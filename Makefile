@@ -4,6 +4,9 @@
 USR := $(shell whoami | head -c 2)
 DT := $(shell date +"%Y%m%d-%H:%M:%S")
 
+PREFIX = "decoder-training"
+JOB_NAME = "$(PREFIX)-$(USR)-$(DT)"
+
 # To run locally
 # CMD = python
 # To batch on slurm
