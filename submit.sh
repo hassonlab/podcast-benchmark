@@ -9,7 +9,7 @@
 #SBATCH --error='./logs/%x.err'
 
 module purge
-source decoder_env/bin/activate
+source decoding_env/bin/activate
 
 echo 'Requester:' $USER 'Node:' $HOSTNAME
 echo "$@"
