@@ -8,17 +8,18 @@ from foundation_model.model_code.models_mae import MaskedAutoencoderViT
 from foundation_model.model_code.config import create_video_mae_experiment_config_from_file
 from foundation_model.model_code.utils import create_model
 
+from config import ExperimentConfig
 import registry
 
 @registry.register_config_setter('foundation_model')
-def foundation_model_config_setter(experiment_config, raws, _df_word, _word_embeddings):
+def foundation_model_config_setter(experiment_config: ExperimentConfig, raws, _df_word, _word_embeddings) -> ExperimentConfig:
     ch_names = sum([raw.info.ch_names for raw in raws], [])
-    preprocessor_params = experiment_config['data_params']['preprocessor_params']
+    preprocessor_params = experiment_config.data_params.preprocessor_params
     preprocessor_params['ch_names'] = ch_names
 
     # Set window width to whatever the sample length of the foundation model is.
     ecog_config = create_video_mae_experiment_config_from_file(os.path.join(preprocessor_params['model_dir'], "experiment_config.ini"))
-    experiment_config['data_params']['window_width'] = ecog_config.ecog_data_config.sample_length
+    experiment_config.data_params.window_width = ecog_config.ecog_data_config.sample_length
     return experiment_config
 
 

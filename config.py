@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields
+from dataclasses import is_dataclass, dataclass, fields, field
 from typing import Optional
 
 # These classes exist to document all of the model-agnostic fields for data collection and model training.
@@ -6,14 +6,14 @@ from typing import Optional
 @dataclass
 class DataParams:
     # The name of the embeddings to use. Currently supports gpt2-xl and glove
-    embedding_type: str
+    embedding_type: str = 'gpt-2xl'
     # The width of neural data to gather around each word onset in seconds.
-    window_width: float
+    window_width: float = -1
     # The name of your model's preprocessing function. Your function msut be registered using the register_data_preprocessor
     # decorator and imported into main.py. See registry.py for details.
-    preprocessing_fn_name: str
+    preprocessing_fn_name: Optional[str] = None
     # The subject id's to include in your analysis. For the podcast data they must all be in the range [1, 9]
-    subject_ids: list[int]
+    subject_ids: list[int] = field(default_factory=lambda: [])
     # Root of data folder.
     data_root: str = 'data'
     # Number of embeddings to reduce the embeddings to using pca. If None, don't run PCA.
@@ -48,12 +48,39 @@ class TrainingParams:
     lag_step_size: int = 1000
 
 
+@dataclass
+class ExperimentConfig:
+    # Model constructor function name. Must be registered using @registry.register_model_constructor()
+    model_constructor_name: str = ''
+    # Config setter function name. Must be registered using @registry.register_config_setter()
+    config_setter_name: Optional[str] = None
+    # Parameters for this model. Can be any user-defined dictionary.
+    model_params: dict = field(default_factory=lambda: {})
+    # Parameters for training.
+    training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
+    # Parameters for data loading and preprocessing. Sub-field preprocessor_params can be set for your use-case.
+    data_params: DataParams = field(default_factory=lambda: DataParams())
+    # Name for trial. Will be used for separating results in storage.
+    trial_name: str = ''
+    # Base directory to output results to.
+    output_dir: str = 'results'
+
+
 def dict_to_config(d: dict, config_class):
-    """Convert a dict d to dataclass of config_class.
-    
-    Requires that d contains all required fields in config_class.
-    """
-    config_fields = {f.name for f in fields(config_class)}
-    filtered = {k: v for k, v in d.items() if k in config_fields}
-    return config_class(**filtered)
+    """Recursively convert a dict d to an instance of config_class."""
+    init_kwargs = {}
+    for field_info in fields(config_class):
+        field_name = field_info.name
+        field_type = field_info.type
+        if field_name not in d:
+            continue
+        field_value = d[field_name]
+        
+        # Handle nested dataclasses
+        if is_dataclass(field_type) and isinstance(field_value, dict):
+            init_kwargs[field_name] = dict_to_config(field_value, field_type)
+        else:
+            init_kwargs[field_name] = field_value
+
+    return config_class(**init_kwargs)
 

@@ -5,21 +5,22 @@ import time
 
 import numpy as np
 
-from config import DataParams, TrainingParams, dict_to_config
+from config import ExperimentConfig, dict_to_config
 import data_utils
 import decoding_utils
 from loader import import_all_from_package
 import registry
 
-# Import modules which define registry functions.
+# Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package('neural_conv_decoder')
 import_all_from_package('foundation_model')
+# Add your model import here!
 
 
-def load_config(config_path):
+def load_config(config_path) -> ExperimentConfig:
     with open(config_path, 'r') as f:
         experiment_config = yaml.safe_load(f)
-    return experiment_config
+    return dict_to_config(experiment_config, ExperimentConfig)
 
 
 def main():
@@ -30,41 +31,44 @@ def main():
     experiment_config = load_config(args.config)
 
     # Load all data.
-    data_params = dict_to_config(experiment_config['data_params'], DataParams)
-    raws = data_utils.load_raws(data_params)
-    df_word, word_embeddings = data_utils.load_word_data(data_params)
+    raws = data_utils.load_raws(experiment_config.data_params)
+    df_word, word_embeddings = data_utils.load_word_data(experiment_config.data_params)
 
     # Allow user defined function to alter config if necessary for their model.
-    if experiment_config['config_setter_name']:
-        config_setter_fn = registry.config_setter_registry[experiment_config['config_setter_name']]
+    if experiment_config.config_setter_name:
+        config_setter_fn = registry.config_setter_registry[experiment_config.config_setter_name]
         experiment_config = config_setter_fn(experiment_config, raws, df_word, word_embeddings)
-        data_params = dict_to_config(experiment_config['data_params'], DataParams)
 
-    # Add pointer to preprocessing_fn, raw, df_word, and word_embeddings to data_params.
-    preprocessing_fn = registry.data_preprocessor_registry[data_params.preprocessing_fn_name]
-
-    model_constructor_fn = registry.model_constructor_registry[experiment_config['model_constructor_name']]
+    # User defined preprocessing function.
+    preprocessing_fn = None
+    if experiment_config.data_params.preprocessing_fn_name:
+        preprocessing_fn = registry.data_preprocessor_registry[experiment_config.data_params.preprocessing_fn_name]
+        
+    # User defined model constructor function.
+    model_constructor_fn = registry.model_constructor_registry[experiment_config.model_constructor_name]
 
     # Append epoch seconds to prevent accidental overwriting.
-    trial_name = experiment_config['trial_name'] + '_' + str(int(time.time()))
-    output_dir = os.path.join(experiment_config.get("output_dir", "results/"), trial_name)
+    trial_name = experiment_config.trial_name + '_' + str(int(time.time()))
+    base_output_dir = experiment_config.output_dir if experiment_config.output_dir else "results/"
+    output_dir = os.path.join(base_output_dir, trial_name)
     os.makedirs(output_dir, exist_ok=True)
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
     with open(os.path.join(output_dir, 'config.yml'), 'w') as fp:
         yaml.dump(experiment_config, fp, default_flow_style=False)
 
-    training_params = dict_to_config(experiment_config['training_params'], TrainingParams)
-    lags = np.arange(training_params.min_lag, training_params.max_lag, training_params.lag_step_size)
+    lags = np.arange(experiment_config.training_params.min_lag,
+                     experiment_config.training_params.max_lag,
+                     experiment_config.training_params.lag_step_size)
     weighted_roc_means = decoding_utils.run_training_over_lags(lags, 
                                                 raws,
                                                 df_word,
                                                 word_embeddings,
                                                 preprocessing_fn,
                                                 model_constructor_fn,
-                                                model_params=experiment_config['model_params'],
-                                                training_params=training_params,
-                                                data_params=data_params,
+                                                model_params=experiment_config.model_params,
+                                                training_params=experiment_config.training_params,
+                                                data_params=experiment_config.data_params,
                                                 trial_name=trial_name,
                                                 output_dir=output_dir)
 

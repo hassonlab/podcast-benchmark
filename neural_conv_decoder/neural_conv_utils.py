@@ -1,4 +1,5 @@
 import registry
+from config import ExperimentConfig
 
 @registry.register_data_preprocessor()
 def preprocess_neural_data(data, preprocessor_params):
@@ -6,7 +7,7 @@ def preprocess_neural_data(data, preprocessor_params):
 
 
 @registry.register_config_setter('neural_conv')
-def set_config_input_channels(experiment_config: dict, raws, _df_word, _word_embeddings):
+def set_config_input_channels(experiment_config: ExperimentConfig, raws, _df_word, _word_embeddings) -> ExperimentConfig:
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
-    experiment_config['model_params']['input_channels'] = num_electrodes
+    experiment_config.model_params['input_channels'] = num_electrodes
     return experiment_config
