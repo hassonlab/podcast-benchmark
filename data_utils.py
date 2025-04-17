@@ -73,6 +73,8 @@ def load_word_data(data_params: DataParams):
 
     if data_params.embedding_type == 'glove':
         aligned_embeddings = embeddings.get_glove_embeddings(df_word, data_params)
+    elif data_params.embedding_type == 'arbitrary':
+        aligned_embeddings = embeddings.get_arbitrary_embeddings(df_word, data_params)
     
     if data_params.embedding_pca_dim:
         pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver='auto')

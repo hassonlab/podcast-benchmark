@@ -5,13 +5,13 @@ from gensim.models import KeyedVectors
 import h5py
 import numpy as np
 
-import config
+from config import DataParams
 
 # TODO: If we decide that we want to add support for more embeddings later it could be worth
 # making this more generic with a function registry. For now I don't see a reason to make this
 # more complicated though.
 
-def get_gpt_2xl_embeddings(df_contextual, data_params):
+def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
     """
     Loads GPT-2 XL contextual embeddings and aligns them to word-level units.
 
@@ -43,7 +43,7 @@ def get_gpt_2xl_embeddings(df_contextual, data_params):
     return aligned_embeddings
 
 
-def get_glove_embeddings(df_word, data_params):
+def get_glove_embeddings(df_word, data_params: DataParams):
     """
     Retrieves GloVe embeddings for each word in the input DataFrame.
 
@@ -90,3 +90,46 @@ def get_glove_embeddings(df_word, data_params):
     glove_embeddings = np.vstack(glove_embeddings)
 
     return df_word, glove_embeddings
+
+
+def get_arbitrary_embeddings(df_word, data_params: DataParams):
+    """
+    Generates arbitrary (random) embeddings for each unique word in the input DataFrame.
+
+    Parameters:
+    -----------
+    df_word : pandas.DataFrame
+        A DataFrame containing a column named 'word', representing a list of words.
+    data_params : DataParams
+        An object containing configuration parameters, specifically `embedding_pca_dim`,
+        which defines the dimensionality of the final embeddings.
+
+    Returns:
+    --------
+    numpy.ndarray
+        A NumPy array of shape (len(df_word), data_params.embedding_pca_dim), where each
+        row is an embedding corresponding to a word in `df_word`. Words that appear
+        multiple times receive the same embedding.
+
+    Notes:
+    ------
+    - Embeddings are randomly sampled from a uniform distribution in the range [-1.0, 1.0]
+      with an initial dimensionality of 50, then truncated or padded to match
+      `embedding_pca_dim`.
+    - Useful as a placeholder or for testing models where real word embeddings are not required.
+    """
+    words = df_word.word.tolist()
+    unique_words = list(set(words))
+    word_to_idx = {}
+    for i, word in enumerate(words):
+        if word not in word_to_idx:
+            word_to_idx[word] = []
+        word_to_idx[word].append(i)
+        
+    arbitrary_embeddings_per_word = np.random.uniform(low=-1.0, high=1.0, size=(len(unique_words), data_params.embedding_pca_dim))
+    arbitrary_embeddings = np.zeros((len(words), data_params.embedding_pca_dim))
+    for i, word in enumerate(unique_words):
+        for idx in word_to_idx[word]:
+            arbitrary_embeddings[idx] = arbitrary_embeddings_per_word[i]
+
+    return arbitrary_embeddings

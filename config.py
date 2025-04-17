@@ -5,7 +5,7 @@ from typing import Optional
 
 @dataclass
 class DataParams:
-    # The name of the embeddings to use. Currently supports gpt2-xl and glove
+    # The name of the embeddings to use. Currently supports gpt-2xl, glove, and arbitrary.
     embedding_type: str = 'gpt-2xl'
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
