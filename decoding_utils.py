@@ -1,27 +1,34 @@
 from collections import Counter
 import os
 import matplotlib.pyplot as plt
-import mne
 import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 
 from tqdm import tqdm
 
-from himalaya.scoring import correlation_score
-
+import mne
 from sklearn.model_selection import KFold, train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 
 from scipy.spatial.distance import cosine
-from scipy.fftpack import fft, ifft
 
-def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_params, training_params=None, model_dir="models/"):
+import data_utils
+from config import TrainingParams, DataParams
+
+def train_decoding_model(X: np.array,
+                         Y: np.array,
+                         selected_words: list[str],
+                         model_constructor_fn,
+                         lag: int,
+                         model_params: dict,
+                         training_params: TrainingParams,
+                         model_dir="models/",
+                         plot_results=False):
     """
     Train decoding model on data using 5-fold cross-validation.
     Uses 3 folds for training, 1 fold for validation (early stopping), and 1 fold for testing.
@@ -34,8 +41,9 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
         model_constructor_fn: Function constructor for model. Should have function arguments model_constructor_fn(model_params) -> Model.
         lag: Current lag being trained over
         model_params: Dictionary of model parameters
-        training_params: Dictionary of training parameters (default: None)
+        training_params: Training parameters (default: None)
         model_dir: Directory to write models to. (default: model_dir)
+        plot_results: If true then will plot data relevant to each fold, upon finishing each fold. (default: False)
         
     Returns:
         models: List of trained PitomModels (one per fold)
@@ -48,17 +56,6 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
 
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
-    
-    # Default training parameters
-    if training_params is None:
-        training_params = {
-            'batch_size': 32,
-            'epochs': 50,
-            'learning_rate': 0.001,
-            'weight_decay': 0.0001,
-            'early_stopping_patience': 10,
-            'n_folds': 5
-        }
     
     # Convert numpy arrays to torch tensors if needed
     if isinstance(X, np.ndarray):
@@ -108,19 +105,19 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
         
         train_loader = DataLoader(
             train_dataset, 
-            batch_size=training_params['batch_size'], 
+            batch_size=training_params.batch_size, 
             shuffle=True
         )
         
         val_loader = DataLoader(
             val_dataset, 
-            batch_size=training_params['batch_size'], 
+            batch_size=training_params.batch_size, 
             shuffle=False
         )
         
         test_loader = DataLoader(
             test_dataset, 
-            batch_size=training_params['batch_size'], 
+            batch_size=training_params.batch_size, 
             shuffle=False
         )
         
@@ -131,8 +128,8 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
         criterion = nn.MSELoss()
         optimizer = optim.Adam(
             model.parameters(), 
-            lr=training_params['learning_rate'],
-            weight_decay=training_params['weight_decay']  # L2 regularization
+            lr=training_params.learning_rate,
+            weight_decay=training_params.weight_decay  # L2 regularization
         )
         
         # Initialize variables for early stopping (now based on cosine similarity)
@@ -148,7 +145,7 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
         }
         
         # Training loop for this fold
-        progress_bar = tqdm(range(training_params['epochs']), desc=f"Lag {lag}, Fold {fold + 1}")
+        progress_bar = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold + 1}")
         for epoch in progress_bar:
             # Training phase
             model.train()
@@ -217,12 +214,11 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
                 torch.save(model.state_dict(), model_path)
             else:
                 patience_counter += 1
-                if patience_counter >= training_params['early_stopping_patience']:
-                    print(f"Early stopping triggered after {epoch+1} epochs.")
+                if patience_counter >= training_params.early_stopping_patience:
                     break
 
             # Update progress bar
-            progress_bar.set_postfix({'train_loss': train_loss , 'train_cosine': train_cosine, 'val_loss': val_loss, 'val_cosine': val_cosine, 'best_epoch': best_epoch + 1})
+            progress_bar.set_postfix({'train_loss': train_loss , 'train_cosine': train_cosine, 'val_loss': val_loss, 'val_cosine': val_cosine, 'best_epoch': best_epoch + 1, 'epoch': epoch})
         
         # Load best model for this fold
         model.load_state_dict(torch.load(model_path))
@@ -268,7 +264,9 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
         histories.append(history)
         
         # Plot training history for this fold
-        plot_training_history(history, fold=fold+1)
+        # TODO: Add support for this to write plots to file.
+        if plot_results:
+            plot_training_history(history, fold=fold+1)
     
     # Calculate and print cross-validation results
     print("\n" + "="*60)
@@ -282,7 +280,9 @@ def train_decoding_model(X, Y, selected_words, model_constructor_fn, lag, model_
     print(f"Mean Test Cosine: {np.mean(cv_results['test_cosine']):.4f} ± {np.std(cv_results['test_cosine']):.4f}")
     
     # Plot overall cross-validation results
-    plot_cv_results(cv_results)
+    # TODO: Add support for this to write plots to file.
+    if plot_results:
+        plot_cv_results(cv_results)
 
     final_word_auc = {}
     for roc_result in roc_results:
@@ -516,63 +516,37 @@ def summarize_roc_results(word_aucs, selected_words, min_repetitions=5):
     return weighted_auc
 
 
-def get_data(lag, raw, df_word, word_embeddings, window_width, preprocessing_fn=None):
-    """Gather data for every word in df_word from raw.
-
-    Args:
-        lag: the lag relative to each word onset to gather data around
-        raw: mne.Raw object holding electrode data
-        df_word: dataframe containing columns start and word 
-        word_embeddings: word embeddings aligned with each word in df_word
-        window_width: the width of the window which is gathered around each word onset + lag
-        preprocessing_fn: function to apply to epoch data. Should expect data input of shape [num_words, num_electrodes, timesteps]
-    """
-    events = np.zeros((len(df_word), 3), dtype=int)
-    events[:, 0] = (df_word.start * raw.info['sfreq']).astype(int)
-
-    epochs = mne.Epochs(
-        raw,
-        events,
-        tmin=lag / 1000 - window_width / 2,
-        tmax=lag / 1000 + window_width / 2 - 2e-3,
-        baseline=None,
-        proj=False,
-        event_id=None,
-        preload=True,
-        on_missing="ignore",
-        event_repeated="merge",
-        verbose="ERROR"
-    )
-
-    data = epochs.get_data(copy=False)
-    if preprocessing_fn:
-        data = preprocessing_fn(data)
-    
-    selected_embeddings = word_embeddings[epochs.selection]
-    
-    selected_words = df_word.word.to_numpy()[epochs.selection]
-    
-    # Make sure the number of samples match
-    assert data.shape[0] == selected_embeddings.shape[0], "Sample counts don't match"
-    assert data.shape[0] == selected_words.shape[0], "Words don't match"
-
-    return data, selected_embeddings, selected_words
-
-
-def run_training_over_lags(lags, model_constructor_fn, model_params, training_params, data_params, trial_name, output_dir="results/"):
+def run_training_over_lags(lags,
+                           raws: list[mne.io.Raw],
+                           df_word: pd.DataFrame,
+                           word_embeddings: np.array,
+                           preprocessing_fn,
+                           model_constructor_fn,
+                           model_params: dict,
+                           training_params: TrainingParams,
+                           data_params: DataParams,
+                           trial_name,
+                           output_dir="results/"):
     """
     Args:
         lags: array of lags to run training over
+        raws: list of mne.Raw objects for each subject,
+        df_word: dataframe containing columns word, start, and end corresponding to words in the transcript,
+        word_embeddings: np.array of embeddings of each word in df_word,
+        preprocessing_fn: function to preprocess data for each lag.
+            Should have contract 
+            preprocessing_fn(data: np.array of shape [num_words, num_electrodes, timesteps],
+                             params: dictionary in data_params['preprocessor_params']) -> array of shape [num_words, ...]
         model_constructor_fn: Function constructor for model. Should have function arguments model_constructor_fn(model_params) -> Model.
         model_params: Dictionary of model parameters
-        training_params: Dictionary of training parameters
-        data_params: Dictionary of parameters for get_data function call
+        training_params: Training parameters
+        data_params: Parameters for get_data function call
         trial_name: Name of trial to be used for file writing
     """
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
         
-    filename = os.path.join(output_dir, f"{trial_name}_roc_means.csv")
+    filename = os.path.join(output_dir, f"lag_performance.csv")
     if os.path.exists(filename):
         roc_df = pd.read_csv(filename)
         weighted_roc_means = roc_df.rocs.tolist()
@@ -589,9 +563,13 @@ def run_training_over_lags(lags, model_constructor_fn, model_params, training_pa
         print('=' * 60)
         print('running lag:', lag)
         print('=' * 60)
-        X, Y, selected_words = get_data(lag, data_params['raw'], data_params['df_word'], 
-                                        data_params['word_embeddings'], data_params['window_width'], data_params['preprocessing_fn'])
-        print("Got data")
+        X, Y, selected_words = data_utils.get_data(lag,
+                                                   raws, 
+                                                   df_word, 
+                                                   word_embeddings,
+                                                   data_params.window_width,
+                                                   preprocessing_fn,
+                                                   data_params.preprocessor_params)
     
         X_tensor = torch.FloatTensor(X)
         Y_tensor = torch.FloatTensor(Y)
