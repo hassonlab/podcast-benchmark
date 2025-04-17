@@ -1,5 +1,5 @@
-from foundation_model.config import VideoMAEExperimentConfig
-from foundation_model.models_mae import MaskedAutoencoderViT
+from foundation_model.model_code.config import VideoMAEExperimentConfig
+from foundation_model.model_code.models_mae import MaskedAutoencoderViT
 
 def create_model(config: VideoMAEExperimentConfig):
     model_config = config.video_mae_task_config.vit_config

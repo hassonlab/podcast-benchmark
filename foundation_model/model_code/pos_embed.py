@@ -7,7 +7,7 @@
 # Position embedding utils
 # --------------------------------------------------------
 
-import foundation_model.logging as logging
+import foundation_model.model_code.logging as logging
 import numpy as np
 import torch
 

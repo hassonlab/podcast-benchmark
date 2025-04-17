@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 import copy
-from foundation_model import video_vit
+from foundation_model.model_code import video_vit
 
 
 def pearson_correlation(x1, x2):
