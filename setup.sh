@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Step 1: Setup Podcast dataset
 # Config
 DATASET_ID="ds005574"
@@ -34,14 +36,23 @@ git ls-files | while read -r file; do
         file_url="${OPENNEURO_BASE_URL}/${url_path}"
         echo "Downloading: $file_url"
 
-        # Create parent directories if needed
-        mkdir -p "$(dirname "$file")"
+	# If file is in this directory we need to delete it first.
+	if [[ ! "$file" == */* ]]; then
+		rm "$file"
+	fi
 
+	# Have to delete existi
         # Download using wget
         wget --show-progress "$file_url"
+	
+	# Only do this if it's in a directory.
+	if [[ "$file" == */* ]]; then
+		# Create parent directories if needed
+        	mkdir -p "$(dirname "$file")"
 
-	# Move the downloaded file to the correct location
-	mv "$(basename "$file_url")" "$file"
+		# Move the downloaded file to the correct location
+		mv "$(basename "$file_url")" "$file"
+	fi
     fi
 done
 
@@ -50,13 +61,27 @@ cd ..
 echo "All missing files downloaded!"
 
 # Step 3: Download GloVe vectors
-mkdir -p data/glove
-wget https://nlp.stanford.edu/data/glove.6B.zip -P data/glove/
+if [ -f data/glove/glove.6B.50d.txt ]; then
+    echo "GloVe vectors already prepared. Skipping download and extraction."
+else
+    mkdir -p data/glove
+    wget https://nlp.stanford.edu/data/glove.6B.zip -P data/glove/
 
-# Step 4: Unzip GloVe vectors
-unzip data/glove/glove.6B.zip -d data/glove/
+    unzip data/glove/glove.6B.zip -d data/glove/
 
-# Step 5: Remove the zip file
-rm data/glove/glove.6B.zip
+    rm data/glove/glove.6B.zip
+
+    echo "GloVe vectors downloaded and extracted."
+fi
+
+# Step 4: Setup a new virtual environment and install all the necessary packages
+module load anaconda3/2024.6
+pip install --user virtualenv
+
+mkdir decoding_env
+virtualenv decoding_env
+source decoding_env/bin/activate
+
+pip install -r requirements.txt
 
 echo "Setup complete."
