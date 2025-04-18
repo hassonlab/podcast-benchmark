@@ -64,6 +64,8 @@ class ExperimentConfig:
     trial_name: str = ''
     # Base directory to output results to.
     output_dir: str = 'results'
+    # Base directory to write models to.
+    model_dir: str = 'models'
 
 
 def dict_to_config(d: dict, config_class):

@@ -45,13 +45,15 @@ def main():
         preprocessing_fn = registry.data_preprocessor_registry[experiment_config.data_params.preprocessing_fn_name]
         
     # User defined model constructor function.
-    model_constructor_fn = registry.model_constructor_registry[experiment_config.model_constructor_name]
+    model_constructor_fn = registry.model_constructor_registry[experiment_config.model_constructor_nameq]
 
     # Append epoch seconds to prevent accidental overwriting.
     trial_name = experiment_config.trial_name + '_' + str(int(time.time()))
-    base_output_dir = experiment_config.output_dir if experiment_config.output_dir else "results/"
-    output_dir = os.path.join(base_output_dir, trial_name)
+    output_dir = os.path.join(experiment_config.output_dir, trial_name)
     os.makedirs(output_dir, exist_ok=True)
+
+    model_dir = os.path.join(os.path.join(experiment_config.model_dir, trial_name))
+    os.makedirs(model_dir, exist_ok=True)
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
     with open(os.path.join(output_dir, 'config.yml'), 'w') as fp:
@@ -70,7 +72,8 @@ def main():
                                                 training_params=experiment_config.training_params,
                                                 data_params=experiment_config.data_params,
                                                 trial_name=trial_name,
-                                                output_dir=output_dir)
+                                                output_dir=output_dir,
+                                                model_dir=model_dir)
 
 
 if __name__ == '__main__':

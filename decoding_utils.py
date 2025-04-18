@@ -27,7 +27,7 @@ def train_decoding_model(X: np.array,
                          lag: int,
                          model_params: dict,
                          training_params: TrainingParams,
-                         model_dir="models/",
+                         model_dir,
                          plot_results=False):
     """
     Train decoding model on data using 5-fold cross-validation.
@@ -41,8 +41,8 @@ def train_decoding_model(X: np.array,
         model_constructor_fn: Function constructor for model. Should have function arguments model_constructor_fn(model_params) -> Model.
         lag: Current lag being trained over
         model_params: Dictionary of model parameters
-        training_params: Training parameters (default: None)
-        model_dir: Directory to write models to. (default: model_dir)
+        training_params: Training parameters
+        model_dir: Directory to write models to. 
         plot_results: If true then will plot data relevant to each fold, upon finishing each fold. (default: False)
         
     Returns:
@@ -55,7 +55,7 @@ def train_decoding_model(X: np.array,
     print(f"Using device: {device}")
 
     if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
+        os.makedirs(model_dir, exist_ok=True)
     
     # Convert numpy arrays to torch tensors if needed
     if isinstance(X, np.ndarray):
@@ -526,7 +526,8 @@ def run_training_over_lags(lags,
                            training_params: TrainingParams,
                            data_params: DataParams,
                            trial_name,
-                           output_dir="results/"):
+                           output_dir="results/",
+                           model_dir="models/"):
     """
     Args:
         lags: array of lags to run training over
@@ -542,6 +543,7 @@ def run_training_over_lags(lags,
         training_params: Training parameters
         data_params: Parameters for get_data function call
         trial_name: Name of trial to be used for file writing
+        output_dir: Name of folder to write results to.
     """
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
@@ -580,6 +582,7 @@ def run_training_over_lags(lags,
             X_tensor, Y_tensor, selected_words, model_constructor_fn, lag,
             model_params=model_params,
             training_params=training_params,
+            model_dir=os.path.join(model_dir, f"lag_{lag}")
         )
         weighted_roc_means.append(weighted_roc_mean)
     
