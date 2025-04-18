@@ -4,7 +4,7 @@
 USR := $(shell whoami | head -c 2)
 DT := $(shell date +"%Y%m%d-%H:%M:%S")
 
-PREFIX = "decoder-training"
+PREFIX = decoder-training
 JOB_NAME = "$(PREFIX)-$(USR)-$(DT)"
 
 # To run locally
@@ -15,9 +15,9 @@ CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 neural-conv:
 	mkdir -p logs
 	$(CMD) main.py \
-		--config configs/neural_conv_decoder/neural_conv_decoder.yml
+		--config "configs/neural_conv_decoder/neural_conv_decoder$(CONFIG_SUFFIX).yml"
 
 foundation-model:
 	mkdir -p logs
 	$(CMD) main.py \
-		--config configs/foundation_model/foundation_model.yml
+		--config "configs/foundation_model/foundation_model$(CONFIG_SUFFIX).yml"
