@@ -11,6 +11,7 @@ from config import DataParams
 # making this more generic with a function registry. For now I don't see a reason to make this
 # more complicated though.
 
+
 def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
     """
     Loads GPT-2 XL contextual embeddings and aligns them to word-level units.
@@ -27,16 +28,18 @@ def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
     Returns:
         np.ndarray: A 2D array of shape (num_words, embedding_dim), where each row is a word-level embedding.
     """
-    embedding_path = os.path.join(data_params.data_root, 'stimuli/gpt2-xl/features.hdf5')
+    embedding_path = os.path.join(
+        data_params.data_root, "stimuli/gpt2-xl/features.hdf5"
+    )
 
     with h5py.File(embedding_path, "r") as f:
         contextual_embeddings = f[f"layer-{data_params.embedding_layer}"][...]
 
     # Group embeddings for each word (some are sub-tokenized).
     aligned_embeddings = []
-    for _, group in df_contextual.groupby("word_idx"): # group by word index
+    for _, group in df_contextual.groupby("word_idx"):  # group by word index
         indices = group.index.to_numpy()
-        average_emb = contextual_embeddings[indices].mean(0) # average features
+        average_emb = contextual_embeddings[indices].mean(0)  # average features
         aligned_embeddings.append(average_emb)
     aligned_embeddings = np.stack(aligned_embeddings)
 
@@ -59,18 +62,19 @@ def get_glove_embeddings(df_word, data_params: DataParams):
         data_params (config.DataParams): Configuration object specifying the data root and GloVe file path.
 
     Returns:
-        Tuple[pd.DataFrame, np.ndarray]: 
-            - Updated DataFrame with an 'in_glove' boolean column.
-            - NumPy array of GloVe embeddings for matched words (shape: [num_matched_words, embedding_dim]).
+        pd.DataFrame:
+            - DataFrame with GloVe embeddings in embedding column.
     """
-    glove_file = os.path.join(data_params.data_root, 'glove/glove.6B.50d.txt')
-    glove_vectors = KeyedVectors.load_word2vec_format(glove_file, binary=False, no_header=True)
+    glove_file = os.path.join(data_params.data_root, "glove/glove.6B.50d.txt")
+    glove_vectors = KeyedVectors.load_word2vec_format(
+        glove_file, binary=False, no_header=True
+    )
 
     def preprocess_word(word):
         # Convert to lowercase
         word = word.lower()
         # Remove punctuation outside of words. i.e. keep apostrophes
-        word = re.sub(r'\b[^\w\s]+|[^\w\s]+\b', '', word)
+        word = re.sub(r"\b[^\w\s]+|[^\w\s]+\b", "", word)
         return word
 
     words = df_word.word.tolist()
@@ -85,11 +89,13 @@ def get_glove_embeddings(df_word, data_params: DataParams):
         else:
             in_glove.append(False)
 
-    df_word['in_glove'] = in_glove
+    df_word["in_glove"] = in_glove
+    df_word = df_word[df_word["in_glove"]].reset_index()
 
-    glove_embeddings = np.vstack(glove_embeddings)
+    glove_embeddings = np.stack(glove_embeddings)
+    df_word["embedding"] = list(glove_embeddings)
 
-    return df_word, glove_embeddings
+    return df_word
 
 
 def get_arbitrary_embeddings(df_word, data_params: DataParams):
@@ -106,10 +112,8 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
 
     Returns:
     --------
-    numpy.ndarray
-        A NumPy array of shape (len(df_word), data_params.embedding_pca_dim), where each
-        row is an embedding corresponding to a word in `df_word`. Words that appear
-        multiple times receive the same embedding.
+    pd.DataFrame:
+        df_word with arbitrary embeddings in embedding column
 
     Notes:
     ------
@@ -125,11 +129,15 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
         if word not in word_to_idx:
             word_to_idx[word] = []
         word_to_idx[word].append(i)
-        
-    arbitrary_embeddings_per_word = np.random.uniform(low=-1.0, high=1.0, size=(len(unique_words), data_params.embedding_pca_dim))
+
+    arbitrary_embeddings_per_word = np.random.uniform(
+        low=-1.0, high=1.0, size=(len(unique_words), data_params.embedding_pca_dim)
+    )
     arbitrary_embeddings = np.zeros((len(words), data_params.embedding_pca_dim))
     for i, word in enumerate(unique_words):
         for idx in word_to_idx[word]:
             arbitrary_embeddings[idx] = arbitrary_embeddings_per_word[i]
 
-    return arbitrary_embeddings
+    df_word["embedding"] = list(arbitrary_embeddings)
+
+    return df_word

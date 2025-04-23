@@ -246,7 +246,7 @@ Sometimes we don't know all of the configuration fields that we would like to us
 ```
 # Another registry, don't forget!
 @registry.register_config_setter('neural_conv')
-def set_config_input_channels(experiment_config: ExperimentConfig, raws: list[mne.io.Raw], _df_word: pd.DataFrame, _word_embeddings: np.array) -> ExperimentConfig:
+def set_config_input_channels(experiment_config: ExperimentConfig, raws: list[mne.io.Raw], _df_word: pd.DataFrame) -> ExperimentConfig:
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
     experiment_config.model_params['input_channels'] = num_electrodes
     return experiment_config
@@ -261,21 +261,19 @@ config_setter(
             experiment_config: ExperimentConfig,
             raws: list[mne.io.Raw],
             df_word: pd.DataFrame,
-            word_embeddings: np.ndarray
         ) -> ExperimentConfig
 ```
 
 Where:
     - experiment_config: ExperimentConfig dataclass
     - raws: List of MNE Raw objects (continuous iEEG/EEG data)
-    - df_word: DataFrame containing word-level metadata (e.g., onset times, labels)
-    - word_embeddings: NumPy array of embeddings corresponding to the words
+    - df_word: DataFrame containing word-level metadata (e.g., onset times, labels, embeddings)
 
 As an alternative example for the foundation model I need to know all of the channel names when preprocessing the data as well as wanting to set the window width to whatever the model expects from its pretraining. This would give us the following:
 
 ```
 @registry.register_config_setter('foundation_model')
-def foundation_model_config_setter(experiment_config: ExperimentConfig, raws, _df_word, _word_embeddings) -> ExperimentConfig:
+def foundation_model_config_setter(experiment_config: ExperimentConfig, raws, _df_word) -> ExperimentConfig:
     ch_names = sum([raw.info.ch_names for raw in raws], [])
     preprocessor_params = experiment_config.data_params.preprocessor_params
     preprocessor_params['ch_names'] = ch_names

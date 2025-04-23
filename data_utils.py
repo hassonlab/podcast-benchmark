@@ -30,9 +30,15 @@ def load_raws(data_params: DataParams):
     """
     raws = []
     for sub_id in data_params.subject_ids:
-        file_path = BIDSPath(root=os.path.join(data_params.data_root, "derivatives/ecogprep"),
-                        subject=f"{sub_id:02}", task="podcast", datatype="ieeg", description="highgamma",
-                        suffix="ieeg", extension=".fif")
+        file_path = BIDSPath(
+            root=os.path.join(data_params.data_root, "derivatives/ecogprep"),
+            subject=f"{sub_id:02}",
+            task="podcast",
+            datatype="ieeg",
+            description="highgamma",
+            suffix="ieeg",
+            extension=".fif",
+        )
 
         raw = mne.io.read_raw_fif(file_path, verbose=False)
         if data_params.channel_reg_ex:
@@ -60,44 +66,51 @@ def load_word_data(data_params: DataParams):
         Tuple[pd.DataFrame, np.ndarray]: A DataFrame containing word-level information (word, start time, end time),
         and a NumPy array of corresponding word-level embeddings.
     """
-    transcript_path = os.path.join(data_params.data_root, 'stimuli/gpt2-xl/transcript.tsv')
+    transcript_path = os.path.join(
+        data_params.data_root, "stimuli/gpt2-xl/transcript.tsv"
+    )
 
     # Load transcript
     df_contextual = pd.read_csv(transcript_path, sep="\t", index_col=0)
 
-    if data_params.embedding_type == 'gpt-2xl':
-        aligned_embeddings = embeddings.get_gpt_2xl_embeddings(df_contextual, data_params)
-    
+    if data_params.embedding_type == "gpt-2xl":
+        aligned_embeddings = embeddings.get_gpt_2xl_embeddings(
+            df_contextual, data_params
+        )
+
     # Group sub-tokens together into words.
-    df_word = df_contextual.groupby('word_idx').agg(dict(word='first', start='first', end='last'))
+    df_word = df_contextual.groupby("word_idx").agg(
+        dict(word="first", start="first", end="last")
+    )
 
-    if data_params.embedding_type == 'glove':
-        aligned_embeddings = embeddings.get_glove_embeddings(df_word, data_params)
-    elif data_params.embedding_type == 'arbitrary':
-        aligned_embeddings = embeddings.get_arbitrary_embeddings(df_word, data_params)
-    
+    if data_params.embedding_type == "gpt-2xl":
+        df_word["embedding"] = list(aligned_embeddings)
+    if data_params.embedding_type == "glove":
+        df_word = embeddings.get_glove_embeddings(df_word, data_params)
+    elif data_params.embedding_type == "arbitrary":
+        df_word = embeddings.get_arbitrary_embeddings(df_word, data_params)
+
     if data_params.embedding_pca_dim:
-        pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver='auto')
-        aligned_embeddings = pca.fit_transform(aligned_embeddings.tolist())
+        pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver="auto")
+        df_word.embedding = list(pca.fit_transform(df_word.embedding.tolist()))
 
-    return df_word, aligned_embeddings
-        
+    return df_word
 
 
-def get_data(lag,
-             raws: list[mne.io.Raw], 
-             df_word: pd.DataFrame, 
-             word_embeddings: np.array, 
-             window_width: float, 
-             preprocessing_fn=None, 
-             preprocessor_params: dict = None):
+def get_data(
+    lag,
+    raws: list[mne.io.Raw],
+    df_word: pd.DataFrame,
+    window_width: float,
+    preprocessing_fn=None,
+    preprocessor_params: dict = None,
+):
     """Gather data for every word in df_word from raw.
 
     Args:
         lag: the lag relative to each word onset to gather data around
         raws: list of mne.Raw object holding electrode data
-        df_word: dataframe containing columns start and word 
-        word_embeddings: word embeddings aligned with each word in df_word
+        df_word: dataframe containing columns start, end, word, and embedding
         window_width: the width of the window which is gathered around each word onset + lag
         preprocessing_fn: function to apply to epoch data.
             Should have contract:
@@ -107,7 +120,7 @@ def get_data(lag,
     datas = []
     for raw in raws:
         events = np.zeros((len(df_word), 3), dtype=int)
-        events[:, 0] = (df_word.start * raw.info['sfreq']).astype(int)
+        events[:, 0] = (df_word.start * raw.info["sfreq"]).astype(int)
 
         epochs = mne.Epochs(
             raw,
@@ -120,17 +133,18 @@ def get_data(lag,
             preload=True,
             on_missing="ignore",
             event_repeated="merge",
-            verbose="ERROR"
+            verbose="ERROR",
         )
 
         data = epochs.get_data(copy=False)
-        
-        selected_embeddings = word_embeddings[epochs.selection]
-        
+        selected_embeddings = df_word.embedding[epochs.selection]
+
         selected_words = df_word.word.to_numpy()[epochs.selection]
-        
+
         # Make sure the number of samples match
-        assert data.shape[0] == selected_embeddings.shape[0], "Sample counts don't match"
+        assert (
+            data.shape[0] == selected_embeddings.shape[0]
+        ), "Sample counts don't match"
         assert data.shape[0] == selected_words.shape[0], "Words don't match"
 
         datas.append(data)
