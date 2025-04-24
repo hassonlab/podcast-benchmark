@@ -1,0 +1,29 @@
+model_constructor_name: foundation_model_finetune_mlp
+config_setter_name: foundation_model_finetune_mlp
+model_params: 
+  mlp_layer_sizes: [64, 57, 50]
+  model_dir: foundation_model/models
+training_params:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -2000
+  max_lag: 2000
+  lag_step_size: 200
+data_params:
+  # Cross-model fields
+  data_root: data
+  embedding_type: gpt-2xl
+  embedding_layer: 24
+  embedding_pca_dim: 50
+  # Window width is set by config setter function to the model's sample length.
+  window_width: -1
+  preprocessing_fn_name: foundation_model_finetune_mlp
+  subject_ids: [9]
+  channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+  # Model specific config.
+  # preprocessor_params:
+trial_name: foundation_model_finetune
