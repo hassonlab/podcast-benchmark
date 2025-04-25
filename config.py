@@ -3,10 +3,11 @@ from typing import Optional
 
 # These classes exist to document all of the model-agnostic fields for data collection and model training.
 
+
 @dataclass
 class DataParams:
     # The name of the embeddings to use. Currently supports gpt-2xl, glove, and arbitrary.
-    embedding_type: str = 'gpt-2xl'
+    embedding_type: str = "gpt-2xl"
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
     # The name of your model's preprocessing function. Your function msut be registered using the register_data_preprocessor
@@ -15,7 +16,7 @@ class DataParams:
     # The subject id's to include in your analysis. For the podcast data they must all be in the range [1, 9]
     subject_ids: list[int] = field(default_factory=lambda: [])
     # Root of data folder.
-    data_root: str = 'data'
+    data_root: str = "data"
     # Number of embeddings to reduce the embeddings to using pca. If None, don't run PCA.
     embedding_pca_dim: Optional[int] = None
     # A regular expression to pick which channels you are interested in.
@@ -51,7 +52,7 @@ class TrainingParams:
 @dataclass
 class ExperimentConfig:
     # Model constructor function name. Must be registered using @registry.register_model_constructor()
-    model_constructor_name: str = ''
+    model_constructor_name: str = ""
     # Config setter function name. Must be registered using @registry.register_config_setter()
     config_setter_name: Optional[str] = None
     # Parameters for this model. Can be any user-defined dictionary.
@@ -61,11 +62,11 @@ class ExperimentConfig:
     # Parameters for data loading and preprocessing. Sub-field preprocessor_params can be set for your use-case.
     data_params: DataParams = field(default_factory=lambda: DataParams())
     # Name for trial. Will be used for separating results in storage.
-    trial_name: str = ''
+    trial_name: str = ""
     # Base directory to output results to.
-    output_dir: str = 'results'
+    output_dir: str = "results"
     # Base directory to write models to.
-    model_dir: str = 'models'
+    model_dir: str = "models"
 
 
 def dict_to_config(d: dict, config_class):
@@ -77,7 +78,6 @@ def dict_to_config(d: dict, config_class):
         if field_name not in d:
             continue
         field_value = d[field_name]
-        
         # Handle nested dataclasses
         if is_dataclass(field_type) and isinstance(field_value, dict):
             init_kwargs[field_name] = dict_to_config(field_value, field_type)
@@ -85,4 +85,3 @@ def dict_to_config(d: dict, config_class):
             init_kwargs[field_name] = field_value
 
     return config_class(**init_kwargs)
-

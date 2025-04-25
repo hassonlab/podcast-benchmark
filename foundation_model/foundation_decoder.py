@@ -81,8 +81,12 @@ class FoundationModelFinetuneMLP(nn.Module):
         super(FoundationModelFinetuneMLP, self).__init__()
         self.foundation_model = create_model(foundation_model_config)
         if model_dir:
+            print(
+                "Using model weights at:",
+                os.path.join(model_dir, "model.pth"),
+            )
             checkpoint = torch.load(
-                os.path.join(model_dir, "model_weight_test.pth"),
+                os.path.join(model_dir, "model.pth"),
                 weights_only=True,
             )
             self.foundation_model.load_state_dict(checkpoint)
@@ -104,4 +108,5 @@ def foundation_model_finetune_mlp(model_params):
     return FoundationModelFinetuneMLP(
         model_params["foundation_model_config"],
         model_params["mlp_layer_sizes"],
+        model_dir=model_params.get("model_dir"),
     )

@@ -1,6 +1,7 @@
 from foundation_model.model_code.config import VideoMAEExperimentConfig
 from foundation_model.model_code.models_mae import MaskedAutoencoderViT
 
+
 def create_model(config: VideoMAEExperimentConfig):
     model_config = config.video_mae_task_config.vit_config
     num_frames = int(
@@ -26,6 +27,5 @@ def create_model(config: VideoMAEExperimentConfig):
         # TODO: Make this configurable.
         pred_t_dim=num_frames,
         img_mask=None,
-        pct_masks_to_decode=config.video_mae_task_config.pct_masks_to_decode,
     )
     return model

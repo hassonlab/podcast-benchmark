@@ -96,7 +96,7 @@ def foundation_model_mlp_finetune_config_setter(
     experiment_config.data_params.preprocessor_params["ch_names"] = ch_names
 
     # Setup foundation model config.
-    if experiment_config.model_params["model_dir"]:
+    if experiment_config.model_params.get("model_dir"):
         ecog_config = create_video_mae_experiment_config_from_file(
             os.path.join(
                 experiment_config.model_params["model_dir"], "experiment_config.ini"
