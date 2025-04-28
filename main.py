@@ -1,7 +1,9 @@
 import argparse
+from dataclasses import is_dataclass
 import yaml
 import os
-import time
+from datetime import datetime
+from typing import Any, Union
 
 import numpy as np
 
@@ -21,6 +23,21 @@ def load_config(config_path) -> ExperimentConfig:
     with open(config_path, "r") as f:
         experiment_config = yaml.safe_load(f)
     return dict_to_config(experiment_config, ExperimentConfig)
+
+
+def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
+    fields = path.split(".")
+    current = obj
+    for field in fields:
+        if isinstance(current, dict):
+            current = current[field]
+        elif is_dataclass(current):
+            current = getattr(current, field)
+        else:
+            raise TypeError(
+                f"Cannot access field '{field}' on non-dict, non-dataclass object: {current}"
+            )
+    return current
 
 
 def main():
@@ -55,13 +72,29 @@ def main():
         experiment_config.model_constructor_name
     ]
 
-    # Append epoch seconds to prevent accidental overwriting.
-    trial_name = experiment_config.trial_name + "_" + str(int(time.time()))
+    # Generate trial name if user specified format string.
+    trial_name = experiment_config.trial_name
+    if experiment_config.format_fields:
+        format_values = [
+            get_nested_value(experiment_config, s)
+            for s in experiment_config.format_fields
+        ]
+        print(experiment_config.format_fields)
+        print(format_values)
+        trial_name = trial_name.format(*format_values)
+    # Append timestamp to prevent accidental overwriting.
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    trial_name = f"{trial_name}_{timestamp}"
     output_dir = os.path.join(experiment_config.output_dir, trial_name)
     os.makedirs(output_dir, exist_ok=True)
 
     model_dir = os.path.join(os.path.join(experiment_config.model_dir, trial_name))
     os.makedirs(model_dir, exist_ok=True)
+
+    tensorboard_dir = os.path.join(
+        os.path.join(experiment_config.tensorboard_dir, trial_name)
+    )
+    os.makedirs(tensorboard_dir, exist_ok=True)
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
@@ -83,6 +116,8 @@ def main():
         data_params=experiment_config.data_params,
         output_dir=output_dir,
         model_dir=model_dir,
+        tensorboard_dir=tensorboard_dir,
+        write_to_tensorboard=True,
     )
 
 

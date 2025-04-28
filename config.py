@@ -61,12 +61,18 @@ class ExperimentConfig:
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
     # Parameters for data loading and preprocessing. Sub-field preprocessor_params can be set for your use-case.
     data_params: DataParams = field(default_factory=lambda: DataParams())
-    # Name for trial. Will be used for separating results in storage.
+    # Name for trial. Will be used for separating results in storage. Can use format strings such as
+    # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""
+    # Path to fields of config to be formatted into trial_name. For example if your trial_name is
+    # "decoding_dim={}_lr={:.2f}" you could set format_fields to ["model_params.dim", "training_params.learning_rate"]
+    format_fields: Optional[list[str]] = None
     # Base directory to output results to.
     output_dir: str = "results"
     # Base directory to write models to.
     model_dir: str = "models"
+    # Base directory to write Tensorboard logs to.
+    tensorboard_dir: str = "event_logs"
 
 
 def dict_to_config(d: dict, config_class):

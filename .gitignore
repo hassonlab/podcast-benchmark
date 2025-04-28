@@ -178,3 +178,4 @@ data/
 models/
 results/
 logs/
+event_logs/

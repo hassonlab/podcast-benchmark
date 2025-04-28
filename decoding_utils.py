@@ -8,6 +8,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.tensorboard import SummaryWriter
 
 from tqdm import tqdm
 
@@ -29,30 +30,11 @@ def train_decoding_model(
     lag: int,
     model_params: dict,
     training_params: TrainingParams,
-    model_dir,
+    model_dir: str,
     plot_results=False,
+    write_to_tensorboard=False,
+    tensorboard_dir="event_logs",
 ):
-    """
-    Train decoding model on data using 5-fold cross-validation.
-    Uses 3 folds for training, 1 fold for validation (early stopping), and 1 fold for testing.
-    Uses cosine similarity as a metric and for early stopping.
-
-    Args:
-        X: Input data of shape [num_examples, num_electrodes, num_timepoints]
-        Y: Target embeddings of shape [num_examples, embedding_dim]
-        selected_words: String representation of words of shape [num_examples]
-        model_constructor_fn: Function constructor for model. Should have function arguments model_constructor_fn(model_params) -> Model.
-        lag: Current lag being trained over
-        model_params: Dictionary of model parameters
-        training_params: Training parameters
-        model_dir: Directory to write models to.
-        plot_results: If true then will plot data relevant to each fold, upon finishing each fold. (default: False)
-
-    Returns:
-        models: List of trained PitomModels (one per fold)
-        histories: List of dictionaries containing training histories
-        cv_results: Dictionary with cross-validation metrics
-    """
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -86,18 +68,22 @@ def train_decoding_model(
     for fold, (train_val_idx, test_idx) in enumerate(fold_indices):
         model_path = os.path.join(model_dir, f"best_pitom_model_fold{fold+1}.pt")
 
-        # For each fold, we need to:
-        # 1. Use 3 folds for training
-        # 2. Use 1 fold for validation (early stopping)
-        # 3. Use 1 fold for testing
+        # TensorBoard writer per fold/lag/run
+        if write_to_tensorboard:
+            writer = SummaryWriter(
+                log_dir=os.path.join(
+                    tensorboard_dir,
+                    f"lag_{lag}",
+                    f"fold_{fold+1}",
+                )
+            )
 
         train_idx, val_idx = train_test_split(
             np.array(train_val_idx),
-            test_size=0.25,  # Equivalent to 1 fold out of 4
+            test_size=0.25,
             shuffle=False,
         )
 
-        # Create data loaders for train, validation, and test sets
         X_train, Y_train = X[train_idx], Y[train_idx]
         X_val, Y_val = X[val_idx], Y[val_idx]
         X_test, Y_test = X[test_idx], Y[test_idx]
@@ -109,31 +95,24 @@ def train_decoding_model(
         train_loader = DataLoader(
             train_dataset, batch_size=training_params.batch_size, shuffle=True
         )
-
         val_loader = DataLoader(
             val_dataset, batch_size=training_params.batch_size, shuffle=False
         )
-
         test_loader = DataLoader(
             test_dataset, batch_size=training_params.batch_size, shuffle=False
         )
 
-        # Initialize model for this fold
         model = model_constructor_fn(model_params).to(device)
-
-        # Define loss function and optimizer
         criterion = nn.MSELoss()
         optimizer = optim.Adam(
             model.parameters(),
             lr=training_params.learning_rate,
-            weight_decay=training_params.weight_decay,  # L2 regularization
+            weight_decay=training_params.weight_decay,
         )
 
-        # Initialize variables for early stopping (now based on cosine similarity)
-        best_val_cosine = -float("inf")  # We want to maximize cosine similarity
+        best_val_cosine = -float("inf")
         patience_counter = 0
 
-        # Initialize history dictionary to track metrics for this fold
         history = {
             "train_loss": [],
             "val_loss": [],
@@ -141,34 +120,23 @@ def train_decoding_model(
             "val_cosine": [],
         }
 
-        # Training loop for this fold
         progress_bar = tqdm(
             range(training_params.epochs), desc=f"Lag {lag}, Fold {fold + 1}"
         )
         for epoch in progress_bar:
-            # Training phase
             model.train()
             train_loss = 0.0
             train_cosine = 0.0
 
             for inputs, targets in train_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
-
-                # Zero the parameter gradients
                 optimizer.zero_grad()
-
-                # Forward pass
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
-
-                # Backward pass and optimize
                 loss.backward()
                 optimizer.step()
 
-                # Track statistics
                 train_loss += loss.item() * inputs.size(0)
-
-                # Calculate cosine similarity between predictions and targets
                 batch_cosines = calculate_cosine_similarity(
                     outputs.detach().cpu(), targets.detach().cpu()
                 )
@@ -177,7 +145,6 @@ def train_decoding_model(
             train_loss = train_loss / len(train_loader.dataset)
             train_cosine = train_cosine / len(train_loader.dataset)
 
-            # Validation phase
             model.eval()
             val_loss = 0.0
             val_cosine = 0.0
@@ -185,15 +152,9 @@ def train_decoding_model(
             with torch.no_grad():
                 for inputs, targets in val_loader:
                     inputs, targets = inputs.to(device), targets.to(device)
-
-                    # Forward pass
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
-
-                    # Track statistics
                     val_loss += loss.item() * inputs.size(0)
-
-                    # Calculate cosine similarity
                     batch_cosines = calculate_cosine_similarity(
                         outputs.cpu(), targets.cpu()
                     )
@@ -202,25 +163,27 @@ def train_decoding_model(
             val_loss = val_loss / len(val_loader.dataset)
             val_cosine = val_cosine / len(val_loader.dataset)
 
-            # Update history
             history["train_loss"].append(train_loss)
             history["val_loss"].append(val_loss)
             history["train_cosine"].append(train_cosine)
             history["val_cosine"].append(val_cosine)
 
-            # Early stopping based on cosine similarity (higher is better)
+            if write_to_tensorboard:
+                writer.add_scalar("Loss/Train", train_loss, epoch)
+                writer.add_scalar("Loss/Validation", val_loss, epoch)
+                writer.add_scalar("Cosine/Train", train_cosine, epoch)
+                writer.add_scalar("Cosine/Validation", val_cosine, epoch)
+
             if val_cosine > best_val_cosine:
                 best_val_cosine = val_cosine
                 patience_counter = 0
                 best_epoch = epoch
-                # Save best model for this fold
                 torch.save(model.state_dict(), model_path)
             else:
                 patience_counter += 1
                 if patience_counter >= training_params.early_stopping_patience:
                     break
 
-            # Update progress bar
             progress_bar.set_postfix(
                 {
                     "train_loss": train_loss,
@@ -232,10 +195,7 @@ def train_decoding_model(
                 }
             )
 
-        # Load best model for this fold
         model.load_state_dict(torch.load(model_path))
-
-        # Test the model on the test set
         model.eval()
         test_loss = 0.0
         test_cosine = 0.0
@@ -243,52 +203,47 @@ def train_decoding_model(
         with torch.no_grad():
             for inputs, targets in test_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
-
-                # Forward pass
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
-
-                # Track statistics
                 test_loss += loss.item() * inputs.size(0)
-
-                # Calculate cosine similarity
                 batch_cosines = calculate_cosine_similarity(
                     outputs.cpu(), targets.cpu()
                 )
-                test_cosine = sum(batch_cosines)
+                test_cosine += sum(batch_cosines)
 
-            roc_result = calculate_word_embeddings_roc_auc_logits(
-                model, X_test, Y_test, selected_words[test_idx], device
-            )
-            roc_results.append(roc_result)
+        roc_result = calculate_word_embeddings_roc_auc_logits(
+            model, X_test, Y_test, selected_words[test_idx], device
+        )
+        roc_results.append(roc_result)
 
         test_loss = test_loss / len(test_loader.dataset)
         test_cosine = test_cosine / len(test_loader.dataset)
+
+        if write_to_tensorboard:
+            writer.add_scalar("Loss/Test", test_loss, fold)
+            writer.add_scalar("Cosine/Test", test_cosine, fold)
+
+            writer.close()
 
         print(
             f"\nFold {fold+1} Test Results: Loss = {test_loss:.4f}, Cosine Similarity = {test_cosine:.4f}"
         )
 
-        # Store fold results
-        cv_results["train_loss"].append(history["train_loss"][-1])  # Last epoch
+        cv_results["train_loss"].append(history["train_loss"][-1])
         cv_results["val_loss"].append(
             history["val_loss"][history["val_cosine"].index(max(history["val_cosine"]))]
-        )  # Loss at best cosine
+        )
         cv_results["test_loss"].append(test_loss)
-        cv_results["train_cosine"].append(history["train_cosine"][-1])  # Last epoch
-        cv_results["val_cosine"].append(best_val_cosine)  # Best validation cosine
+        cv_results["train_cosine"].append(history["train_cosine"][-1])
+        cv_results["val_cosine"].append(best_val_cosine)
         cv_results["test_cosine"].append(test_cosine)
 
-        # Store model and history for this fold
         models.append(model)
         histories.append(history)
 
-        # Plot training history for this fold
-        # TODO: Add support for this to write plots to file.
         if plot_results:
             plot_training_history(history, fold=fold + 1)
 
-    # Calculate and print cross-validation results
     print("\n" + "=" * 60)
     print("CROSS-VALIDATION RESULTS")
     print("=" * 60)
@@ -311,8 +266,6 @@ def train_decoding_model(
         f"Mean Test Cosine: {np.mean(cv_results['test_cosine']):.4f} ± {np.std(cv_results['test_cosine']):.4f}"
     )
 
-    # Plot overall cross-validation results
-    # TODO: Add support for this to write plots to file.
     if plot_results:
         plot_cv_results(cv_results)
 
@@ -586,6 +539,8 @@ def run_training_over_lags(
     data_params: DataParams,
     output_dir="results/",
     model_dir="models/",
+    write_to_tensorboard=False,
+    tensorboard_dir="event_log",
 ):
     """
     Args:
@@ -602,6 +557,9 @@ def run_training_over_lags(
         data_params: Parameters for get_data function call
         trial_name: Name of trial to be used for file writing
         output_dir: Name of folder to write results to.
+        run_name: Name of run for writing tensorboard results to.
+        write_to_tensorboard: If true then write tensorboard logs to tensorboard_dir.
+        tensorboard_dir: Directory to write tensorboard logs to if write_to_tensorboard is True.
     """
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
@@ -647,6 +605,8 @@ def run_training_over_lags(
                 model_params=model_params,
                 training_params=training_params,
                 model_dir=os.path.join(model_dir, f"lag_{lag}"),
+                write_to_tensorboard=write_to_tensorboard,
+                tensorboard_dir=tensorboard_dir,
             )
         )
         weighted_roc_means.append(weighted_roc_mean)
