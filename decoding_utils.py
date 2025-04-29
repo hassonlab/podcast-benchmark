@@ -491,22 +491,6 @@ def calculate_word_embeddings_roc_auc_logits(
         sum(word_aucs[word] * word_counts[word] for word in word_aucs) / total_count
     )
 
-    # Plotting
-    plt.figure(figsize=(10, 6))
-    plt.bar(word_aucs.keys(), word_aucs.values())
-    plt.axhline(
-        y=weighted_auc,
-        color="r",
-        linestyle="-",
-        label=f"Weighted Average: {weighted_auc:.3f}",
-    )
-    plt.xticks(rotation=90)
-    plt.ylabel("ROC-AUC")
-    plt.xlabel("Words")
-    plt.title("ROC-AUC for Word Predictions (Logits Approach)")
-    plt.legend()
-    plt.tight_layout()
-
     return {
         "word_aucs": word_aucs,
         "weighted_auc": weighted_auc,
