@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -6,13 +7,17 @@ from torch.nn import functional as F
 
 from foundation_model.model_code.config import VideoMAEExperimentConfig
 from foundation_model.model_code.models_mae import MaskedAutoencoderViT
-from foundation_model.model_code.utils import create_model
+from foundation_model.foundation_decoder_utils import create_foundation_model
 import registry
 
 
 class MLP(nn.Module):
     def __init__(
-        self, layer_sizes, activation=F.relu, dropout_rate=0.2, use_layer_norm=True
+        self,
+        layer_sizes,
+        activation=F.relu,
+        dropout_rate=0.0,
+        use_layer_norm=False,
     ):
         """
         Initialize a Multi-Layer Perceptron with configurable architecture and LayerNorm.
@@ -21,7 +26,7 @@ class MLP(nn.Module):
             layer_sizes (list): List of integers specifying the size of each layer.
                                First element is input size, last element is output size.
             activation (function): Activation function to use between layers (default: ReLU).
-            dropout_rate (float): Dropout probability for regularization (default: 0.2).
+            dropout_rate (float): Dropout probability for regularization (default: 0.).
             use_layer_norm (bool): Whether to use LayerNorm after each hidden layer (default: True).
         """
         super(MLP, self).__init__()
@@ -56,57 +61,114 @@ class MLP(nn.Module):
         for i, layer in enumerate(self.layers):
             x = layer(x)
 
-            # Final layer will be normed.
-            if self.use_layer_norm:
-                x = self.layer_norms[i](x)
-
             # Apply activation, and dropout to all but the final layer
             if i < len(self.layers) - 1:
+                if self.use_layer_norm:
+                    x = self.layer_norms[i](x)
                 x = self.activation(x)
                 x = self.dropout(x)
 
         return x
 
 
-class FoundationModelFinetuneMLP(nn.Module):
+class FoundationModelMLP(nn.Module):
     def __init__(
         self,
-        foundation_model_config: VideoMAEExperimentConfig,
         mlp_layer_sizes,
         model_dir=None,
         mlp_activation=F.relu,
-        dropout_rate=0.2,
+        dropout_rate=0.0,
         use_layer_norm=True,
+        finetune=False,
+        foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
     ):
-        super(FoundationModelFinetuneMLP, self).__init__()
-        self.foundation_model = create_model(foundation_model_config)
-        if model_dir:
-            print(
-                "Using model weights at:",
-                os.path.join(model_dir, "model.pth"),
+        super(FoundationModelMLP, self).__init__()
+        self.finetune = finetune
+        if finetune:
+            self.foundation_model = create_foundation_model(
+                foundation_model_config, model_dir=model_dir
             )
-            checkpoint = torch.load(
-                os.path.join(model_dir, "model.pth"),
-                weights_only=True,
-            )
-            self.foundation_model.load_state_dict(checkpoint)
 
         self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
 
     def forward(self, x):
-        x = self.foundation_model(x, forward_features=True)
+        if self.finetune:
+            x = self.foundation_model(x, forward_features=True)
         return self.mlp(x)
+
+
+class FoundationModelAttentionPoolingDecoder(nn.Module):
+    def __init__(
+        self,
+        mlp_layer_sizes,
+        model_dir=None,
+        mlp_activation=F.relu,
+        dropout_rate=0.0,
+        use_layer_norm=True,
+        finetune=False,
+        foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
+    ):
+        super().__init__()
+        self.finetune = finetune
+        if finetune:
+            self.foundation_model = create_foundation_model(
+                foundation_model_config, model_dir
+            )
+
+        self.query = nn.Parameter(torch.randn(1, mlp_layer_sizes[0]))  # 1 x C
+        self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
+
+    def forward(self, x, return_weights=False):
+        """
+        Args:
+            x: Tensor of shape (B, N, C), transformer outputs
+        Returns:
+            output: Tensor of shape (B, out_dim)
+        """
+        if self.finetune:
+            x = self.foundation_model(x, forward_features=True, global_pool=False)
+
+        B, N, C = x.shape
+
+        # Expand query to batch size
+        query = self.query.expand(B, -1, -1)  # (B, 1, C)
+
+        # Compute attention scores
+        attn_scores = torch.matmul(query, x.transpose(1, 2))  # (B, 1, N)
+        attn_scores = attn_scores / (C**0.5)  # scale by sqrt(d)
+        attn_weights = torch.softmax(attn_scores, dim=-1)  # (B, 1, N)
+
+        # Weighted sum
+        pooled = torch.matmul(attn_weights, x)  # (B, 1, C)
+        pooled = pooled.squeeze(1)  # (B, C)
+
+        # Final projection
+        output = self.mlp(pooled)  # (B, out_dim)
+        if return_weights:
+            return output, attn_weights
+        return output
 
 
 @registry.register_model_constructor()
 def foundation_mlp(model_params):
-    return MLP(model_params["layer_sizes"])
+    return FoundationModelMLP(model_params["layer_sizes"], finetune=False)
 
 
 @registry.register_model_constructor()
 def foundation_model_finetune_mlp(model_params):
-    return FoundationModelFinetuneMLP(
-        model_params["foundation_model_config"],
+    return FoundationModelMLP(
         model_params["mlp_layer_sizes"],
         model_dir=model_params.get("model_dir"),
+        foundation_model_config=model_params["foundation_model_config"],
+        finetune=True,
+    )
+
+
+@registry.register_model_constructor()
+def foundation_model_finetune_attention(model_params):
+    return FoundationModelAttentionPoolingDecoder(
+        model_params["mlp_layer_sizes"],
+        model_dir=model_params.get("model_dir"),
+        foundation_model_config=model_params["foundation_model_config"],
+        finetune=True,
     )

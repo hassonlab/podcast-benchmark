@@ -15,6 +15,37 @@ from config import ExperimentConfig, dict_to_config
 import registry
 
 
+def create_foundation_model(config: VideoMAEExperimentConfig, model_dir=None):
+    model = create_model(config)
+    if model_dir:
+        checkpoint = torch.load(
+            os.path.join(model_dir, "model.pth"),
+            weights_only=True,
+        )
+        model.load_state_dict(checkpoint)
+    return model
+
+
+@registry.register_data_preprocessor("foundation_model_finetune_mlp")
+def prepare_data_for_foundation_model(data, preprocessor_params):
+    data_config = preprocessor_params["ecog_data_config"]
+    data = data.reshape(
+        data.shape[0], data.shape[1], -1, data_config.original_fs // data_config.new_fs
+    )
+    data = data.mean(-1)
+
+    for i in range(64):
+        channel = "G" + str(i + 1)
+        if not np.isin(channel, preprocessor_params["ch_names"]):
+            data = np.insert(data, i, np.zeros_like(data[:, i, :]), axis=1)
+
+    # Reshape to [num_examples, frequency bands (currrently 1), time, num_electrodes]
+    data = np.einsum("bet->bte", data).reshape(data.shape[0], data.shape[2], 8, 8)
+    data = np.expand_dims(data, axis=1)
+
+    return data
+
+
 @registry.register_config_setter("foundation_model")
 def foundation_model_config_setter(
     experiment_config: ExperimentConfig, raws, _df_word
@@ -35,37 +66,15 @@ def foundation_model_config_setter(
 
 @registry.register_data_preprocessor()
 def foundation_model_preprocessing_fn(data, preprocessor_params):
-    # First load the model and set it in eval mode.
     ecog_config = create_video_mae_experiment_config_from_file(
         os.path.join(preprocessor_params["model_dir"], "experiment_config.ini")
     )
-
+    model = create_foundation_model(ecog_config, preprocessor_params["model_dir"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    checkpoint = torch.load(
-        os.path.join(preprocessor_params["model_dir"], "model_weight_test.pth"),
-        weights_only=True,
-    )
-    model = create_model(ecog_config)
-    model.load_state_dict(checkpoint)
     model = model.to(device)
-
     model.eval()
 
-    data_config = ecog_config.ecog_data_config
-    data = data.reshape(
-        data.shape[0], data.shape[1], -1, data_config.original_fs // data_config.new_fs
-    )
-    data = data.mean(-1)
-
-    for i in range(64):
-        channel = "G" + str(i + 1)
-        if not np.isin(channel, preprocessor_params["ch_names"]):
-            data = np.insert(data, i, np.zeros_like(data[:, i, :]), axis=1)
-
-    # Reshape to [num_examples, frequency bands (currrently 1), time, num_electrodes]
-    data = np.einsum("bet->bte", data).reshape(data.shape[0], data.shape[2], 8, 8)
-    data = np.expand_dims(data, axis=1)
+    data = prepare_data_for_foundation_model(data, preprocessor_params)
 
     # Construct input dataset
     batch_size = preprocessor_params["foundation_model_batch_size"]
@@ -120,23 +129,3 @@ def foundation_model_mlp_finetune_config_setter(
     )
 
     return experiment_config
-
-
-@registry.register_data_preprocessor("foundation_model_finetune_mlp")
-def foundation_model_mlp_finetune_preprocessing_fn(data, preprocessor_params):
-    data_config = preprocessor_params["ecog_data_config"]
-    data = data.reshape(
-        data.shape[0], data.shape[1], -1, data_config.original_fs // data_config.new_fs
-    )
-    data = data.mean(-1)
-
-    for i in range(64):
-        channel = "G" + str(i + 1)
-        if not np.isin(channel, preprocessor_params["ch_names"]):
-            data = np.insert(data, i, np.zeros_like(data[:, i, :]), axis=1)
-
-    # Reshape to [num_examples, frequency bands (currrently 1), time, num_electrodes]
-    data = np.einsum("bet->bte", data).reshape(data.shape[0], data.shape[2], 8, 8)
-    data = np.expand_dims(data, axis=1)
-
-    return data
