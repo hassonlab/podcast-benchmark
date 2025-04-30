@@ -11,6 +11,47 @@ from foundation_model.foundation_decoder_utils import create_foundation_model
 import registry
 
 
+def freeze_encoder_blocks(model: MaskedAutoencoderViT, num_unfrozen_blocks: int = 1):
+    """
+    Freeze all encoder blocks except the last `num_unfrozen_blocks`.
+
+    Args:
+        model: MaskedAutoencoderViT instance
+        num_unfrozen_blocks: Number of final encoder blocks to keep trainable
+    """
+    num_blocks = len(model.blocks)
+    assert (
+        0 <= num_unfrozen_blocks <= num_blocks
+    ), f"num_unfrozen_blocks should be between 0 and {num_blocks}"
+
+    for i, block in enumerate(model.blocks):
+        requires_grad = i >= (num_blocks - num_unfrozen_blocks)
+        for param in block.parameters():
+            param.requires_grad = requires_grad
+
+    # Optionally freeze patch_embed and position embeddings
+    for param in model.patch_embed.parameters():
+        param.requires_grad = False
+    if hasattr(model, "cls_token"):
+        model.cls_token.requires_grad = False
+    if model.sep_pos_embed:
+        for pos_embed in [model.pos_embed_spatial, model.pos_embed_temporal]:
+            pos_embed.requires_grad = False
+        if hasattr(model, "pos_embed_class"):
+            model.pos_embed_class.requires_grad = False
+    else:
+        model.pos_embed.requires_grad = False
+
+
+def create_and_freeze_foundation_model(
+    foundation_model_config, model_dir, freeze_foundation_model, num_unfrozen_blocks
+):
+    foundation_model = create_foundation_model(foundation_model_config, model_dir)
+    if freeze_foundation_model:
+        freeze_encoder_blocks(foundation_model, num_unfrozen_blocks)
+    return foundation_model
+
+
 class MLP(nn.Module):
     def __init__(
         self,
@@ -81,12 +122,17 @@ class FoundationModelMLP(nn.Module):
         use_layer_norm=True,
         finetune=False,
         foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
+        freeze_foundation_model: bool = False,
+        num_unfrozen_blocks: int = 0,
     ):
         super(FoundationModelMLP, self).__init__()
         self.finetune = finetune
         if finetune:
-            self.foundation_model = create_foundation_model(
-                foundation_model_config, model_dir=model_dir
+            self.foundation_model = create_and_freeze_foundation_model(
+                foundation_model_config,
+                model_dir,
+                freeze_foundation_model,
+                num_unfrozen_blocks,
             )
 
         self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
@@ -107,12 +153,17 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
         use_layer_norm=True,
         finetune=False,
         foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
+        freeze_foundation_model: bool = False,
+        num_unfrozen_blocks: int = 0,
     ):
         super().__init__()
         self.finetune = finetune
         if finetune:
-            self.foundation_model = create_foundation_model(
-                foundation_model_config, model_dir
+            self.foundation_model = create_and_freeze_foundation_model(
+                foundation_model_config,
+                model_dir,
+                freeze_foundation_model,
+                num_unfrozen_blocks,
             )
 
         self.query = nn.Parameter(torch.randn(1, mlp_layer_sizes[0]))  # 1 x C
@@ -171,4 +222,12 @@ def foundation_model_finetune_attention(model_params):
         model_dir=model_params.get("model_dir"),
         foundation_model_config=model_params["foundation_model_config"],
         finetune=True,
+    )
+
+
+@registry.register_model_constructor()
+def foundation_model_attention(model_params):
+    return FoundationModelAttentionPoolingDecoder(
+        model_params["mlp_layer_sizes"],
+        finetune=False,
     )
