@@ -58,6 +58,9 @@ def train_decoding_model(
         "train_cosine": [],
         "val_cosine": [],
         "test_cosine": [],
+        "train_nll": [],
+        "val_nll": [],
+        "test_nll": [],
     }
     roc_results = []
 
@@ -118,6 +121,8 @@ def train_decoding_model(
             "val_loss": [],
             "train_cosine": [],
             "val_cosine": [],
+            "train_nll": [],
+            "val_nll": [],
         }
 
         progress_bar = tqdm(
@@ -127,6 +132,7 @@ def train_decoding_model(
             model.train()
             train_loss = 0.0
             train_cosine = 0.0
+            train_nll = 0.0
 
             for inputs, targets in train_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
@@ -138,16 +144,20 @@ def train_decoding_model(
 
                 train_loss += loss.item() * inputs.size(0)
                 batch_cosines = calculate_cosine_similarity(
-                    outputs.detach().cpu(), targets.detach().cpu()
+                    outputs.detach(), targets.detach()
                 )
-                train_cosine += sum(batch_cosines)
+                train_cosine += batch_cosines.sum().item()
+                nll = compute_nll_contextual(outputs.detach(), targets.detach())
+                train_nll += nll.sum().item()
 
             train_loss = train_loss / len(train_loader.dataset)
             train_cosine = train_cosine / len(train_loader.dataset)
+            train_nll = train_nll / len(train_loader.dataset)
 
             model.eval()
             val_loss = 0.0
             val_cosine = 0.0
+            val_nll = 0.0
 
             with torch.no_grad():
                 for inputs, targets in val_loader:
@@ -156,23 +166,30 @@ def train_decoding_model(
                     loss = criterion(outputs, targets)
                     val_loss += loss.item() * inputs.size(0)
                     batch_cosines = calculate_cosine_similarity(
-                        outputs.cpu(), targets.cpu()
+                        outputs.detach(), targets.detach()
                     )
-                    val_cosine += sum(batch_cosines)
+                    val_cosine += batch_cosines.sum().item()
+                    nll = compute_nll_contextual(outputs.detach(), targets.detach())
+                    val_nll += nll.sum().item()
 
             val_loss = val_loss / len(val_loader.dataset)
             val_cosine = val_cosine / len(val_loader.dataset)
+            val_nll = val_nll / len(val_loader.dataset)
 
             history["train_loss"].append(train_loss)
             history["val_loss"].append(val_loss)
             history["train_cosine"].append(train_cosine)
             history["val_cosine"].append(val_cosine)
+            history["train_nll"].append(train_nll)
+            history["val_nll"].append(val_nll)
 
             if write_to_tensorboard:
                 writer.add_scalar("Loss/Train", train_loss, epoch)
                 writer.add_scalar("Loss/Validation", val_loss, epoch)
                 writer.add_scalar("Cosine/Train", train_cosine, epoch)
                 writer.add_scalar("Cosine/Validation", val_cosine, epoch)
+                writer.add_scalar("NLL/Train", train_nll, epoch)
+                writer.add_scalar("NLL/Validation", val_cosine, epoch)
 
             if val_cosine > best_val_cosine:
                 best_val_cosine = val_cosine
@@ -199,6 +216,7 @@ def train_decoding_model(
         model.eval()
         test_loss = 0.0
         test_cosine = 0.0
+        test_nll = 0.0
 
         with torch.no_grad():
             for inputs, targets in test_loader:
@@ -207,9 +225,11 @@ def train_decoding_model(
                 loss = criterion(outputs, targets)
                 test_loss += loss.item() * inputs.size(0)
                 batch_cosines = calculate_cosine_similarity(
-                    outputs.cpu(), targets.cpu()
+                    outputs.detach(), targets.detach()
                 )
-                test_cosine += sum(batch_cosines)
+                test_cosine += batch_cosines.sum().item()
+                nll = compute_nll_contextual(outputs.detach(), targets.detach())
+                test_nll += nll.sum().item()
 
         roc_result = calculate_word_embeddings_roc_auc_logits(
             model, X_test, Y_test, selected_words[test_idx], device
@@ -218,11 +238,12 @@ def train_decoding_model(
 
         test_loss = test_loss / len(test_loader.dataset)
         test_cosine = test_cosine / len(test_loader.dataset)
+        test_nll = test_nll / len(test_loader.dataset)
 
         if write_to_tensorboard:
             writer.add_scalar("Loss/Test", test_loss, fold)
             writer.add_scalar("Cosine/Test", test_cosine, fold)
-
+            writer.add_scalar("NLL/Test", test_nll, fold)
             writer.close()
 
         print(
@@ -237,6 +258,11 @@ def train_decoding_model(
         cv_results["train_cosine"].append(history["train_cosine"][-1])
         cv_results["val_cosine"].append(best_val_cosine)
         cv_results["test_cosine"].append(test_cosine)
+        cv_results["train_nll"].append(history["train_nll"][-1])
+        cv_results["val_nll"].append(
+            history["val_nll"][history["val_cosine"].index(max(history["val_cosine"]))]
+        )
+        cv_results["test_nll"].append(test_nll)
 
         models.append(model)
         histories.append(history)
@@ -277,38 +303,25 @@ def train_decoding_model(
     return models, histories, cv_results, roc_results, weighted_roc_mean
 
 
-def calculate_cosine_similarity(predictions, targets):
+def calculate_cosine_similarity(
+    predictions: torch.Tensor, targets: torch.Tensor
+) -> torch.Tensor:
     """
-    Calculate cosine similarity between predictions and targets.
+    Calculate cosine similarity between each pair of rows in predictions and targets.
 
     Args:
         predictions: Tensor of shape [batch_size, embedding_dim]
         targets: Tensor of shape [batch_size, embedding_dim]
 
     Returns:
-        cosine_similarities: List of cosine similarities for each example
+        cosine_similarities: Tensor of shape [batch_size], with cosine similarity per sample
     """
-    cosine_similarities = []
+    # Normalize along the embedding dimension
+    predictions = F.normalize(predictions, p=2, dim=1)
+    targets = F.normalize(targets, p=2, dim=1)
 
-    # Convert to numpy if tensors
-    if torch.is_tensor(predictions):
-        predictions = predictions.numpy()
-    if torch.is_tensor(targets):
-        targets = targets.numpy()
-
-    # Calculate cosine similarity for each example
-    for i in range(predictions.shape[0]):
-        # Normalize vectors
-        pred_norm = np.linalg.norm(predictions[i])
-        target_norm = np.linalg.norm(targets[i])
-
-        # Handle zero vectors
-        if pred_norm == 0 or target_norm == 0:
-            cosine_similarities.append(0.0)
-        else:
-            # Calculate cosine similarity
-            similarity = np.dot(predictions[i], targets[i]) / (pred_norm * target_norm)
-            cosine_similarities.append(similarity)
+    # Element-wise dot product across batch
+    cosine_similarities = torch.sum(predictions * targets, dim=1)
 
     return cosine_similarities
 
@@ -393,6 +406,26 @@ def plot_cv_results(cv_results):
 
     plt.tight_layout()
     plt.show()
+
+
+def compute_nll_contextual(predicted_embeddings, actual_embeddings):
+    """
+    Computes a contrastive NLL where each predicted embedding is scored against all actual embeddings.
+    """
+    # Normalize embeddings
+    pred_norm = F.normalize(predicted_embeddings, dim=1)
+    actual_norm = F.normalize(actual_embeddings, dim=1)
+
+    # Similarity matrix: [n_samples, n_samples]
+    logits = torch.matmul(pred_norm, actual_norm.T)
+
+    # Labels: diagonal = correct match
+    targets = torch.arange(
+        len(predicted_embeddings), device=predicted_embeddings.device
+    )
+
+    # Cross-entropy over rows
+    return F.cross_entropy(logits, targets)
 
 
 def calculate_word_embeddings_roc_auc_logits(
