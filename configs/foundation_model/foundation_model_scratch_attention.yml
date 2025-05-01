@@ -1,8 +1,26 @@
-model_constructor_name: foundation_model_finetune_mlp
+model_constructor_name: foundation_model_finetune_attention
 config_setter_name: foundation_model_finetune_mlp
 model_params: 
   mlp_layer_sizes: [64, 50]
-  model_dir: /scratch/gpfs/zparis/ECoG-foundation-model/checkpoints/video-mae-train-zp-20250417-19:36:25_29082218/best_checkpoint
+  foundation_model_config:
+    video_mae_task_config:
+      vit_config:
+        dim: 64
+        mlp_ratio: 4.0
+        depth: 12
+        num_heads: 8
+        patch_size: 2
+        frame_patch_size: 16
+        use_cls_token: False
+        sep_pos_embed: True
+        trunc_init: False
+        no_qkv_bias: False
+    ecog_data_config:
+      env: False
+      bands: [[70, 200]]
+      original_fs: 512
+      new_fs: 128
+      sample_length: 1
 training_params:
   batch_size: 32
   epochs: 100
@@ -26,7 +44,7 @@ data_params:
   channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   # Model specific config.
   # preprocessor_params:
-trial_name: foundation_finetune_no_norm_dim={}_framepatchsize={}_patchsize={}
+trial_name: foundation_scratch_attention_no_norm_dim={}_framepatchsize={}_patchsize={}
 format_fields: [
     model_params.foundation_model_config.video_mae_task_config.vit_config.dim,
     model_params.foundation_model_config.video_mae_task_config.vit_config.frame_patch_size,

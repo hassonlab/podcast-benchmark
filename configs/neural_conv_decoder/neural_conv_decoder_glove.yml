@@ -20,9 +20,9 @@ training_params:
 data_params:
   # Cross model data_params
   data_root: data
-  embedding_type: gpt-2xl
+  embedding_type: glove
   embedding_layer: 24
-  embedding_pca_dim: 50
+  # embedding_pca_dim: 50
   window_width: 0.625
   preprocessing_fn_name: preprocess_neural_data
   subject_ids: [9]
@@ -30,4 +30,4 @@ data_params:
   # neural_conv_decoder specific config
   preprocessor_params:
     num_average_samples: 32
-trial_name: ensemble_model_10
+trial_name: ensemble_model_10_glove

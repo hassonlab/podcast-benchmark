@@ -1,4 +1,4 @@
-model_constructor_name: foundation_model_finetune_mlp
+model_constructor_name: foundation_model_finetune_attention
 config_setter_name: foundation_model_finetune_mlp
 model_params: 
   mlp_layer_sizes: [64, 50]
@@ -26,7 +26,7 @@ data_params:
   channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   # Model specific config.
   # preprocessor_params:
-trial_name: foundation_finetune_no_norm_dim={}_framepatchsize={}_patchsize={}
+trial_name: foundation_finetune_attention_no_norm_dim={}_framepatchsize={}_patchsize={}
 format_fields: [
     model_params.foundation_model_config.video_mae_task_config.vit_config.dim,
     model_params.foundation_model_config.video_mae_task_config.vit_config.frame_patch_size,

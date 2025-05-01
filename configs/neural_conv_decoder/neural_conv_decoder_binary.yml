@@ -30,4 +30,4 @@ data_params:
   # neural_conv_decoder specific config
   preprocessor_params:
     num_average_samples: 32
-trial_name: ensemble_model_10
+trial_name: ensemble_model_10_binary

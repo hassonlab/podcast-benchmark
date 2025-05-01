@@ -1,7 +1,8 @@
-model_constructor_name: foundation_mlp
+model_constructor_name: foundation_model_full_attention
 config_setter_name: foundation_model
 model_params: 
-  layer_sizes: [64, 57, 50]
+  mlp_layer_sizes: [64, 50]
+  num_heads: 8
 training_params:
   batch_size: 32
   epochs: 100
@@ -25,7 +26,10 @@ data_params:
   channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   # Model specific config.
   preprocessor_params:
-    global_pool: True
+    global_pool: False
     foundation_model_batch_size: 32
     model_dir: /scratch/gpfs/zparis/ECoG-foundation-model/checkpoints/video-mae-train-zp-20250417-19:36:25_29082218/best_checkpoint
-trial_name: foundation_model_no_norm
+trial_name: foundation_model_full_attention_numheads={}
+format_fields: [
+  model_params.num_heads
+]

@@ -2,6 +2,8 @@ model_constructor_name: foundation_model_finetune_mlp
 config_setter_name: foundation_model_finetune_mlp
 model_params: 
   mlp_layer_sizes: [64, 50]
+  freeze_foundation_model: True
+  num_unfrozen_blocks: 1
   model_dir: /scratch/gpfs/zparis/ECoG-foundation-model/checkpoints/video-mae-train-zp-20250417-19:36:25_29082218/best_checkpoint
 training_params:
   batch_size: 32
@@ -26,8 +28,9 @@ data_params:
   channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   # Model specific config.
   # preprocessor_params:
-trial_name: foundation_finetune_no_norm_dim={}_framepatchsize={}_patchsize={}
+trial_name: foundation_finetune_linear_frozen_num_unfrozen_blocks={}_dim={}_framepatchsize={}_patchsize={}
 format_fields: [
+    model_params.num_unfrozen_blocks,
     model_params.foundation_model_config.video_mae_task_config.vit_config.dim,
     model_params.foundation_model_config.video_mae_task_config.vit_config.frame_patch_size,
     model_params.foundation_model_config.video_mae_task_config.vit_config.patch_size,

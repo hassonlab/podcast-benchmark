@@ -20,7 +20,7 @@ training_params:
 data_params:
   # Cross model data_params
   data_root: data
-  embedding_type: gpt-2xl
+  embedding_type: arbitrary
   embedding_layer: 24
   embedding_pca_dim: 50
   window_width: 0.625
@@ -30,4 +30,4 @@ data_params:
   # neural_conv_decoder specific config
   preprocessor_params:
     num_average_samples: 32
-trial_name: ensemble_model_10
+trial_name: ensemble_model_10_arbitrary
