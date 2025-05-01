@@ -8,6 +8,7 @@ from foundation_model.model_code.models_mae import MaskedAutoencoderViT
 from foundation_model.model_code.config import (
     create_video_mae_experiment_config_from_file,
     VideoMAEExperimentConfig,
+    ECoGDataConfig,
 )
 from foundation_model.model_code.utils import create_model
 
@@ -26,9 +27,9 @@ def create_foundation_model(config: VideoMAEExperimentConfig, model_dir=None):
     return model
 
 
-@registry.register_data_preprocessor("foundation_model_finetune_mlp")
-def prepare_data_for_foundation_model(data, preprocessor_params):
-    data_config = preprocessor_params["ecog_data_config"]
+def prepare_data_for_foundation_model(
+    data, data_config: ECoGDataConfig, ch_names: list[str]
+):
     data = data.reshape(
         data.shape[0], data.shape[1], -1, data_config.original_fs // data_config.new_fs
     )
@@ -36,7 +37,7 @@ def prepare_data_for_foundation_model(data, preprocessor_params):
 
     for i in range(64):
         channel = "G" + str(i + 1)
-        if not np.isin(channel, preprocessor_params["ch_names"]):
+        if not np.isin(channel, ch_names):
             data = np.insert(data, i, np.zeros_like(data[:, i, :]), axis=1)
 
     # Reshape to [num_examples, frequency bands (currrently 1), time, num_electrodes]
@@ -44,6 +45,14 @@ def prepare_data_for_foundation_model(data, preprocessor_params):
     data = np.expand_dims(data, axis=1)
 
     return data
+
+
+@registry.register_data_preprocessor("foundation_model_finetune_mlp")
+def prepare_data_for_finetuning(data, preprocessor_params):
+    data_config = preprocessor_params["ecog_data_config"]
+    return prepare_data_for_foundation_model(
+        data, data_config, preprocessor_params["ch_names"]
+    )
 
 
 @registry.register_config_setter("foundation_model")
@@ -74,7 +83,9 @@ def foundation_model_preprocessing_fn(data, preprocessor_params):
     model = model.to(device)
     model.eval()
 
-    data = prepare_data_for_foundation_model(data, preprocessor_params)
+    data = prepare_data_for_foundation_model(
+        data, ecog_config.ecog_data_config, preprocessor_params["ch_names"]
+    )
 
     # Construct input dataset
     batch_size = preprocessor_params["foundation_model_batch_size"]
@@ -86,7 +97,9 @@ def foundation_model_preprocessing_fn(data, preprocessor_params):
                 device
             )
             batch_embeddings = model(
-                batch, forward_features=True
+                batch,
+                forward_features=True,
+                global_pool=preprocessor_params["global_pool"],
             )  # Shape: [batch_size, 16]
             foundation_embeddings.append(batch_embeddings.cpu().numpy())
 

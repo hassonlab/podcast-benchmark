@@ -112,6 +112,64 @@ class MLP(nn.Module):
         return x
 
 
+class FoundationModelFullAttentionDecoder(nn.Module):
+    """
+    Attention decoder that collapses N latents into a single latent via a learnable query vector per head.
+    """
+
+    def __init__(
+        self,
+        mlp_layer_sizes,
+        mlp_activation=F.relu,
+        dropout_rate=0.0,
+        use_layer_norm=True,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+    ):
+        super().__init__()
+        dim = mlp_layer_sizes[0]
+        assert dim % num_heads == 0, "dim should be divisible by num_heads"
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        # Learnable query vector per head (no projection from x)
+        self.query = nn.Parameter(torch.randn(num_heads, head_dim))
+
+        # Only key and value projections
+        self.k = nn.Linear(dim, dim, bias=qkv_bias)
+        self.v = nn.Linear(dim, dim, bias=qkv_bias)
+
+        # MLP expects input of shape [batch, embed_dim]
+        self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
+
+    def forward(self, x):
+        # x: [B, N, C]
+        B, N, C = x.shape
+        head_dim = C // self.num_heads
+
+        # Project keys and values: [B, heads, N, head_dim]
+        k = self.k(x).view(B, N, self.num_heads, head_dim).permute(0, 2, 1, 3)
+        v = self.v(x).view(B, N, self.num_heads, head_dim).permute(0, 2, 1, 3)
+
+        # Expand query: [B, heads, 1, head_dim]
+        q = self.query.unsqueeze(0).unsqueeze(2).expand(B, -1, 1, -1)
+
+        # Compute attention scores and weights: [B, heads, 1, N]
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+
+        # Weighted sum over values: [B, heads, 1, head_dim]
+        out = attn @ v
+
+        # Collapse to single embedding per example: [B, C]
+        out = out.transpose(1, 2).reshape(B, C)
+
+        # Pass through MLP
+        return self.mlp(out)
+
+
 class FoundationModelMLP(nn.Module):
     def __init__(
         self,
@@ -212,6 +270,8 @@ def foundation_model_finetune_mlp(model_params):
         model_dir=model_params.get("model_dir"),
         foundation_model_config=model_params["foundation_model_config"],
         finetune=True,
+        freeze_foundation_model=model_params.get("freeze_foundation_model", False),
+        num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
     )
 
 
@@ -222,6 +282,8 @@ def foundation_model_finetune_attention(model_params):
         model_dir=model_params.get("model_dir"),
         foundation_model_config=model_params["foundation_model_config"],
         finetune=True,
+        freeze_foundation_model=model_params.get("freeze_foundation_model", False),
+        num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
     )
 
 
@@ -230,4 +292,11 @@ def foundation_model_attention(model_params):
     return FoundationModelAttentionPoolingDecoder(
         model_params["mlp_layer_sizes"],
         finetune=False,
+    )
+
+
+@registry.register_model_constructor()
+def foundation_model_full_attention(model_params):
+    return FoundationModelFullAttentionDecoder(
+        model_params["mlp_layer_sizes"], num_heads=model_params["num_heads"]
     )
