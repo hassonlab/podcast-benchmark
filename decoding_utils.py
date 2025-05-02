@@ -61,6 +61,7 @@ def train_decoding_model(
         "train_nll": [],
         "val_nll": [],
         "test_nll": [],
+        "num_epochs": [],
     }
     roc_results = []
 
@@ -123,6 +124,7 @@ def train_decoding_model(
             "val_cosine": [],
             "train_nll": [],
             "val_nll": [],
+            "num_epochs": np.nan,
         }
 
         progress_bar = tqdm(
@@ -199,6 +201,7 @@ def train_decoding_model(
             else:
                 patience_counter += 1
                 if patience_counter >= training_params.early_stopping_patience:
+                    history["num_epochs"] = best_epoch + 1
                     break
 
             progress_bar.set_postfix(
@@ -211,6 +214,9 @@ def train_decoding_model(
                     "epoch": epoch,
                 }
             )
+
+        if np.isnan(history["num_epochs"]):
+            history["num_epochs"] = training_params.epochs
 
         model.load_state_dict(torch.load(model_path))
         model.eval()
@@ -263,6 +269,7 @@ def train_decoding_model(
             history["val_nll"][history["val_cosine"].index(max(history["val_cosine"]))]
         )
         cv_results["test_nll"].append(test_nll)
+        cv_results["num_epochs"].append(history["num_epochs"])
 
         models.append(model)
         histories.append(history)
@@ -290,6 +297,18 @@ def train_decoding_model(
     )
     print(
         f"Mean Test Cosine: {np.mean(cv_results['test_cosine']):.4f} ± {np.std(cv_results['test_cosine']):.4f}"
+    )
+    print(
+        f"Mean Train Negative Log-Likelihood: {np.mean(cv_results['train_nll']):.4f} ± {np.std(cv_results['train_nll']):.4f}"
+    )
+    print(
+        f"Mean Val Negative Log-Likelihood: {np.mean(cv_results['val_nll']):.4f} ± {np.std(cv_results['val_nll']):.4f}"
+    )
+    print(
+        f"Mean Test Negative Log-Likelihood: {np.mean(cv_results['test_nll']):.4f} ± {np.std(cv_results['test_nll']):.4f}"
+    )
+    print(
+        f"Mean Num Epochs: {np.mean(cv_results['num_epochs']):.4f} ± {np.std(cv_results['num_epochs']):.4f}"
     )
 
     if plot_results:
@@ -559,45 +578,31 @@ def run_training_over_lags(
     write_to_tensorboard=False,
     tensorboard_dir="event_log",
 ):
-    """
-    Args:
-        lags: array of lags to run training over
-        raws: list of mne.Raw objects for each subject,
-        df_word: dataframe containing columns word, start, end, and embedding corresponding to words in the transcript,
-        preprocessing_fn: function to preprocess data for each lag.
-            Should have contract
-            preprocessing_fn(data: np.array of shape [num_words, num_electrodes, timesteps],
-                             params: dictionary in data_params['preprocessor_params']) -> array of shape [num_words, ...]
-        model_constructor_fn: Function constructor for model. Should have function arguments model_constructor_fn(model_params) -> Model.
-        model_params: Dictionary of model parameters
-        training_params: Training parameters
-        data_params: Parameters for get_data function call
-        trial_name: Name of trial to be used for file writing
-        output_dir: Name of folder to write results to.
-        run_name: Name of run for writing tensorboard results to.
-        write_to_tensorboard: If true then write tensorboard logs to tensorboard_dir.
-        tensorboard_dir: Directory to write tensorboard logs to if write_to_tensorboard is True.
-    """
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
     filename = os.path.join(output_dir, f"lag_performance.csv")
+
+    # Load existing results if they exist
     if os.path.exists(filename):
         roc_df = pd.read_csv(filename)
-        weighted_roc_means = roc_df.rocs.tolist()
-        already_read_lags = roc_df.lags.tolist()
+        already_read_lags = roc_df["lags"].tolist()
+        existing_df = roc_df
     else:
-        weighted_roc_means = []
         already_read_lags = []
+        existing_df = pd.DataFrame()
+
+    all_new_results = []
 
     for lag in lags:
         if lag in already_read_lags:
             print(f"Lag {lag} already done, skipping...")
             continue
-        # Maybe make it so only words in all lags are included.
+
         print("=" * 60)
         print("running lag:", lag)
         print("=" * 60)
+
         X, Y, selected_words = data_utils.get_data(
             lag,
             raws,
@@ -626,14 +631,25 @@ def run_training_over_lags(
                 tensorboard_dir=tensorboard_dir,
             )
         )
-        weighted_roc_means.append(weighted_roc_mean)
 
-        # Write file
-        pd.DataFrame(
+        # Aggregate metrics
+        lag_metrics = {
+            f"{metric}_mean": np.mean(values) if len(values) > 0 else np.nan
+            for metric, values in cv_results.items()
+        }
+        lag_metrics.update(
             {
-                "lags": lags[: len(weighted_roc_means)],
-                "rocs": np.array(weighted_roc_means),
+                f"{metric}_std": np.std(values) if len(values) > 0 else np.nan
+                for metric, values in cv_results.items()
             }
-        ).to_csv(filename, index=False)
+        )
+        lag_metrics["lags"] = lag
+        lag_metrics["rocs"] = weighted_roc_mean
 
-    return weighted_roc_means
+        # Append new row to existing DataFrame and write to file
+        existing_df = pd.concat(
+            [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
+        )
+        existing_df.to_csv(filename, index=False)
+
+    return [row["rocs"] for row in all_new_results]

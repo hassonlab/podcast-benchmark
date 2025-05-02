@@ -79,8 +79,6 @@ def main():
             get_nested_value(experiment_config, s)
             for s in experiment_config.format_fields
         ]
-        print(experiment_config.format_fields)
-        print(format_values)
         trial_name = trial_name.format(*format_values)
     # Append timestamp to prevent accidental overwriting.
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
