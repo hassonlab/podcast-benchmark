@@ -4,6 +4,9 @@ model_constructor_registry = {}
 data_preprocessor_registry = {}
 # Registry of functions for altering config values after data outputs.
 config_setter_registry = {}
+# Registry of functions for metric calculations.
+metric_registry = {}
+
 
 def register_model_constructor(name=None):
     """
@@ -21,13 +24,15 @@ def register_model_constructor(name=None):
                               Defaults to the function's __name__.
 
     Returns:
-        function: A decorator that registers the model constructor in 
+        function: A decorator that registers the model constructor in
                   model_constructor_registry.
     """
+
     def decorator(fn):
         model_name = name or fn.__name__
         model_constructor_registry[model_name] = fn
         return fn
+
     return decorator
 
 
@@ -41,7 +46,7 @@ def register_data_preprocessor(name=None):
     Where:
         - data: A NumPy array of shape [num_words, num_electrodes, timesteps]
         - preprocessor_params: User-defined parameters for preprocessing
-        - Returns: A NumPy array whose first dimension is still `num_words`, 
+        - Returns: A NumPy array whose first dimension is still `num_words`,
                    but the remaining shape is arbitrary (e.g., features for model input)
 
     This allows for preprocessing steps like feature extraction, downsampling, or reshaping
@@ -52,19 +57,21 @@ def register_data_preprocessor(name=None):
                               Defaults to the function's __name__.
 
     Returns:
-        function: A decorator that registers the preprocessor in 
+        function: A decorator that registers the preprocessor in
                   data_preprocessor_registry.
     """
+
     def decorator(fn):
         preprocessor_name = name or fn.__name__
         data_preprocessor_registry[preprocessor_name] = fn
         return fn
+
     return decorator
 
 
 def register_config_setter(name=None):
     """
-    Decorator to register a configuration setter function used to modify 
+    Decorator to register a configuration setter function used to modify
     the experiment configuration based on the loaded data.
 
     The decorated function must follow the signature:
@@ -88,11 +95,42 @@ def register_config_setter(name=None):
                               Defaults to the function's __name__.
 
     Returns:
-        function: A decorator that registers the config setter in 
+        function: A decorator that registers the config setter in
                   config_setter_registry.
     """
+
     def decorator(fn):
         config_setter_name = name or fn.__name__
         config_setter_registry[config_setter_name] = fn
         return fn
+
+    return decorator
+
+
+def register_metric(name=None):
+    """
+    Decorator to register a metric function.
+
+    The decorated function must follow the signature:
+        model_constructor(predicted: torch.Tensor, groundtruth: torch.Tensor) -> metric (float)
+
+    Where:
+        - predicted (torch.Tensor): Model outputs
+        - groundtruth (torch.Tensor): Groundtruth outputs
+        - metric: Metric value.
+
+    Args:
+        name (str, optional): Optional name to register the function under.
+                              Defaults to the function's __name__.
+
+    Returns:
+        function: A decorator that registers the metric in
+                  metric_registry.
+    """
+
+    def decorator(fn):
+        model_name = name or fn.__name__
+        metric_registry[model_name] = fn
+        return fn
+
     return decorator

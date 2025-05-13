@@ -1,7 +1,7 @@
 model_constructor_name: foundation_model_finetune_mlp
 config_setter_name: foundation_model_finetune_mlp
 model_params: 
-  mlp_layer_sizes: [64, 50]
+  mlp_layer_sizes: [50]
   foundation_model_config:
     video_mae_task_config:
       vit_config:

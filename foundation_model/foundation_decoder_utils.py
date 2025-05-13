@@ -4,13 +4,13 @@ import torch
 
 from tqdm import tqdm
 
-from foundation_model.model_code.models_mae import MaskedAutoencoderViT
-from foundation_model.model_code.config import (
-    create_video_mae_experiment_config_from_file,
+from ecog_foundation_model.mae_st_util.models_mae import MaskedAutoencoderViT
+from ecog_foundation_model.config import (
+    create_video_mae_experiment_config_from_yaml,
     VideoMAEExperimentConfig,
     ECoGDataConfig,
 )
-from foundation_model.model_code.utils import create_model
+from ecog_foundation_model.ecog_setup import create_model, CheckpointManager
 
 from config import ExperimentConfig, dict_to_config
 import registry
@@ -19,11 +19,8 @@ import registry
 def create_foundation_model(config: VideoMAEExperimentConfig, model_dir=None):
     model = create_model(config)
     if model_dir:
-        checkpoint = torch.load(
-            os.path.join(model_dir, "model.pth"),
-            weights_only=True,
-        )
-        model.load_state_dict(checkpoint)
+        ckpt_manager = CheckpointManager(model)
+        ckpt_manager.load(os.path.join(model_dir, "checkpoint.pth"))
     return model
 
 
@@ -64,19 +61,26 @@ def foundation_model_config_setter(
     preprocessor_params["ch_names"] = ch_names
 
     # Set window width to whatever the sample length of the foundation model is.
-    ecog_config = create_video_mae_experiment_config_from_file(
-        os.path.join(preprocessor_params["model_dir"], "experiment_config.ini")
+    ecog_config = create_video_mae_experiment_config_from_yaml(
+        os.path.join(preprocessor_params["model_dir"], "experiment_config.yml")
     )
     experiment_config.data_params.window_width = (
         ecog_config.ecog_data_config.sample_length
+    )
+    # Set first layer of mlp to the dim of the encoder.
+    experiment_config.model_params["layer_sizes"].insert(
+        0, ecog_config.video_mae_task_config.vit_config.dim
+    )
+    experiment_config.model_params["model_name"] = (
+        ecog_config.video_mae_task_config.model_name
     )
     return experiment_config
 
 
 @registry.register_data_preprocessor()
 def foundation_model_preprocessing_fn(data, preprocessor_params):
-    ecog_config = create_video_mae_experiment_config_from_file(
-        os.path.join(preprocessor_params["model_dir"], "experiment_config.ini")
+    ecog_config = create_video_mae_experiment_config_from_yaml(
+        os.path.join(preprocessor_params["model_dir"], "experiment_config.yml")
     )
     model = create_foundation_model(ecog_config, preprocessor_params["model_dir"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -119,12 +123,15 @@ def foundation_model_mlp_finetune_config_setter(
 
     # Setup foundation model config.
     if experiment_config.model_params.get("model_dir"):
-        ecog_config = create_video_mae_experiment_config_from_file(
+        ecog_config = create_video_mae_experiment_config_from_yaml(
             os.path.join(
-                experiment_config.model_params["model_dir"], "experiment_config.ini"
+                experiment_config.model_params["model_dir"], "experiment_config.yml"
             )
         )
         experiment_config.model_params["foundation_model_config"] = ecog_config
+        experiment_config.model_params["model_name"] = (
+            ecog_config.video_mae_task_config.model_name
+        )
     else:
         ecog_config = dict_to_config(
             experiment_config.model_params["foundation_model_config"],
@@ -135,6 +142,11 @@ def foundation_model_mlp_finetune_config_setter(
     # Set window width to whatever the sample length of the foundation model is.
     experiment_config.data_params.window_width = (
         ecog_config.ecog_data_config.sample_length
+    )
+
+    # Set first layer of mlp to the dim of the encoder.
+    experiment_config.model_params["mlp_layer_sizes"].insert(
+        0, ecog_config.video_mae_task_config.vit_config.dim
     )
 
     experiment_config.data_params.preprocessor_params["ecog_data_config"] = (

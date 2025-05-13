@@ -4,6 +4,7 @@ import yaml
 import os
 from datetime import datetime
 from typing import Any, Union
+from copy import deepcopy
 
 import numpy as np
 
@@ -40,14 +41,67 @@ def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
     return current
 
 
-def main():
+def parse_known_args():
     parser = argparse.ArgumentParser(description="Run decoding model over lag range")
     parser.add_argument(
         "--config", type=str, required=True, help="Path to config YAML file"
     )
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+    overrides = parse_override_args(unknown_args)
+    return args, overrides
 
-    experiment_config = load_config(args.config)
+
+def parse_override_args(unknown_args):
+    """
+    Parse args like --model_params.checkpoint_dir=some_path into a dictionary.
+    """
+    overrides = {}
+    for arg in unknown_args:
+        if arg.startswith("--") and "=" in arg:
+            key, val = arg[2:].split("=", 1)
+            overrides[key] = yaml.safe_load(val)  # preserve types like int, float, bool
+    return overrides
+
+
+def set_nested_attr(obj, key_path, value):
+    keys = key_path.split(".")
+    target = obj
+    for key in keys[:-1]:
+        if is_dataclass(target):
+            target = getattr(target, key)
+        elif isinstance(target, dict):
+            target = target[key]
+        else:
+            raise TypeError(
+                f"Unsupported type {type(target)} for intermediate key: {key}"
+            )
+
+    final_key = keys[-1]
+    if is_dataclass(target):
+        setattr(target, final_key, value)
+    elif isinstance(target, dict):
+        target[final_key] = value
+    else:
+        raise TypeError(f"Unsupported type {type(target)} for final key: {final_key}")
+
+
+def apply_overrides(config, overrides):
+    config = deepcopy(config)  # Avoid mutating original
+    for key_path, value in overrides.items():
+        set_nested_attr(config, key_path, value)
+    return config
+
+
+def load_config_with_overrides(config_path: str, overrides: dict):
+    with open(config_path, "r") as f:
+        raw_cfg = yaml.safe_load(f)
+    base_config = dict_to_config(raw_cfg, ExperimentConfig)
+    return apply_overrides(base_config, overrides)
+
+
+def main():
+    args, overrides = parse_known_args()
+    experiment_config = load_config_with_overrides(args.config, overrides)
 
     # Load all data.
     raws = data_utils.load_raws(experiment_config.data_params)

@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from foundation_model.model_code.config import VideoMAEExperimentConfig
-from foundation_model.model_code.models_mae import MaskedAutoencoderViT
+from ecog_foundation_model.config import VideoMAEExperimentConfig
+from ecog_foundation_model.mae_st_util.models_mae import MaskedAutoencoderViT
 from foundation_model.foundation_decoder_utils import create_foundation_model
 import registry
 
@@ -59,6 +59,7 @@ class MLP(nn.Module):
         activation=F.relu,
         dropout_rate=0.0,
         use_layer_norm=False,
+        norm_embedding=False,
     ):
         """
         Initialize a Multi-Layer Perceptron with configurable architecture and LayerNorm.
@@ -69,6 +70,7 @@ class MLP(nn.Module):
             activation (function): Activation function to use between layers (default: ReLU).
             dropout_rate (float): Dropout probability for regularization (default: 0.).
             use_layer_norm (bool): Whether to use LayerNorm after each hidden layer (default: True).
+            norm_embedding (bool): Whether to normalize the output embedding.
         """
         super(MLP, self).__init__()
 
@@ -80,6 +82,7 @@ class MLP(nn.Module):
         self.activation = activation
         self.dropout = nn.Dropout(dropout_rate)
         self.use_layer_norm = use_layer_norm
+        self.norm_embedding = norm_embedding
 
         # Create linear layers and layer norms based on specified sizes
         for i in range(len(layer_sizes) - 1):
@@ -109,6 +112,8 @@ class MLP(nn.Module):
                 x = self.activation(x)
                 x = self.dropout(x)
 
+        if self.norm_embedding:
+            x = F.normalize(x, dim=1)
         return x
 
 
@@ -126,6 +131,7 @@ class FoundationModelFullAttentionDecoder(nn.Module):
         num_heads=8,
         qkv_bias=False,
         qk_scale=None,
+        norm_embedding=False,
     ):
         super().__init__()
         dim = mlp_layer_sizes[0]
@@ -142,7 +148,13 @@ class FoundationModelFullAttentionDecoder(nn.Module):
         self.v = nn.Linear(dim, dim, bias=qkv_bias)
 
         # MLP expects input of shape [batch, embed_dim]
-        self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
+        self.mlp = MLP(
+            mlp_layer_sizes,
+            mlp_activation,
+            dropout_rate,
+            use_layer_norm,
+            norm_embedding,
+        )
 
     def forward(self, x):
         # x: [B, N, C]
@@ -182,6 +194,7 @@ class FoundationModelMLP(nn.Module):
         foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
         freeze_foundation_model: bool = False,
         num_unfrozen_blocks: int = 0,
+        norm_embedding: bool = False,
     ):
         super(FoundationModelMLP, self).__init__()
         self.finetune = finetune
@@ -193,7 +206,13 @@ class FoundationModelMLP(nn.Module):
                 num_unfrozen_blocks,
             )
 
-        self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
+        self.mlp = MLP(
+            mlp_layer_sizes,
+            mlp_activation,
+            dropout_rate,
+            use_layer_norm,
+            norm_embedding,
+        )
 
     def forward(self, x):
         if self.finetune:
@@ -213,6 +232,7 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
         foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
         freeze_foundation_model: bool = False,
         num_unfrozen_blocks: int = 0,
+        norm_embedding: bool = False,
     ):
         super().__init__()
         self.finetune = finetune
@@ -225,7 +245,13 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
             )
 
         self.query = nn.Parameter(torch.randn(1, mlp_layer_sizes[0]))  # 1 x C
-        self.mlp = MLP(mlp_layer_sizes, mlp_activation, dropout_rate, use_layer_norm)
+        self.mlp = MLP(
+            mlp_layer_sizes,
+            mlp_activation,
+            dropout_rate,
+            use_layer_norm,
+            norm_embedding,
+        )
 
     def forward(self, x, return_weights=False):
         """
@@ -260,7 +286,11 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
 
 @registry.register_model_constructor()
 def foundation_mlp(model_params):
-    return FoundationModelMLP(model_params["layer_sizes"], finetune=False)
+    return FoundationModelMLP(
+        model_params["layer_sizes"],
+        finetune=False,
+        norm_embedding=model_params.get("norm_embedding", False),
+    )
 
 
 @registry.register_model_constructor()
@@ -272,6 +302,7 @@ def foundation_model_finetune_mlp(model_params):
         finetune=True,
         freeze_foundation_model=model_params.get("freeze_foundation_model", False),
         num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
+        norm_embedding=model_params.get("norm_embedding", False),
     )
 
 
@@ -284,19 +315,23 @@ def foundation_model_finetune_attention(model_params):
         finetune=True,
         freeze_foundation_model=model_params.get("freeze_foundation_model", False),
         num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
+        norm_embedding=model_params.get("norm_embedding", False),
     )
 
 
 @registry.register_model_constructor()
 def foundation_model_attention(model_params):
     return FoundationModelAttentionPoolingDecoder(
-        model_params["mlp_layer_sizes"],
+        model_params["layer_sizes"],
         finetune=False,
+        norm_embedding=model_params.get("norm_embedding", False),
     )
 
 
 @registry.register_model_constructor()
 def foundation_model_full_attention(model_params):
     return FoundationModelFullAttentionDecoder(
-        model_params["mlp_layer_sizes"], num_heads=model_params["num_heads"]
+        model_params["layer_sizes"],
+        num_heads=model_params["num_heads"],
+        norm_embedding=model_params.get("norm_embedding", False),
     )

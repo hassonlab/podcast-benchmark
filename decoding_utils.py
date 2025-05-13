@@ -13,313 +13,238 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import mne
-from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import roc_auc_score
 
 from scipy.spatial.distance import cosine
 
 import data_utils
 from config import TrainingParams, DataParams
+from fold_utils import get_sequential_folds, get_zero_shot_folds
+import metrics
+from registry import metric_registry
 
 
 def train_decoding_model(
-    X: np.array,
-    Y: np.array,
+    X: np.ndarray,
+    Y: np.ndarray,
     selected_words: list[str],
     model_constructor_fn,
     lag: int,
     model_params: dict,
     training_params: TrainingParams,
     model_dir: str,
-    plot_results=False,
-    write_to_tensorboard=False,
-    tensorboard_dir="event_logs",
+    plot_results: bool = False,
+    write_to_tensorboard: bool = False,
+    tensorboard_dir: str = "event_logs",
 ):
-    # Set device
+    # 1. Prepare device & output dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    os.makedirs(model_dir, exist_ok=True)
 
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir, exist_ok=True)
-
-    # Convert numpy arrays to torch tensors if needed
+    # 2. Convert to tensors if needed
     if isinstance(X, np.ndarray):
         X = torch.tensor(X, dtype=torch.float32)
     if isinstance(Y, np.ndarray):
         Y = torch.tensor(Y, dtype=torch.float32)
 
-    # Initialize cross-validation results
-    models = []
-    histories = []
-    cv_results = {
-        "train_loss": [],
-        "val_loss": [],
-        "test_loss": [],
-        "train_cosine": [],
-        "val_cosine": [],
-        "test_cosine": [],
-        "train_nll": [],
-        "val_nll": [],
-        "test_nll": [],
-        "num_epochs": [],
-    }
-    roc_results = []
+    # 3. Get fold indices
+    if training_params.fold_type == "sequential_folds":
+        fold_indices = get_sequential_folds(X, num_folds=training_params.n_folds)
+    elif training_params.fold_type == "zero_shot_folds":
+        fold_indices = get_zero_shot_folds(
+            selected_words, num_folds=training_params.n_folds
+        )
+    else:
+        raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
 
-    kf = KFold(n_splits=5, shuffle=False)
-    fold_indices = list(kf.split(range(X.shape[0])))
-    best_epoch = 0
+    # 4. Build a single dict of all metric functions (including loss)
+    metric_names = [training_params.loss_name] + training_params.metrics
+    all_fns = {name: metric_registry[name] for name in metric_names}
 
-    for fold, (train_val_idx, test_idx) in enumerate(fold_indices):
-        model_path = os.path.join(model_dir, f"best_pitom_model_fold{fold+1}.pt")
+    # 5. Initialize CV containers
+    phases = ("train", "val", "test")
+    cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
+    cv_results["num_epochs"] = []
 
-        # TensorBoard writer per fold/lag/run
+    models, histories, roc_results = [], [], []
+
+    def run_epoch(model, loader, optimizer=None):
+        """
+        If optimizer is provided: does a training pass.
+        Otherwise: does an eval pass.
+        Returns a dict { metric_name: average_value }.
+        """
+        is_train = optimizer is not None
+        if is_train:
+            model.train()
+        else:
+            model.eval()
+
+        sums = {name: 0.0 for name in metric_names}
+        total = 0
+
+        grad_steps = training_params.grad_accumulation_steps
+        if is_train:
+            optimizer.zero_grad()
+
+        for i, (Xb, yb) in enumerate(loader):
+            Xb, yb = Xb.to(device), yb.to(device)
+            bsz = Xb.size(0)
+            total += bsz
+
+            if is_train:
+                out = model(Xb)
+                loss = all_fns[training_params.loss_name](out, yb)
+                # Normalize loss to account for gradient accumulation
+                loss = loss / grad_steps
+                loss.backward()
+
+                if (i + 1) % grad_steps == 0 or (i + 1) == len(loader):
+                    optimizer.step()
+                    optimizer.zero_grad()
+            else:
+                with torch.no_grad():
+                    out = model(Xb)
+
+            # accumulate each metric
+            for name, fn in all_fns.items():
+                val = fn(out, yb)
+                # get a scalar float
+                if torch.is_tensor(val):
+                    val = val.detach().mean().item()
+                sums[name] += val * bsz
+
+        return {name: sums[name] / total for name in sums}
+
+    # 6. Cross‐val loop
+    for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
+        model_path = os.path.join(model_dir, f"best_model_fold{fold}.pt")
+
+        # TensorBoard writer
         if write_to_tensorboard:
-            writer = SummaryWriter(
-                log_dir=os.path.join(
-                    tensorboard_dir,
-                    f"lag_{lag}",
-                    f"fold_{fold+1}",
-                )
+            tb_path = os.path.join(tensorboard_dir, f"lag_{lag}", f"fold_{fold}")
+            writer = SummaryWriter(log_dir=tb_path)
+
+        # DataLoaders
+        datasets = {
+            "train": TensorDataset(X[tr_idx], Y[tr_idx]),
+            "val": TensorDataset(X[va_idx], Y[va_idx]),
+            "test": TensorDataset(X[te_idx], Y[te_idx]),
+        }
+        loaders = {
+            phase: DataLoader(
+                ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
             )
+            for phase, ds in datasets.items()
+        }
 
-        train_idx, val_idx = train_test_split(
-            np.array(train_val_idx),
-            test_size=0.25,
-            shuffle=False,
-        )
-
-        X_train, Y_train = X[train_idx], Y[train_idx]
-        X_val, Y_val = X[val_idx], Y[val_idx]
-        X_test, Y_test = X[test_idx], Y[test_idx]
-
-        train_dataset = TensorDataset(X_train, Y_train)
-        val_dataset = TensorDataset(X_val, Y_val)
-        test_dataset = TensorDataset(X_test, Y_test)
-
-        train_loader = DataLoader(
-            train_dataset, batch_size=training_params.batch_size, shuffle=True
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=training_params.batch_size, shuffle=False
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=training_params.batch_size, shuffle=False
-        )
-
+        # Model, optimizer, early‐stop setup
         model = model_constructor_fn(model_params).to(device)
-        criterion = nn.MSELoss()
         optimizer = optim.Adam(
             model.parameters(),
             lr=training_params.learning_rate,
             weight_decay=training_params.weight_decay,
         )
 
-        best_val_cosine = -float("inf")
-        patience_counter = 0
+        best_val = float("inf") if training_params.smaller_is_better else -float("inf")
+        patience = 0
+        best_epoch = 0
 
+        # per‐fold history (only train & val, for plotting)
         history = {
-            "train_loss": [],
-            "val_loss": [],
-            "train_cosine": [],
-            "val_cosine": [],
-            "train_nll": [],
-            "val_nll": [],
-            "num_epochs": np.nan,
+            f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+        history["num_epochs"] = None
 
-        progress_bar = tqdm(
-            range(training_params.epochs), desc=f"Lag {lag}, Fold {fold + 1}"
-        )
-        for epoch in progress_bar:
-            model.train()
-            train_loss = 0.0
-            train_cosine = 0.0
-            train_nll = 0.0
+        loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
+        for epoch in loop:
+            train_mets = run_epoch(model, loaders["train"], optimizer)
+            val_mets = run_epoch(model, loaders["val"])
 
-            for inputs, targets in train_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
+            # record + TensorBoard
+            for name, val in train_mets.items():
+                history[f"train_{name}"].append(val)
+                if write_to_tensorboard:
+                    writer.add_scalar(f"{name}/train", val, epoch)
+            for name, val in val_mets.items():
+                history[f"val_{name}"].append(val)
+                if write_to_tensorboard:
+                    writer.add_scalar(f"{name}/val", val, epoch)
 
-                train_loss += loss.item() * inputs.size(0)
-                batch_cosines = calculate_cosine_similarity(
-                    outputs.detach(), targets.detach()
-                )
-                train_cosine += batch_cosines.sum().item()
-                nll = compute_nll_contextual(outputs.detach(), targets.detach())
-                train_nll += nll.sum().item()
-
-            train_loss = train_loss / len(train_loader.dataset)
-            train_cosine = train_cosine / len(train_loader.dataset)
-            train_nll = train_nll / len(train_loader.dataset)
-
-            model.eval()
-            val_loss = 0.0
-            val_cosine = 0.0
-            val_nll = 0.0
-
-            with torch.no_grad():
-                for inputs, targets in val_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    val_loss += loss.item() * inputs.size(0)
-                    batch_cosines = calculate_cosine_similarity(
-                        outputs.detach(), targets.detach()
-                    )
-                    val_cosine += batch_cosines.sum().item()
-                    nll = compute_nll_contextual(outputs.detach(), targets.detach())
-                    val_nll += nll.sum().item()
-
-            val_loss = val_loss / len(val_loader.dataset)
-            val_cosine = val_cosine / len(val_loader.dataset)
-            val_nll = val_nll / len(val_loader.dataset)
-
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
-            history["train_cosine"].append(train_cosine)
-            history["val_cosine"].append(val_cosine)
-            history["train_nll"].append(train_nll)
-            history["val_nll"].append(val_nll)
-
-            if write_to_tensorboard:
-                writer.add_scalar("Loss/Train", train_loss, epoch)
-                writer.add_scalar("Loss/Validation", val_loss, epoch)
-                writer.add_scalar("Cosine/Train", train_cosine, epoch)
-                writer.add_scalar("Cosine/Validation", val_cosine, epoch)
-                writer.add_scalar("NLL/Train", train_nll, epoch)
-                writer.add_scalar("NLL/Validation", val_cosine, epoch)
-
-            if val_cosine > best_val_cosine:
-                best_val_cosine = val_cosine
-                patience_counter = 0
+            # early stopping on requested metric
+            cur = val_mets[training_params.early_stopping_metric]
+            if training_params.smaller_is_better and cur < best_val:
+                best_val = cur
                 best_epoch = epoch
                 torch.save(model.state_dict(), model_path)
+                patience = 0
+            elif not training_params.smaller_is_better and cur > best_val:
+                best_val = cur
+                best_epoch = epoch
+                torch.save(model.state_dict(), model_path)
+                patience = 0
             else:
-                patience_counter += 1
-                if patience_counter >= training_params.early_stopping_patience:
-                    history["num_epochs"] = best_epoch + 1
+                patience += 1
+                if patience >= training_params.early_stopping_patience:
                     break
 
-            progress_bar.set_postfix(
+            loop.set_postfix(
                 {
-                    "train_loss": train_loss,
-                    "train_cosine": train_cosine,
-                    "val_loss": val_loss,
-                    "val_cosine": val_cosine,
-                    "best_epoch": best_epoch + 1,
-                    "epoch": epoch,
+                    training_params.early_stopping_metric: f"{best_val:.4f}",
+                    **{f"train_{name}": val for name, val in train_mets.items()},
+                    **{f"val_{name}": val for name, val in val_mets.items()},
                 }
             )
 
-        if np.isnan(history["num_epochs"]):
-            history["num_epochs"] = training_params.epochs
+        history["num_epochs"] = best_epoch + 1
 
+        # load best and eval on test set
         model.load_state_dict(torch.load(model_path))
-        model.eval()
-        test_loss = 0.0
-        test_cosine = 0.0
-        test_nll = 0.0
+        test_mets = run_epoch(model, loaders["test"])
 
-        with torch.no_grad():
-            for inputs, targets in test_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                test_loss += loss.item() * inputs.size(0)
-                batch_cosines = calculate_cosine_similarity(
-                    outputs.detach(), targets.detach()
-                )
-                test_cosine += batch_cosines.sum().item()
-                nll = compute_nll_contextual(outputs.detach(), targets.detach())
-                test_nll += nll.sum().item()
-
-        roc_result = calculate_word_embeddings_roc_auc_logits(
-            model, X_test, Y_test, selected_words[test_idx], device
-        )
-        roc_results.append(roc_result)
-
-        test_loss = test_loss / len(test_loader.dataset)
-        test_cosine = test_cosine / len(test_loader.dataset)
-        test_nll = test_nll / len(test_loader.dataset)
+        # record into cv_results
+        for name in metric_names:
+            cv_results[f"train_{name}"].append(history[f"train_{name}"][-1])
+            cv_results[f"val_{name}"].append(max(history[f"val_{name}"]))
+            cv_results[f"test_{name}"].append(test_mets[name])
+        cv_results["num_epochs"].append(history["num_epochs"])
 
         if write_to_tensorboard:
-            writer.add_scalar("Loss/Test", test_loss, fold)
-            writer.add_scalar("Cosine/Test", test_cosine, fold)
-            writer.add_scalar("NLL/Test", test_nll, fold)
+            for name, val in test_mets.items():
+                writer.add_scalar(f"{name}/test", val, fold)
             writer.close()
 
-        print(
-            f"\nFold {fold+1} Test Results: Loss = {test_loss:.4f}, Cosine Similarity = {test_cosine:.4f}"
+        # word‐level ROC
+        roc = calculate_word_embeddings_roc_auc_logits(
+            model, X[te_idx], Y[te_idx], selected_words[te_idx], device
         )
-
-        cv_results["train_loss"].append(history["train_loss"][-1])
-        cv_results["val_loss"].append(
-            history["val_loss"][history["val_cosine"].index(max(history["val_cosine"]))]
-        )
-        cv_results["test_loss"].append(test_loss)
-        cv_results["train_cosine"].append(history["train_cosine"][-1])
-        cv_results["val_cosine"].append(best_val_cosine)
-        cv_results["test_cosine"].append(test_cosine)
-        cv_results["train_nll"].append(history["train_nll"][-1])
-        cv_results["val_nll"].append(
-            history["val_nll"][history["val_cosine"].index(max(history["val_cosine"]))]
-        )
-        cv_results["test_nll"].append(test_nll)
-        cv_results["num_epochs"].append(history["num_epochs"])
+        roc_results.append(roc)
 
         models.append(model)
         histories.append(history)
 
         if plot_results:
-            plot_training_history(history, fold=fold + 1)
+            plot_training_history(history, fold=fold)
 
+    # 7. Print CV summary
     print("\n" + "=" * 60)
     print("CROSS-VALIDATION RESULTS")
     print("=" * 60)
-    print(
-        f"Mean Train Loss: {np.mean(cv_results['train_loss']):.4f} ± {np.std(cv_results['train_loss']):.4f}"
-    )
-    print(
-        f"Mean Val Loss: {np.mean(cv_results['val_loss']):.4f} ± {np.std(cv_results['val_loss']):.4f}"
-    )
-    print(
-        f"Mean Test Loss: {np.mean(cv_results['test_loss']):.4f} ± {np.std(cv_results['test_loss']):.4f}"
-    )
-    print(
-        f"Mean Train Cosine: {np.mean(cv_results['train_cosine']):.4f} ± {np.std(cv_results['train_cosine']):.4f}"
-    )
-    print(
-        f"Mean Val Cosine: {np.mean(cv_results['val_cosine']):.4f} ± {np.std(cv_results['val_cosine']):.4f}"
-    )
-    print(
-        f"Mean Test Cosine: {np.mean(cv_results['test_cosine']):.4f} ± {np.std(cv_results['test_cosine']):.4f}"
-    )
-    print(
-        f"Mean Train Negative Log-Likelihood: {np.mean(cv_results['train_nll']):.4f} ± {np.std(cv_results['train_nll']):.4f}"
-    )
-    print(
-        f"Mean Val Negative Log-Likelihood: {np.mean(cv_results['val_nll']):.4f} ± {np.std(cv_results['val_nll']):.4f}"
-    )
-    print(
-        f"Mean Test Negative Log-Likelihood: {np.mean(cv_results['test_nll']):.4f} ± {np.std(cv_results['test_nll']):.4f}"
-    )
-    print(
-        f"Mean Num Epochs: {np.mean(cv_results['num_epochs']):.4f} ± {np.std(cv_results['num_epochs']):.4f}"
-    )
+    for phase in phases:
+        for name in metric_names:
+            vals = cv_results[f"{phase}_{name}"]
+            print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
     if plot_results:
         plot_cv_results(cv_results)
 
+    # 8. Aggregate final word‐AUC
     final_word_auc = {}
-    for roc_result in roc_results:
-        final_word_auc.update(roc_result["word_aucs"])
-    weighted_roc_mean = summarize_roc_results(final_word_auc, selected_words)
+    for r in roc_results:
+        final_word_auc.update(r["word_aucs"])
+    weighted_roc = summarize_roc_results(final_word_auc, selected_words)
 
-    return models, histories, cv_results, roc_results, weighted_roc_mean
+    return models, histories, cv_results, roc_results, weighted_roc
 
 
 def calculate_cosine_similarity(
@@ -425,26 +350,6 @@ def plot_cv_results(cv_results):
 
     plt.tight_layout()
     plt.show()
-
-
-def compute_nll_contextual(predicted_embeddings, actual_embeddings):
-    """
-    Computes a contrastive NLL where each predicted embedding is scored against all actual embeddings.
-    """
-    # Normalize embeddings
-    pred_norm = F.normalize(predicted_embeddings, dim=1)
-    actual_norm = F.normalize(actual_embeddings, dim=1)
-
-    # Similarity matrix: [n_samples, n_samples]
-    logits = torch.matmul(pred_norm, actual_norm.T)
-
-    # Labels: diagonal = correct match
-    targets = torch.arange(
-        len(predicted_embeddings), device=predicted_embeddings.device
-    )
-
-    # Cross-entropy over rows
-    return F.cross_entropy(logits, targets)
 
 
 def calculate_word_embeddings_roc_auc_logits(

@@ -47,6 +47,19 @@ class TrainingParams:
     min_lag: int = -10_000
     max_lag: int = 10_000
     lag_step_size: int = 1000
+    # Type of fold generation to use. One of "sequential_folds" or "zero_shot_folds"
+    fold_type: str = "sequential_folds"
+    # Loss to use, by default use mse. Should be decorated with @register_metric.
+    loss_name: str = "mse"
+    # Metrics to track during training. Should be decorated with @register_metric.
+    metrics: list[str] = field(default_factory=lambda: ["nll_embedding", "cosine_sim"])
+    # Metric to use for early stopping over validation set. Must be either the loss or in metrics.
+    early_stopping_metric: str = "cosine_sim"
+    # Whether or not a smaller value is better for early_stopping_metric. Should be False for metrics you
+    # want to increase (i.e. cosine similarity) but True for ones you want to decrease (i.e. MSE).
+    smaller_is_better: bool = False
+    # Number of gradient accumulation steps.
+    grad_accumulation_steps: int = 1
 
 
 @dataclass
