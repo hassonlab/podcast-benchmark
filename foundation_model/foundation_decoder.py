@@ -5,13 +5,14 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from ecog_foundation_model.config import VideoMAEExperimentConfig
-from ecog_foundation_model.mae_st_util.models_mae import MaskedAutoencoderViT
+# Lazy imports for ecog_foundation_model - only imported when needed
+# from ecog_foundation_model.config import VideoMAEExperimentConfig
+# from ecog_foundation_model.mae_st_util.models_mae import MaskedAutoencoderViT
 from foundation_model.foundation_decoder_utils import create_foundation_model
 import registry
 
 
-def freeze_encoder_blocks(model: MaskedAutoencoderViT, num_unfrozen_blocks: int = 1):
+def freeze_encoder_blocks(model, num_unfrozen_blocks: int = 1):
     """
     Freeze all encoder blocks except the last `num_unfrozen_blocks`.
 
@@ -19,6 +20,10 @@ def freeze_encoder_blocks(model: MaskedAutoencoderViT, num_unfrozen_blocks: int 
         model: MaskedAutoencoderViT instance
         num_unfrozen_blocks: Number of final encoder blocks to keep trainable
     """
+    # Lazy import to avoid dependency issues
+    from ecog_foundation_model.mae_st_util.models_mae import MaskedAutoencoderViT
+    if not isinstance(model, MaskedAutoencoderViT):
+        raise TypeError(f"Expected MaskedAutoencoderViT, got {type(model)}")
     num_blocks = len(model.blocks)
     assert (
         0 <= num_unfrozen_blocks <= num_blocks
@@ -46,10 +51,16 @@ def freeze_encoder_blocks(model: MaskedAutoencoderViT, num_unfrozen_blocks: int 
 def create_and_freeze_foundation_model(
     foundation_model_config, model_dir, freeze_foundation_model, num_unfrozen_blocks
 ):
+    # Lazy import to avoid dependency issues
+    try:
     foundation_model = create_foundation_model(foundation_model_config, model_dir)
     if freeze_foundation_model:
         freeze_encoder_blocks(foundation_model, num_unfrozen_blocks)
     return foundation_model
+    except ImportError as e:
+        if "ecog_foundation_model" in str(e):
+            raise ImportError("ecog_foundation_model is required for foundation model finetuning. Please install it or use a non-finetuning model.") from e
+        raise
 
 
 class MLP(nn.Module):
@@ -191,7 +202,7 @@ class FoundationModelMLP(nn.Module):
         dropout_rate=0.0,
         use_layer_norm=True,
         finetune=False,
-        foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
+        foundation_model_config=None,  # Optional[VideoMAEExperimentConfig] = None,
         freeze_foundation_model: bool = False,
         num_unfrozen_blocks: int = 0,
         norm_embedding: bool = False,
@@ -229,7 +240,7 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
         dropout_rate=0.0,
         use_layer_norm=True,
         finetune=False,
-        foundation_model_config: Optional[VideoMAEExperimentConfig] = None,
+        foundation_model_config=None,  # Optional[VideoMAEExperimentConfig] = None,
         freeze_foundation_model: bool = False,
         num_unfrozen_blocks: int = 0,
         norm_embedding: bool = False,

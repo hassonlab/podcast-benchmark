@@ -1,0 +1,52 @@
+model_constructor_name: population_transformer_mlp
+config_setter_name: population_transformer
+model_params:
+  # These will be set by the config setter at runtime
+  input_dim: 512  # PopulationTransformer embedding dimension
+  output_dim: 50  # Word embedding dimension
+  hidden_dims: [128, 64]  # Smaller hidden layers for CPU
+training_params:
+  batch_size: 8   # Smaller batch size for CPU
+  epochs: 50      # Fewer epochs for faster testing
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 3      # Fewer folds for faster testing
+  min_lag: -1000  # Smaller lag range for faster testing
+  max_lag: 1000
+  lag_step_size: 200
+  fold_type: sequential_folds
+  loss_name: cosine_sim
+  metrics: [cosine_sim]
+data_params:
+  # Cross model data_params
+  data_root: data
+  embedding_type: gpt-2xl
+  embedding_layer: 24
+  embedding_pca_dim: 50
+  window_width: 0.625
+  preprocessing_fn_name: population_transformer_preprocessing_fn
+  subject_ids: [1]
+  # channel_reg_ex: LG[AB]*
+  # PopulationTransformer CPU-optimized config
+  preprocessor_params:
+    model_path: population_transformer/pretrained_weights/popt_brainbert_stft/pretrained_popt_brainbert_stft.pth
+    batch_size: 4   # Very small batch size for CPU
+    device: cpu     # Force CPU usage
+    use_cls_token: true
+    pt_embedding_dim: 512
+    resample_factor: 32
+    window_width: 0.625
+    frozen_weights: true  # Freeze weights for faster CPU inference
+    # Model configuration for PopulationTransformer
+    model_config:
+      name: pt_model_custom
+      position_encoding: multi_subj_position_encoding
+      n_head: 8
+      n_layers: 6
+      hidden_dim: 512
+      input_dim: 768
+      layer_activation: gelu
+      attention_weights: false
+      use_token_cls_head: true
+trial_name: population_transformer_cpu 

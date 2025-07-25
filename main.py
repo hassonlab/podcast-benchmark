@@ -16,7 +16,8 @@ import registry
 
 # Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package("neural_conv_decoder")
-import_all_from_package("foundation_model")
+# import_all_from_package("foundation_model")  # Not needed for PopulationTransformer
+import_all_from_package("population_transformer_module")
 # Add your model import here!
 
 
@@ -100,31 +101,46 @@ def load_config_with_overrides(config_path: str, overrides: dict):
 
 
 def main():
+    print("🚀 Starting PopulationTransformer experiment...")
+    print("=" * 60)
+    
     args, overrides = parse_known_args()
     experiment_config = load_config_with_overrides(args.config, overrides)
+    print(f"📋 Loaded config: {experiment_config.trial_name}")
 
     # Load all data.
+    print("📊 Loading neural data...")
     raws = data_utils.load_raws(experiment_config.data_params)
+    print(f"   ✅ Loaded {len(raws)} raw data files")
+    
+    print("📝 Loading word data...")
     df_word = data_utils.load_word_data(experiment_config.data_params)
+    print(f"   ✅ Loaded {len(df_word)} word entries")
 
     # Allow user defined function to alter config if necessary for their model.
     if experiment_config.config_setter_name:
+        print(f"⚙️  Running config setter: {experiment_config.config_setter_name}")
         config_setter_fn = registry.config_setter_registry[
             experiment_config.config_setter_name
         ]
         experiment_config = config_setter_fn(experiment_config, raws, df_word)
+        print("   ✅ Config setter completed")
 
     # User defined preprocessing function.
     preprocessing_fn = None
     if experiment_config.data_params.preprocessing_fn_name:
+        print(f"🔧 Loading preprocessing function: {experiment_config.data_params.preprocessing_fn_name}")
         preprocessing_fn = registry.data_preprocessor_registry[
             experiment_config.data_params.preprocessing_fn_name
         ]
+        print("   ✅ Preprocessing function loaded")
 
     # User defined model constructor function.
+    print(f"🏗️  Loading model constructor: {experiment_config.model_constructor_name}")
     model_constructor_fn = registry.model_constructor_registry[
         experiment_config.model_constructor_name
     ]
+    print("   ✅ Model constructor loaded")
 
     # Generate trial name if user specified format string.
     trial_name = experiment_config.trial_name
@@ -137,26 +153,36 @@ def main():
     # Append timestamp to prevent accidental overwriting.
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     trial_name = f"{trial_name}_{timestamp}"
+    print(f"📁 Creating output directories for trial: {trial_name}")
+    
     output_dir = os.path.join(experiment_config.output_dir, trial_name)
     os.makedirs(output_dir, exist_ok=True)
+    print(f"   📂 Output dir: {output_dir}")
 
     model_dir = os.path.join(os.path.join(experiment_config.model_dir, trial_name))
     os.makedirs(model_dir, exist_ok=True)
+    print(f"   📂 Model dir: {model_dir}")
 
     tensorboard_dir = os.path.join(
         os.path.join(experiment_config.tensorboard_dir, trial_name)
     )
     os.makedirs(tensorboard_dir, exist_ok=True)
+    print(f"   📂 Tensorboard dir: {tensorboard_dir}")
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
+    print("💾 Saving configuration...")
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
         yaml.dump(experiment_config, fp, default_flow_style=False)
+    print("   ✅ Configuration saved")
 
     lags = np.arange(
         experiment_config.training_params.min_lag,
         experiment_config.training_params.max_lag,
         experiment_config.training_params.lag_step_size,
     )
+    print(f"🔄 Starting training over {len(lags)} lags: {lags[0]} to {lags[-1]} ms")
+    print("=" * 60)
+    
     weighted_roc_means = decoding_utils.run_training_over_lags(
         lags,
         raws,
@@ -171,6 +197,10 @@ def main():
         tensorboard_dir=tensorboard_dir,
         write_to_tensorboard=True,
     )
+    
+    print("=" * 60)
+    print("🎉 Experiment completed successfully!")
+    print(f"📊 Results saved in: {output_dir}")
 
 
 if __name__ == "__main__":

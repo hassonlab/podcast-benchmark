@@ -65,6 +65,22 @@ foundation-model:
 	$(CMD) main.py \
 		--config "configs/foundation_model/foundation_model$(CONFIG_SUFFIX).yml"
 
+population-transformer:
+	mkdir -p logs
+	$(CMD) main.py \
+		--config "configs/population_transformer/population_transformer$(CONFIG_SUFFIX).yml"
+
+population-transformer-frozen:
+	$(MAKE) population-transformer CONFIG_SUFFIX=_frozen
+
+population-transformer-finetune:
+	$(MAKE) population-transformer CONFIG_SUFFIX=_finetune
+
+population-transformer-base:
+	$(MAKE) population-transformer CONFIG_SUFFIX=_base
+
+population-transformer-cpu:
+	$(MAKE) population-transformer CONFIG_SUFFIX=_cpu
 
 transform-checkpoints:
 	@for model in $(MODEL_CHECKPOINT_NAMES); do \
