@@ -180,12 +180,6 @@ python test_population_transformer_imports.py
 python -c "import yaml; yaml.safe_load(open('configs/population_transformer/population_transformer_cpu.yml'))"
 ```
 
-## 📚 References
-
-- **PopulationTransformer Paper:** [PopulationTransformer: Learning Population-level Representations of Neural Activity](https://github.com/czlwang/PopulationTransformer)
-- **podcast-benchmark:** [Brain-to-word decoding benchmark](https://github.com/your-repo/podcast-benchmark)
-- **Original Paper:** [Neural speech recognition of continuous speech](https://www.nature.com/articles/s41593-022-01026-4)
-
 ## 🤝 Contributing
 
 This integration follows the podcast-benchmark modular design:
@@ -194,11 +188,3 @@ This integration follows the podcast-benchmark modular design:
 3. **Config Setter:** `@registry.register_config_setter()`
 4. **Configuration:** YAML config files
 5. **Makefile:** Easy-to-use targets
-
-## 📄 License
-
-This integration maintains the same license as the original podcast-benchmark repository.
-
----
-
-**Status:** ✅ **Fully Functional** - PopulationTransformer integration is working and ready for brain-to-word decoding experiments! 
