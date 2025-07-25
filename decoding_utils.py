@@ -58,7 +58,7 @@ def train_decoding_model(
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
 
     # 4. Build a single dict of all metric functions (including loss)
-    metric_names = [training_params.loss_name] + training_params.metrics
+    metric_names = training_params.losses + training_params.metrics
     all_fns = {name: metric_registry[name] for name in metric_names}
 
     # 5. Initialize CV containers
@@ -81,7 +81,14 @@ def train_decoding_model(
             model.eval()
 
         sums = {name: 0.0 for name in metric_names}
+        sums["loss"] = 0.0
         total = 0
+
+        def _compute_loss(out):
+            loss = 0.0
+            for i, loss_name in enumerate(training_params.losses):
+                loss += training_params.loss_weights[i] * all_fns[loss_name](out, yb)
+            return loss
 
         grad_steps = training_params.grad_accumulation_steps
         if is_train:
@@ -94,7 +101,7 @@ def train_decoding_model(
 
             if is_train:
                 out = model(Xb)
-                loss = all_fns[training_params.loss_name](out, yb)
+                loss = _compute_loss(out)
                 # Normalize loss to account for gradient accumulation
                 loss = loss / grad_steps
                 loss.backward()
@@ -105,6 +112,7 @@ def train_decoding_model(
             else:
                 with torch.no_grad():
                     out = model(Xb)
+                    loss = _compute_loss(out)
 
             # accumulate each metric
             for name, fn in all_fns.items():
@@ -114,6 +122,10 @@ def train_decoding_model(
                     val = val.detach().mean().item()
                 sums[name] += val * bsz
 
+            # add loss to sums
+            if torch.is_tensor(loss):
+                loss = loss.detach().mean().item()
+            sums["loss"] += loss
         return {name: sums[name] / total for name in sums}
 
     # 6. Cross‐val loop
@@ -154,6 +166,8 @@ def train_decoding_model(
         history = {
             f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+        history["train_loss"] = []
+        history["val_loss"] = []
         history["num_epochs"] = None
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")

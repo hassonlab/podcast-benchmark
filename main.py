@@ -1,5 +1,5 @@
 import argparse
-from dataclasses import is_dataclass
+from dataclasses import is_dataclass, asdict
 import yaml
 import os
 from datetime import datetime
@@ -150,7 +150,7 @@ def main():
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
-        yaml.dump(experiment_config, fp, default_flow_style=False)
+        yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
     lags = np.arange(
         experiment_config.training_params.min_lag,

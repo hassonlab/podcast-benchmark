@@ -6,7 +6,7 @@ model_params:
   num_unfrozen_blocks: 1
   model_dir: /scratch/gpfs/zparis/ECoG-foundation-model/checkpoints/grad_accum=2-encoder_mask_ratio=0.5-weight_decay=0.01-proj_drop=0.1-drop_path=0.05-lr=5e-05-precision=no-frame_patch_size=16_29112516/best_checkpoint
 training_params:
-  batch_size: 32
+  batch_size: 128
   epochs: 100
   learning_rate: 0.001
   weight_decay: 0.0001
