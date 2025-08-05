@@ -75,13 +75,70 @@ else
 fi
 
 # Step 4: Setup a new virtual environment and install all the necessary packages
+# Parse command line arguments
+INSTALL_GPU=false
+INSTALL_DEV=false
+ENV_NAME="decoding_env"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --gpu)
+            INSTALL_GPU=true
+            shift
+            ;;
+        --dev)
+            INSTALL_DEV=true
+            shift
+            ;;
+        --env-name)
+            ENV_NAME="$2"
+            shift 2
+            ;;
+        --help)
+            echo "Usage: $0 [--gpu] [--dev] [--env-name NAME]"
+            echo "  --gpu       Install GPU dependencies (CUDA packages)"
+            echo "  --dev       Install development dependencies (testing)"
+            echo "  --env-name  Specify virtual environment name (default: decoding_env)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 module load anaconda3/2024.6
 pip install --user virtualenv
 
-mkdir decoding_env
-virtualenv decoding_env
-source decoding_env/bin/activate
+# Create virtual environment if it doesn't exist
+if [ ! -d "$ENV_NAME" ]; then
+    echo "Creating virtual environment: $ENV_NAME"
+    virtualenv "$ENV_NAME"
+else
+    echo "Virtual environment $ENV_NAME already exists, using existing one."
+fi
 
-pip install -r requirements.txt
+source "$ENV_NAME/bin/activate"
+
+# Build dependency installation string
+DEPS=""
+if [ "$INSTALL_GPU" = true ] && [ "$INSTALL_DEV" = true ]; then
+    DEPS="[all]"
+    echo "Installing with GPU and development dependencies..."
+elif [ "$INSTALL_GPU" = true ]; then
+    DEPS="[gpu]"
+    echo "Installing with GPU dependencies..."
+elif [ "$INSTALL_DEV" = true ]; then
+    DEPS="[dev]"
+    echo "Installing with development dependencies..."
+else
+    echo "Installing base dependencies only..."
+fi
+
+# Install the package in editable mode
+pip install -e ".$DEPS"
 
 echo "Setup complete."
+echo "To activate the environment later, run: source $ENV_NAME/bin/activate"
