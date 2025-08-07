@@ -88,7 +88,25 @@ test-env:
 	./setup.sh --dev --env-name test_env
 
 test:
-	@if [ -d "test_env" ]; then \
+	@if [ -f ~/miniconda3/etc/profile.d/conda.sh ] || [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then \
+		if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then \
+			source ~/miniconda3/etc/profile.d/conda.sh; \
+		elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then \
+			source ~/anaconda3/etc/profile.d/conda.sh; \
+		fi; \
+		if conda env list | grep -q "^test_env "; then \
+			conda activate test_env && python -m pytest tests/ -v; \
+		elif conda env list | grep -q "^decoding_env "; then \
+			conda activate decoding_env && python -m pytest tests/ -v; \
+		elif [ -d "test_env" ]; then \
+			source test_env/bin/activate && python -m pytest tests/ -v; \
+		elif [ -d "decoding_env" ]; then \
+			source decoding_env/bin/activate && python -m pytest tests/ -v; \
+		else \
+			echo "No virtual environment found. Run 'make test-env' or 'make setup-dev' first."; \
+			exit 1; \
+		fi; \
+	elif [ -d "test_env" ]; then \
 		source test_env/bin/activate && python -m pytest tests/ -v; \
 	elif [ -d "decoding_env" ]; then \
 		source decoding_env/bin/activate && python -m pytest tests/ -v; \

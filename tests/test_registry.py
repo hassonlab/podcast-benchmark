@@ -11,6 +11,17 @@ import numpy as np
 import registry
 
 
+@pytest.fixture(autouse=True)
+def reset_registries():
+    """Reset all registries after each test to prevent state pollution."""
+    yield  # Run the test
+    # Clean up after the test
+    registry.model_constructor_registry.clear()
+    registry.data_preprocessor_registry.clear()
+    registry.config_setter_registry.clear()
+    registry.metric_registry.clear()
+
+
 @pytest.fixture
 def mock_model_constructor():
     """Mock model constructor function for testing registry."""
