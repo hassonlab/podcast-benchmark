@@ -24,6 +24,101 @@ import metrics
 from registry import metric_registry
 
 
+def setup_metrics_and_loss(training_params: TrainingParams):
+    """
+    Set up metrics and loss functions from training parameters.
+
+    Returns:
+        dict: Dictionary mapping metric names to callable functions
+    """
+    # Combine loss and metrics into single list
+    metric_names = [training_params.loss_name] + training_params.metrics
+
+    # Resolve all functions from registry
+    all_fns = {name: metric_registry[name] for name in metric_names}
+
+    return all_fns
+
+
+def validate_early_stopping_config(training_params: TrainingParams):
+    """
+    Validate that early stopping configuration is valid.
+
+    Raises:
+        ValueError: If early stopping metric is not in available metrics
+    """
+    available_metrics = [training_params.loss_name] + training_params.metrics
+
+    if training_params.early_stopping_metric not in available_metrics:
+        raise ValueError(
+            f"Early stopping metric '{training_params.early_stopping_metric}' "
+            f"must be either the loss function or in the metrics list. "
+            f"Available: {available_metrics}"
+        )
+
+
+def get_fold_function_name(training_params: TrainingParams):
+    """
+    Get the name of the fold function to use based on training parameters.
+
+    Returns:
+        str: Name of the fold function
+
+    Raises:
+        ValueError: If fold_type is not recognized
+    """
+    if training_params.fold_type == "sequential_folds":
+        return "get_sequential_folds"
+    elif training_params.fold_type == "zero_shot_folds":
+        return "get_zero_shot_folds"
+    else:
+        raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
+
+
+def setup_early_stopping_state(training_params: TrainingParams):
+    """
+    Set up initial state for early stopping.
+
+    Returns:
+        tuple: (best_val, patience) initial values
+    """
+    if training_params.smaller_is_better:
+        best_val = float("inf")
+    else:
+        best_val = -float("inf")
+
+    patience = 0
+
+    return best_val, patience
+
+
+def should_update_best(current_val, best_val, smaller_is_better):
+    """
+    Determine if current validation value is better than best.
+
+    Returns:
+        bool: True if current value is better
+    """
+    if smaller_is_better:
+        return current_val < best_val
+    else:
+        return current_val > best_val
+
+
+def should_update_gradient_accumulation(
+    batch_idx, total_batches, grad_accumulation_steps
+):
+    """
+    Determine if optimizer should step based on gradient accumulation.
+
+    Returns:
+        bool: True if optimizer should step
+    """
+    return (batch_idx + 1) % grad_accumulation_steps == 0 or (
+        batch_idx + 1
+    ) == total_batches
+
+
 def train_decoding_model(
     X: np.ndarray,
     Y: np.ndarray,
@@ -58,8 +153,8 @@ def train_decoding_model(
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
 
     # 4. Build a single dict of all metric functions (including loss)
-    metric_names = training_params.losses + training_params.metrics
-    all_fns = {name: metric_registry[name] for name in metric_names}
+    all_fns = setup_metrics_and_loss(training_params)
+    metric_names = all_fns.keys()
 
     # 5. Initialize CV containers
     phases = ("train", "val", "test")
@@ -97,7 +192,6 @@ def train_decoding_model(
         for i, (Xb, yb) in enumerate(loader):
             Xb, yb = Xb.to(device), yb.to(device)
             bsz = Xb.size(0)
-            total += bsz
 
             if is_train:
                 out = model(Xb)
@@ -106,7 +200,7 @@ def train_decoding_model(
                 loss = loss / grad_steps
                 loss.backward()
 
-                if (i + 1) % grad_steps == 0 or (i + 1) == len(loader):
+                if should_update_gradient_accumulation(i, len(loader), grad_steps):
                     optimizer.step()
                     optimizer.zero_grad()
             else:
@@ -120,13 +214,13 @@ def train_decoding_model(
                 # get a scalar float
                 if torch.is_tensor(val):
                     val = val.detach().mean().item()
-                sums[name] += val * bsz
+                sums[name] += val
 
             # add loss to sums
             if torch.is_tensor(loss):
                 loss = loss.detach().mean().item()
             sums["loss"] += loss
-        return {name: sums[name] / total for name in sums}
+        return {name: sums[name] / len(loader) for name in sums}
 
     # 6. Cross‐val loop
     for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
@@ -158,8 +252,7 @@ def train_decoding_model(
             weight_decay=training_params.weight_decay,
         )
 
-        best_val = float("inf") if training_params.smaller_is_better else -float("inf")
-        patience = 0
+        best_val, patience = setup_early_stopping_state(training_params)
         best_epoch = 0
 
         # per‐fold history (only train & val, for plotting)
@@ -187,12 +280,7 @@ def train_decoding_model(
 
             # early stopping on requested metric
             cur = val_mets[training_params.early_stopping_metric]
-            if training_params.smaller_is_better and cur < best_val:
-                best_val = cur
-                best_epoch = epoch
-                torch.save(model.state_dict(), model_path)
-                patience = 0
-            elif not training_params.smaller_is_better and cur > best_val:
+            if should_update_best(cur, best_val, training_params.smaller_is_better):
                 best_val = cur
                 best_epoch = epoch
                 torch.save(model.state_dict(), model_path)
