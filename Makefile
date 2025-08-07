@@ -70,3 +70,52 @@ transform-checkpoints:
 	@for model in $(MODEL_CHECKPOINT_NAMES); do \
 		python temp_checkpoint_override.py --input=$(MODEL_DIR_PATH)$$model/best_checkpoint --output=$(MODEL_DIR_PATH)$$model/best_checkpoint/checkpoint.pth; \
 	done
+
+# Development and testing targets
+setup:
+	./setup.sh
+
+setup-gpu:
+	./setup.sh --gpu
+
+setup-dev:
+	./setup.sh --dev
+
+setup-all:
+	./setup.sh --gpu --dev
+
+test-env:
+	./setup.sh --dev --env-name test_env
+
+test:
+	@if [ -f ~/miniconda3/etc/profile.d/conda.sh ] || [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then \
+		if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then \
+			source ~/miniconda3/etc/profile.d/conda.sh; \
+		elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then \
+			source ~/anaconda3/etc/profile.d/conda.sh; \
+		fi; \
+		if conda env list | grep -q "^test_env "; then \
+			conda activate test_env && python -m pytest tests/ -v; \
+		elif conda env list | grep -q "^decoding_env "; then \
+			conda activate decoding_env && python -m pytest tests/ -v; \
+		elif [ -d "test_env" ]; then \
+			source test_env/bin/activate && python -m pytest tests/ -v; \
+		elif [ -d "decoding_env" ]; then \
+			source decoding_env/bin/activate && python -m pytest tests/ -v; \
+		else \
+			echo "No virtual environment found. Run 'make test-env' or 'make setup-dev' first."; \
+			exit 1; \
+		fi; \
+	elif [ -d "test_env" ]; then \
+		source test_env/bin/activate && python -m pytest tests/ -v; \
+	elif [ -d "decoding_env" ]; then \
+		source decoding_env/bin/activate && python -m pytest tests/ -v; \
+	else \
+		echo "No virtual environment found. Run 'make test-env' or 'make setup-dev' first."; \
+		exit 1; \
+	fi
+
+clean-env:
+	rm -rf decoding_env test_env
+
+.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env

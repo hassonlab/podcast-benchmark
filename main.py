@@ -1,102 +1,23 @@
-import argparse
-from dataclasses import is_dataclass
-import yaml
 import os
 from datetime import datetime
-from typing import Any, Union
-from copy import deepcopy
 
 import numpy as np
 
-from config import ExperimentConfig, dict_to_config
+from config import ExperimentConfig
 import data_utils
 import decoding_utils
 from loader import import_all_from_package
 import registry
+from config_utils import (
+    parse_known_args,
+    load_config_with_overrides,
+    get_nested_value
+)
 
 # Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package("neural_conv_decoder")
 import_all_from_package("foundation_model")
 # Add your model import here!
-
-
-def load_config(config_path) -> ExperimentConfig:
-    with open(config_path, "r") as f:
-        experiment_config = yaml.safe_load(f)
-    return dict_to_config(experiment_config, ExperimentConfig)
-
-
-def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
-    fields = path.split(".")
-    current = obj
-    for field in fields:
-        if isinstance(current, dict):
-            current = current[field]
-        elif is_dataclass(current):
-            current = getattr(current, field)
-        else:
-            raise TypeError(
-                f"Cannot access field '{field}' on non-dict, non-dataclass object: {current}"
-            )
-    return current
-
-
-def parse_known_args():
-    parser = argparse.ArgumentParser(description="Run decoding model over lag range")
-    parser.add_argument(
-        "--config", type=str, required=True, help="Path to config YAML file"
-    )
-    args, unknown_args = parser.parse_known_args()
-    overrides = parse_override_args(unknown_args)
-    return args, overrides
-
-
-def parse_override_args(unknown_args):
-    """
-    Parse args like --model_params.checkpoint_dir=some_path into a dictionary.
-    """
-    overrides = {}
-    for arg in unknown_args:
-        if arg.startswith("--") and "=" in arg:
-            key, val = arg[2:].split("=", 1)
-            overrides[key] = yaml.safe_load(val)  # preserve types like int, float, bool
-    return overrides
-
-
-def set_nested_attr(obj, key_path, value):
-    keys = key_path.split(".")
-    target = obj
-    for key in keys[:-1]:
-        if is_dataclass(target):
-            target = getattr(target, key)
-        elif isinstance(target, dict):
-            target = target[key]
-        else:
-            raise TypeError(
-                f"Unsupported type {type(target)} for intermediate key: {key}"
-            )
-
-    final_key = keys[-1]
-    if is_dataclass(target):
-        setattr(target, final_key, value)
-    elif isinstance(target, dict):
-        target[final_key] = value
-    else:
-        raise TypeError(f"Unsupported type {type(target)} for final key: {final_key}")
-
-
-def apply_overrides(config, overrides):
-    config = deepcopy(config)  # Avoid mutating original
-    for key_path, value in overrides.items():
-        set_nested_attr(config, key_path, value)
-    return config
-
-
-def load_config_with_overrides(config_path: str, overrides: dict):
-    with open(config_path, "r") as f:
-        raw_cfg = yaml.safe_load(f)
-    base_config = dict_to_config(raw_cfg, ExperimentConfig)
-    return apply_overrides(base_config, overrides)
 
 
 def main():
@@ -149,8 +70,10 @@ def main():
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     # Write config to output_dir so it is easy to tell what parameters led to these results.
+    import yaml
+    from dataclasses import asdict
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
-        yaml.dump(experiment_config, fp, default_flow_style=False)
+        yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
     lags = np.arange(
         experiment_config.training_params.min_lag,
