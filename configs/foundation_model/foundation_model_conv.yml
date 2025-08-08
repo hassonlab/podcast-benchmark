@@ -1,0 +1,49 @@
+model_constructor_name: foundation_model_finetune_conv
+config_setter_name: foundation_model_finetune_conv
+
+model_params:
+  model_dir: /scratch/gpfs/zparis/ECoG-foundation-pretraining/checkpoints/model=patch_dim_2_small-grad_accum=2-encoder_mask_ratio=0.5_29115813/best_checkpoint
+  hidden_dims: [128, 64]
+  kernel_size: 2
+  use_batch_norm: true
+  dropout_rate: 0.1
+  # These are filled automatically by the config setter
+  # foundation_model_config: ...
+  # grid_shape: ...
+  # conv_out_dim: ...
+
+training_params:
+  batch_size: 128
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.001
+  early_stopping_patience: 20
+  n_folds: 5
+  min_lag: -600
+  max_lag: 1000
+  lag_step_size: 200
+  loss_name: nll_embedding
+  metrics: ["mse", "cosine_sim"]
+  early_stopping_metric: nll_embedding
+  smaller_is_better: true
+
+data_params:
+  data_root: data
+  embedding_type: gpt-2xl
+  embedding_layer: 24
+  embedding_pca_dim: 50
+  window_width: -1  # Overwritten by config setter
+  preprocessing_fn_name: foundation_model_finetune_mlp
+  subject_ids: [9]
+  channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+  # preprocessor_params: set by config setter
+
+trial_name: "{}_finetune_conv_loss={}_lr={}_wd={}_bs={}_grad_accum={}"
+format_fields: [
+  model_params.model_name,
+  training_params.loss_name,
+  training_params.learning_rate,
+  training_params.weight_decay,
+  training_params.batch_size,
+  training_params.grad_accumulation_steps,
+]

@@ -31,13 +31,25 @@ def setup_metrics_and_loss(training_params: TrainingParams):
     Returns:
         dict: Dictionary mapping metric names to callable functions
     """
+    # If user provided loss_name, set it as the loss.
+    if training_params.loss_name:
+        training_params.losses = [training_params.loss_name]
+        training_params.loss_weights = [1]
+
     # Combine loss and metrics into single list
-    metric_names = [training_params.loss_name] + training_params.metrics
+    metric_names = training_params.losses + training_params.metrics
 
     # Resolve all functions from registry
     all_fns = {name: metric_registry[name] for name in metric_names}
 
     return all_fns
+
+
+def compute_loss(out, groundtruth, training_params, all_fns):
+    loss = 0.0
+    for i, loss_name in enumerate(training_params.losses):
+        loss += training_params.loss_weights[i] * all_fns[loss_name](out, groundtruth)
+    return loss
 
 
 def validate_early_stopping_config(training_params: TrainingParams):
@@ -176,6 +188,7 @@ def train_decoding_model(
             model.eval()
 
         sums = {name: 0.0 for name in metric_names}
+        sums["loss"] = 0.0
 
         grad_steps = training_params.grad_accumulation_steps
         if is_train:
@@ -187,7 +200,7 @@ def train_decoding_model(
 
             if is_train:
                 out = model(Xb)
-                loss = all_fns[training_params.loss_name](out, yb)
+                loss = compute_loss(out, yb, training_params, all_fns)
                 # Normalize loss to account for gradient accumulation
                 loss = loss / grad_steps
                 loss.backward()
@@ -198,6 +211,7 @@ def train_decoding_model(
             else:
                 with torch.no_grad():
                     out = model(Xb)
+                    loss = compute_loss(out, yb, training_params, all_fns)
 
             # accumulate each metric
             for name, fn in all_fns.items():
@@ -207,6 +221,10 @@ def train_decoding_model(
                     val = val.detach().mean().item()
                 sums[name] += val
 
+            # add loss to sums
+            if torch.is_tensor(loss):
+                loss = loss.detach().mean().item()
+            sums["loss"] += loss
         return {name: sums[name] / len(loader) for name in sums}
 
     # 6. Cross‐val loop
@@ -246,6 +264,8 @@ def train_decoding_model(
         history = {
             f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+        history["train_loss"] = []
+        history["val_loss"] = []
         history["num_epochs"] = None
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")

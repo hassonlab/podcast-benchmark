@@ -1,0 +1,4 @@
+param_grid:
+  loss_fn: [mse, mae]
+  model_dir: [/path/to/modelA, /path/to/modelB]
+  lr: [0.001, 0.01]

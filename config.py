@@ -49,8 +49,12 @@ class TrainingParams:
     lag_step_size: int = 1000
     # Type of fold generation to use. One of "sequential_folds" or "zero_shot_folds"
     fold_type: str = "sequential_folds"
-    # Loss to use, by default use mse. Should be decorated with @register_metric.
-    loss_name: str = "mse"
+    # For backwards compatability if you want to provide just one loss.
+    loss_name: Optional[str] = None
+    # Losses to use, by default use mse. Should be decorated with @register_metric.
+    losses: list[str] = field(default_factory=lambda: ["mse"])
+    # Weight to assign to each loss. Should be parallel array with losses.
+    loss_weights: list[float] = field(default_factory=lambda: [1.0])
     # Metrics to track during training. Should be decorated with @register_metric.
     metrics: list[str] = field(default_factory=lambda: ["nll_embedding", "cosine_sim"])
     # Metric to use for early stopping over validation set. Must be either the loss or in metrics.

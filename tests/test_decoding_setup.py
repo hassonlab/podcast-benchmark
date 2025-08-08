@@ -50,6 +50,48 @@ class TestLossAndMetricSetup:
         for _, fn in all_fns.items():
             assert callable(fn)
 
+    def test_setup_metrics_and_loss_with_loss_name_override(self):
+        """Test setup_metrics_and_loss correctly overrides losses with loss_name."""
+        training_params = TrainingParams(
+            loss_name="mse", 
+            losses=["custom_loss"],  # This should be overridden
+            loss_weights=[0.5],  # This should be overridden
+            metrics=["cosine_sim"]
+        )
+
+        all_fns = decoding_utils.setup_metrics_and_loss(training_params)
+
+        # Verify loss_name override worked
+        assert training_params.losses == ["mse"]
+        assert training_params.loss_weights == [1]
+        
+        # Verify all functions are in all_fns
+        assert len(all_fns) == 2  # mse (from loss_name) + cosine_sim (from metrics)
+        assert "mse" in all_fns
+        assert "cosine_sim" in all_fns
+        assert "custom_loss" not in all_fns  # Should not be there due to override
+
+    def test_setup_metrics_and_loss_with_multiple_losses(self):
+        """Test setup_metrics_and_loss with multiple losses (no loss_name override)."""
+        training_params = TrainingParams(
+            loss_name=None,  # No override
+            losses=["mse", "custom_loss"],
+            loss_weights=[0.7, 0.3],
+            metrics=["cosine_sim"]
+        )
+
+        all_fns = decoding_utils.setup_metrics_and_loss(training_params)
+
+        # Verify no override occurred
+        assert training_params.losses == ["mse", "custom_loss"]
+        assert training_params.loss_weights == [0.7, 0.3]
+        
+        # Verify all functions are in all_fns
+        assert len(all_fns) == 3  # mse + custom_loss (from losses) + cosine_sim (from metrics)
+        assert "mse" in all_fns
+        assert "custom_loss" in all_fns
+        assert "cosine_sim" in all_fns
+
     def test_duplicate_loss_and_metric(self):
         """Test when loss function is also listed in metrics."""
         training_params = TrainingParams(loss_name="mse", metrics=["mse", "cosine_sim"])
@@ -188,3 +230,104 @@ class TestGradientAccumulationSetup:
             )
             == False
         )  # 6th batch
+
+
+class TestComputeLoss:
+    """Test compute_loss function for multiple loss support."""
+
+    def setup_method(self):
+        """Set up mock loss functions that return fixed values."""
+
+        @registry.register_metric("mock_loss_1")
+        def mock_loss_1(pred, true):
+            return torch.tensor(1.0)
+
+        @registry.register_metric("mock_loss_2")
+        def mock_loss_2(pred, true):
+            return torch.tensor(2.0)
+
+        @registry.register_metric("mock_loss_3")
+        def mock_loss_3(pred, true):
+            return torch.tensor(3.0)
+
+    def test_compute_loss_single_loss(self):
+        """Test compute_loss with a single loss function."""
+        pred = torch.tensor([[1.0, 2.0]])
+        true = torch.tensor([[1.1, 1.9]])
+        
+        training_params = TrainingParams(
+            losses=["mock_loss_1"],
+            loss_weights=[1.0]
+        )
+        
+        all_fns = {"mock_loss_1": registry.metric_registry["mock_loss_1"]}
+        
+        loss = decoding_utils.compute_loss(pred, true, training_params, all_fns)
+        
+        # Should be 1.0 * 1.0 = 1.0
+        expected_loss = torch.tensor(1.0)
+        assert torch.allclose(loss, expected_loss)
+
+    def test_compute_loss_multiple_losses_equal_weights(self):
+        """Test compute_loss with multiple losses and equal weights."""
+        pred = torch.tensor([[1.0, 2.0]])
+        true = torch.tensor([[1.1, 1.9]])
+        
+        training_params = TrainingParams(
+            losses=["mock_loss_1", "mock_loss_2"],
+            loss_weights=[0.5, 0.5]
+        )
+        
+        all_fns = {
+            "mock_loss_1": registry.metric_registry["mock_loss_1"],
+            "mock_loss_2": registry.metric_registry["mock_loss_2"]
+        }
+        
+        loss = decoding_utils.compute_loss(pred, true, training_params, all_fns)
+        
+        # Should be 0.5 * 1.0 + 0.5 * 2.0 = 1.5
+        expected_loss = torch.tensor(1.5)
+        assert torch.allclose(loss, expected_loss)
+
+    def test_compute_loss_multiple_losses_different_weights(self):
+        """Test compute_loss with multiple losses and different weights."""
+        pred = torch.tensor([[1.0, 2.0]])
+        true = torch.tensor([[1.1, 1.9]])
+        
+        training_params = TrainingParams(
+            losses=["mock_loss_1", "mock_loss_2", "mock_loss_3"],
+            loss_weights=[0.2, 0.3, 0.5]
+        )
+        
+        all_fns = {
+            "mock_loss_1": registry.metric_registry["mock_loss_1"],
+            "mock_loss_2": registry.metric_registry["mock_loss_2"],
+            "mock_loss_3": registry.metric_registry["mock_loss_3"]
+        }
+        
+        loss = decoding_utils.compute_loss(pred, true, training_params, all_fns)
+        
+        # Should be 0.2 * 1.0 + 0.3 * 2.0 + 0.5 * 3.0 = 0.2 + 0.6 + 1.5 = 2.3
+        expected_loss = torch.tensor(2.3)
+        assert torch.allclose(loss, expected_loss)
+
+    def test_compute_loss_zero_weight(self):
+        """Test compute_loss with a zero weight (loss should be ignored)."""
+        pred = torch.tensor([[1.0, 2.0]])
+        true = torch.tensor([[1.1, 1.9]])
+        
+        training_params = TrainingParams(
+            losses=["mock_loss_1", "mock_loss_2"],
+            loss_weights=[1.0, 0.0]  # mock_loss_2 has zero weight
+        )
+        
+        all_fns = {
+            "mock_loss_1": registry.metric_registry["mock_loss_1"],
+            "mock_loss_2": registry.metric_registry["mock_loss_2"]
+        }
+        
+        loss = decoding_utils.compute_loss(pred, true, training_params, all_fns)
+        
+        # Should be 1.0 * 1.0 + 0.0 * 2.0 = 1.0
+        expected_loss = torch.tensor(1.0)
+        assert torch.allclose(loss, expected_loss)

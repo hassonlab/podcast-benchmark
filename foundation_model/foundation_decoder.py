@@ -55,6 +55,7 @@ def create_and_freeze_foundation_model(
 class MLP(nn.Module):
     def __init__(
         self,
+        input_dim,
         layer_sizes,
         activation=F.relu,
         dropout_rate=0.0,
@@ -65,6 +66,7 @@ class MLP(nn.Module):
         Initialize a Multi-Layer Perceptron with configurable architecture and LayerNorm.
 
         Args:
+            input_dim (int): Dimensionality of input to MLP
             layer_sizes (list): List of integers specifying the size of each layer.
                                First element is input size, last element is output size.
             activation (function): Activation function to use between layers (default: ReLU).
@@ -74,9 +76,6 @@ class MLP(nn.Module):
         """
         super(MLP, self).__init__()
 
-        if len(layer_sizes) < 2:
-            raise ValueError("layer_sizes must contain at least input and output sizes")
-
         self.layers = nn.ModuleList()
         self.layer_norms = nn.ModuleList() if use_layer_norm else None
         self.activation = activation
@@ -85,12 +84,16 @@ class MLP(nn.Module):
         self.norm_embedding = norm_embedding
 
         # Create linear layers and layer norms based on specified sizes
-        for i in range(len(layer_sizes) - 1):
-            self.layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
-            # Add layer norm for all but the output layer
-            if use_layer_norm:
-                self.layer_norms.append(nn.LayerNorm(layer_sizes[i + 1]))
+        for i in range(len(layer_sizes)):
+            if i == 0:
+                self.layers.append(nn.Linear(input_dim, layer_sizes[i]))
+                # Add layer norm for all but the output layer
+                if use_layer_norm:
+                    self.layer_norms.append(nn.LayerNorm(input_dim))
+            else:
+                if use_layer_norm:
+                    self.layer_norms.append(nn.LayerNorm(layer_sizes[i - 1]))
+                self.layers.append(nn.Linear(layer_sizes[i - 1], layer_sizes[i]))
 
     def forward(self, x):
         """
@@ -149,6 +152,7 @@ class FoundationModelFullAttentionDecoder(nn.Module):
 
         # MLP expects input of shape [batch, embed_dim]
         self.mlp = MLP(
+            dim,
             mlp_layer_sizes,
             mlp_activation,
             dropout_rate,
@@ -182,9 +186,24 @@ class FoundationModelFullAttentionDecoder(nn.Module):
         return self.mlp(out)
 
 
+def get_padding_mask(signal):
+    """
+    Zero padding for channels that were rejected during preprocessing for bad signal quality
+
+    Args:
+        signal: torch tensor of shape batch size * number of bands * timepoints * h * w
+
+    Returns:
+        padding_mask: boolean tensor of same shape as image indicating which parts of the signal are padded
+
+    """
+    return (~torch.isnan(signal)).all(0).all(0).all(0)
+
+
 class FoundationModelMLP(nn.Module):
     def __init__(
         self,
+        input_dim,
         mlp_layer_sizes,
         model_dir=None,
         mlp_activation=F.relu,
@@ -195,9 +214,11 @@ class FoundationModelMLP(nn.Module):
         freeze_foundation_model: bool = False,
         num_unfrozen_blocks: int = 0,
         norm_embedding: bool = False,
+        decode_from_layer: Optional[int] = None,
     ):
         super(FoundationModelMLP, self).__init__()
         self.finetune = finetune
+        self.decode_from_layer = decode_from_layer
         if finetune:
             self.foundation_model = create_and_freeze_foundation_model(
                 foundation_model_config,
@@ -205,8 +226,9 @@ class FoundationModelMLP(nn.Module):
                 freeze_foundation_model,
                 num_unfrozen_blocks,
             )
-
+        self.embedding_norm = nn.BatchNorm1d(input_dim)
         self.mlp = MLP(
+            input_dim,
             mlp_layer_sizes,
             mlp_activation,
             dropout_rate,
@@ -215,14 +237,25 @@ class FoundationModelMLP(nn.Module):
         )
 
     def forward(self, x):
+        padding_mask = get_padding_mask(x).to(
+            next(self.foundation_model.parameters()).device
+        )
+        self.foundation_model.initialize_mask(padding_mask)
+        x = torch.nan_to_num(x)
         if self.finetune:
-            x = self.foundation_model(x, forward_features=True)
+            x = self.foundation_model(
+                x,
+                forward_features=True,
+                return_intermediate_encoder_latent=self.decode_from_layer,
+            )
+        x = self.embedding_norm(x)
         return self.mlp(x)
 
 
 class FoundationModelAttentionPoolingDecoder(nn.Module):
     def __init__(
         self,
+        input_dim,
         mlp_layer_sizes,
         model_dir=None,
         mlp_activation=F.relu,
@@ -244,8 +277,9 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
                 num_unfrozen_blocks,
             )
 
-        self.query = nn.Parameter(torch.randn(1, mlp_layer_sizes[0]))  # 1 x C
+        self.query = nn.Parameter(torch.randn(1, input_dim))  # 1 x C
         self.mlp = MLP(
+            input_dim,
             mlp_layer_sizes,
             mlp_activation,
             dropout_rate,
@@ -284,18 +318,107 @@ class FoundationModelAttentionPoolingDecoder(nn.Module):
         return output
 
 
+class ConvEmbeddingDecoder(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        conv_out_dim: int,
+        hidden_dims: list[int] = [128, 64],
+        kernel_size: int = 3,
+        use_batch_norm: bool = False,
+        dropout_rate: float = 0.0,
+    ):
+        super().__init__()
+
+        layers = []
+        in_channels = embed_dim
+        for out_channels in hidden_dims:
+            layers.append(
+                nn.Conv3d(
+                    in_channels, out_channels, kernel_size, padding=kernel_size // 2
+                )
+            )
+            if use_batch_norm:
+                layers.append(nn.BatchNorm3d(out_channels))
+            layers.append(nn.ReLU())
+            if dropout_rate > 0.0:
+                layers.append(nn.Dropout3d(p=dropout_rate))
+            in_channels = out_channels
+
+        layers.append(nn.AdaptiveAvgPool3d(1))  # → [B, C, 1, 1, 1]
+        self.conv_net = nn.Sequential(*layers)
+
+        self.fc = nn.Linear(hidden_dims[-1], conv_out_dim)
+
+    def forward(self, x):
+        # x: [B, T, H, W, C] → [B, C, T, H, W]
+        x = x.permute(0, 4, 1, 2, 3)
+        x = self.conv_net(x)  # [B, hidden_dims[-1], 1, 1, 1]
+        x = x.view(x.size(0), -1)  # [B, hidden_dims[-1]]
+        return self.fc(x)  # [B, conv_out_dim]
+
+
+class FoundationModelConv(nn.Module):
+    def __init__(
+        self,
+        model_dir: Optional[str],
+        foundation_model_config: VideoMAEExperimentConfig,
+        freeze_foundation_model: bool,
+        num_unfrozen_blocks: int,
+        conv_out_dim: int,
+        grid_shape: tuple[int, int, int],
+        hidden_dims: list[int] = [128, 64],
+        kernel_size: int = 3,
+        use_batch_norm: bool = False,
+        dropout_rate: float = 0.0,
+        finetune: bool = True,
+    ):
+        super().__init__()
+        self.finetune = finetune
+        self.grid_shape = grid_shape  # (T, H, W)
+
+        if finetune:
+            self.foundation_model = create_and_freeze_foundation_model(
+                foundation_model_config,
+                model_dir,
+                freeze_foundation_model,
+                num_unfrozen_blocks,
+            )
+
+        self.decoder = ConvEmbeddingDecoder(
+            embed_dim=foundation_model_config.video_mae_task_config.vit_config.dim,
+            conv_out_dim=conv_out_dim,
+            hidden_dims=hidden_dims,
+            kernel_size=kernel_size,
+            use_batch_norm=use_batch_norm,
+            dropout_rate=dropout_rate,
+        )
+
+    def forward(self, x):
+        # x: [B, C, T, H, W]
+        if self.finetune:
+            x = self.foundation_model(x, forward_features=True, global_pool=False)
+        B, N, C = x.shape
+        T, H, W = self.grid_shape
+        x = x.view(B, T, H, W, C)
+        return self.decoder(x)
+
+
 @registry.register_model_constructor()
 def foundation_mlp(model_params):
     return FoundationModelMLP(
+        model_params["model_dim"],
         model_params["layer_sizes"],
         finetune=False,
         norm_embedding=model_params.get("norm_embedding", False),
+        decode_from_layer=model_params.get("decode_from_layer"),
     )
 
 
 @registry.register_model_constructor()
 def foundation_model_finetune_mlp(model_params):
     return FoundationModelMLP(
+        model_params["model_dim"],
         model_params["mlp_layer_sizes"],
         model_dir=model_params.get("model_dir"),
         foundation_model_config=model_params["foundation_model_config"],
@@ -303,12 +426,14 @@ def foundation_model_finetune_mlp(model_params):
         freeze_foundation_model=model_params.get("freeze_foundation_model", False),
         num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
         norm_embedding=model_params.get("norm_embedding", False),
+        decode_from_layer=model_params.get("decode_from_layer"),
     )
 
 
 @registry.register_model_constructor()
 def foundation_model_finetune_attention(model_params):
     return FoundationModelAttentionPoolingDecoder(
+        model_params["model_dim"],
         model_params["mlp_layer_sizes"],
         model_dir=model_params.get("model_dir"),
         foundation_model_config=model_params["foundation_model_config"],
@@ -322,6 +447,7 @@ def foundation_model_finetune_attention(model_params):
 @registry.register_model_constructor()
 def foundation_model_attention(model_params):
     return FoundationModelAttentionPoolingDecoder(
+        model_params["model_dim"],
         model_params["layer_sizes"],
         finetune=False,
         norm_embedding=model_params.get("norm_embedding", False),
@@ -334,4 +460,21 @@ def foundation_model_full_attention(model_params):
         model_params["layer_sizes"],
         num_heads=model_params["num_heads"],
         norm_embedding=model_params.get("norm_embedding", False),
+    )
+
+
+@registry.register_model_constructor()
+def foundation_model_finetune_conv(model_params):
+    return FoundationModelConv(
+        model_dir=model_params.get("model_dir"),
+        foundation_model_config=model_params["foundation_model_config"],
+        freeze_foundation_model=model_params.get("freeze_foundation_model", False),
+        num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
+        conv_out_dim=model_params["conv_out_dim"],
+        grid_shape=tuple(model_params["grid_shape"]),
+        hidden_dims=model_params.get("hidden_dims", [128, 64]),
+        kernel_size=model_params.get("kernel_size", 3),
+        use_batch_norm=model_params.get("use_batch_norm", False),
+        dropout_rate=model_params.get("dropout_rate", 0.0),
+        finetune=True,
     )

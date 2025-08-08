@@ -8,11 +8,7 @@ import data_utils
 import decoding_utils
 from loader import import_all_from_package
 import registry
-from config_utils import (
-    parse_known_args,
-    load_config_with_overrides,
-    get_nested_value
-)
+from config_utils import parse_known_args, load_config_with_overrides, get_nested_value
 
 # Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package("neural_conv_decoder")
@@ -72,6 +68,7 @@ def main():
     # Write config to output_dir so it is easy to tell what parameters led to these results.
     import yaml
     from dataclasses import asdict
+
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
         yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
