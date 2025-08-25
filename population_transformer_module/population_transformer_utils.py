@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from typing import Dict, Any
 import mne
 
@@ -16,57 +17,197 @@ from config import ExperimentConfig
 from population_transformer.models import build_model as pt_build_model
 from population_transformer.preprocessors import build_preprocessor as pt_build_preprocessor
 
+# Copy of Foundation Model's MLP for consistency (avoiding import issues)
+class MLP(nn.Module):
+    def __init__(
+        self,
+        layer_sizes,
+        activation=F.relu,
+        dropout_rate=0.0,
+        use_layer_norm=False,
+        norm_embedding=False,
+    ):
+        """
+        Initialize a Multi-Layer Perceptron with configurable architecture and LayerNorm.
+        This is an exact copy of the Foundation Model's MLP for consistency.
 
-class PopulationTransformerDecoder(nn.Module):
-    """
-    A simple MLP decoder that takes PopulationTransformer embeddings and decodes to word embeddings.
-    This is similar to the foundation_model approach but uses PopulationTransformer features.
-    """
-    def __init__(self, input_dim: int, output_dim: int, hidden_dims: list = None):
-        super().__init__()
-        
-        if hidden_dims is None:
-            hidden_dims = [256, 128]
-        
-        layers = []
-        current_dim = input_dim
-        
-        for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(current_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(0.2))
-            current_dim = hidden_dim
-        
-        # Final output layer
-        layers.append(nn.Linear(current_dim, output_dim))
-        layers.append(nn.LayerNorm(output_dim))
-        layers.append(nn.Tanh())
-        
-        self.decoder = nn.Sequential(*layers)
-    
+        Args:
+            layer_sizes (list): List of integers specifying the size of each layer.
+                               First element is input size, last element is output size.
+            activation (function): Activation function to use between layers (default: ReLU).
+            dropout_rate (float): Dropout probability for regularization (default: 0.).
+            use_layer_norm (bool): Whether to use LayerNorm after each hidden layer (default: False).
+            norm_embedding (bool): Whether to normalize the output embedding.
+        """
+        super(MLP, self).__init__()
+
+        if len(layer_sizes) < 2:
+            raise ValueError("layer_sizes must contain at least input and output sizes")
+
+        self.layers = nn.ModuleList()
+        self.layer_norms = nn.ModuleList() if use_layer_norm else None
+        self.activation = activation
+        self.dropout = nn.Dropout(dropout_rate)
+        self.use_layer_norm = use_layer_norm
+        self.norm_embedding = norm_embedding
+
+        # Create linear layers and layer norms based on specified sizes
+        for i in range(len(layer_sizes) - 1):
+            self.layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
+
+            # Add layer norm for all but the output layer
+            if use_layer_norm:
+                self.layer_norms.append(nn.LayerNorm(layer_sizes[i + 1]))
+
     def forward(self, x):
-        return self.decoder(x)
+        """
+        Forward pass through the MLP.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, layer_sizes[0]]
+
+        Returns:
+            torch.Tensor: Output tensor of shape [batch_size, layer_sizes[-1]]
+        """
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+
+            # Apply activation, and dropout to all but the final layer
+            if i < len(self.layers) - 1:
+                if self.use_layer_norm:
+                    x = self.layer_norms[i](x)
+                x = self.activation(x)
+                x = self.dropout(x)
+
+        if self.norm_embedding:
+            x = F.normalize(x, dim=1)
+        return x
+
+
+# PopulationTransformerDecoder is now replaced with Foundation Model's MLP copy
+# This ensures consistency across all decoders while avoiding import issues
 
 
 @registry.register_model_constructor()
-def population_transformer_mlp(model_params: Dict[str, Any]) -> PopulationTransformerDecoder:
+def population_transformer_mlp(model_params: Dict[str, Any]) -> MLP:
     """
     Model constructor for PopulationTransformer MLP decoder.
+    Uses the exact same MLP architecture as Foundation Model for consistency.
     
     Args:
         model_params: Dictionary containing:
             - input_dim: Input dimension from PopulationTransformer embeddings
             - output_dim: Output dimension for word embeddings  
-            - hidden_dims: List of hidden layer dimensions (optional)
+            - hidden_dims: List of hidden layer dimensions (e.g., [256, 100])
+            - dropout_rate: Dropout probability (default: 0.2)
+            - use_layer_norm: Whether to use LayerNorm (default: True)
     
     Returns:
-        PopulationTransformerDecoder model
+        MLP model (identical to Foundation Model)
     """
-    return PopulationTransformerDecoder(
-        input_dim=model_params['input_dim'],
-        output_dim=model_params['output_dim'],
-        hidden_dims=model_params.get('hidden_dims', [256, 128])
+    # Build layer_sizes list: [input_dim, hidden_layers..., output_dim]
+    input_dim = model_params['input_dim']
+    output_dim = model_params['output_dim']
+    
+    # Get hidden layers from config, or use default
+    hidden_dims = model_params.get('hidden_dims', [256, 100])
+    
+    # Construct full layer_sizes: [input_dim, hidden..., output_dim]
+    layer_sizes = [input_dim] + hidden_dims + [output_dim]
+    
+    return MLP(
+        layer_sizes=layer_sizes,
+        dropout_rate=model_params.get('dropout_rate', 0.2),
+        use_layer_norm=model_params.get('use_layer_norm', True)
     )
+
+
+class PopulationTransformerEnd2End(nn.Module):
+    """
+    End-to-end PopulationTransformer model that runs PT in forward() and then
+    projects the resulting embedding with the shared MLP head. Supports
+    fine-tuning by toggling frozen_weights in model_params.
+
+    Expects inputs shaped [batch, seq_len(electrodes), 768] (already formatted).
+    """
+    def __init__(self, model_params: Dict[str, Any]):
+        super().__init__()
+
+        # Required params
+        self.pt_embedding_dim: int = int(model_params.get('pt_embedding_dim', 512))
+        output_dim: int = int(model_params['output_dim'])
+        hidden_dims: list[int] = model_params.get('hidden_dims', [256, 100])
+        dropout_rate: float = float(model_params.get('dropout_rate', 0.2))
+        use_layer_norm: bool = bool(model_params.get('use_layer_norm', True))
+
+        # PT runtime config
+        self.device = torch.device(model_params.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
+        self.use_cls_token: bool = bool(model_params.get('use_cls_token', True))
+        self.frozen_weights: bool = bool(model_params.get('frozen_weights', True))
+
+        # Build PT model
+        model_path = model_params['model_path']
+        model_state = torch.load(model_path, weights_only=False, map_location='cpu')
+        model_config = model_state.get('model_cfg', model_params['model_config'])
+        pt_model = pt_build_model(model_config)
+        pt_model.load_state_dict(model_state['model'])
+        self.pt_model = pt_model.to(self.device)
+        self.pt_model.train(not self.frozen_weights)
+        if self.frozen_weights:
+            for p in self.pt_model.parameters():
+                p.requires_grad = False
+
+        # Save raw_data for real positions if available
+        self.raw_data = model_params.get('raw_data', None)
+
+        # Build MLP head
+        layer_sizes = [self.pt_embedding_dim] + hidden_dims + [output_dim]
+        self.mlp = MLP(
+            layer_sizes=layer_sizes,
+            dropout_rate=dropout_rate,
+            use_layer_norm=use_layer_norm,
+        )
+
+    def _make_positions(self, batch_size: int, seq_len_plus_cls: int):
+        if self.raw_data is not None:
+            coords, seq_id = create_real_positions(self.raw_data, batch_size, seq_len_plus_cls, self.device)
+        else:
+            coords, seq_id = create_dummy_positions(batch_size, seq_len_plus_cls, self.device)
+        return (coords, seq_id)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, seq_len, 768]
+        x = x.to(self.device)
+
+        # Add CLS token at front
+        cls = torch.zeros(x.shape[0], 1, x.shape[2], device=self.device, dtype=x.dtype)
+        x_cat = torch.cat([cls, x], dim=1)  # [B, seq_len+1, 768]
+
+        # Attention mask: no padding → all False (bool mask expected by PyTorch)
+        attention_mask = torch.zeros(
+            x_cat.shape[0], x_cat.shape[1], device=self.device, dtype=torch.bool
+        )
+
+        # Positions
+        positions = self._make_positions(x_cat.shape[0], x_cat.shape[1])
+
+        # PT forward to get intermediate reps
+        pt_out = self.pt_model(x_cat, attention_mask, positions, intermediate_rep=True)
+        if pt_out.dim() == 3:
+            if self.use_cls_token:
+                pt_emb = pt_out[:, 0, :]  # CLS
+            else:
+                pt_emb = pt_out.mean(dim=1)
+        else:
+            pt_emb = pt_out
+
+        # Project with MLP head
+        return self.mlp(pt_emb)
+
+
+@registry.register_model_constructor()
+def population_transformer_end2end(model_params: Dict[str, Any]) -> PopulationTransformerEnd2End:
+    return PopulationTransformerEnd2End(model_params)
 
 
 @registry.register_data_preprocessor()
@@ -144,8 +285,10 @@ def population_transformer_preprocessing_fn(data: np.ndarray, preprocessor_param
             batch_tensor = torch.cat([cls_token, batch_tensor], dim=1)
             # print(f"      DEBUG: After adding CLS token, batch_tensor.shape = {batch_tensor.shape}")
             
-            # Create attention mask (assuming no padding for now)
-            attention_mask = torch.ones(batch_tensor.shape[0], batch_tensor.shape[1]).to(device)
+            # Create attention mask: no padding → all False
+            attention_mask = torch.zeros(
+                batch_tensor.shape[0], batch_tensor.shape[1], device=device, dtype=torch.bool
+            )
             
             # Create position information using real electrode data if available
             if raw_data is not None:
@@ -181,6 +324,15 @@ def population_transformer_preprocessing_fn(data: np.ndarray, preprocessor_param
     print(f"   📊 Final embeddings shape: {embeddings.shape}")
     
     return embeddings
+
+
+@registry.register_data_preprocessor('population_transformer_prepare_inputs_fn')
+def population_transformer_prepare_inputs_fn(data: np.ndarray, preprocessor_params: Dict[str, Any]) -> np.ndarray:
+    """
+    Prep-only preprocessor that formats inputs to [num_words, seq_len, 768].
+    Does NOT run PopulationTransformer. Use with the end-to-end model.
+    """
+    return prepare_data_for_population_transformer(data, preprocessor_params)
 
 
 def prepare_data_for_population_transformer(data: np.ndarray, preprocessor_params: Dict[str, Any]) -> np.ndarray:
@@ -337,10 +489,14 @@ def population_transformer_config_setter(experiment_config: ExperimentConfig,
     else:
         print(f"   ⚠️  No MNE Raw data available, will use dummy coordinates")
     
-    # Set input dimensions for the decoder model
-    # This will be set based on PopulationTransformer's output dimension
-    pt_embedding_dim = preprocessor_params.get('pt_embedding_dim', 512)  # Default PopulationTransformer dimension
-    experiment_config.model_params['input_dim'] = pt_embedding_dim
+    # Copy PT params needed by end-to-end model into model_params
+    # Always set embedding dim for MLP head
+    pt_embedding_dim = preprocessor_params.get('pt_embedding_dim', 512)
+    experiment_config.model_params['pt_embedding_dim'] = pt_embedding_dim
+    # Pass through runtime/e2e params if present
+    for k in ['model_path', 'model_config', 'device', 'use_cls_token', 'frozen_weights', 'raw_data']:
+        if k in preprocessor_params:
+            experiment_config.model_params[k] = preprocessor_params[k]
     
     # Set output dimension based on word embeddings
     if hasattr(df_word, 'embedding') and len(df_word['embedding']) > 0:

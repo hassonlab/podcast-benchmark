@@ -1,13 +1,15 @@
-model_constructor_name: population_transformer_mlp
+model_constructor_name: population_transformer_end2end
 config_setter_name: population_transformer
 model_params:
   # These will be set by the config setter at runtime
   input_dim: 512  # PopulationTransformer embedding dimension
   output_dim: 50  # Word embedding dimension
-  hidden_dims: [256, 128]  # Hidden layer dimensions for MLP decoder
+  hidden_dims: [256, 100]  # Hidden layer dimensions (matches Foundation Model)
+  dropout_rate: 0.2  # Dropout probability for regularization
+  use_layer_norm: true  # Whether to use LayerNorm
 training_params:
   batch_size: 32
-  epochs: 100
+  epochs: 100 
   learning_rate: 0.001
   weight_decay: 0.0001
   early_stopping_patience: 10
@@ -16,8 +18,8 @@ training_params:
   max_lag: 2000
   lag_step_size: 100
   fold_type: sequential_folds
-  loss_name: cosine_similarity_loss
-  metrics: [cosine_similarity_loss]
+  loss_name: nll_embedding
+  metrics: [cosine_sim, mse]
 data_params:
   # Cross model data_params
   data_root: data
@@ -25,7 +27,7 @@ data_params:
   embedding_layer: 24
   embedding_pca_dim: 50
   window_width: 0.625
-  preprocessing_fn_name: population_transformer_preprocessing_fn
+  preprocessing_fn_name: population_transformer_prepare_inputs_fn
   subject_ids: [9]
   # channel_reg_ex: LG[AB]*
   # PopulationTransformer specific config
@@ -37,6 +39,7 @@ data_params:
     pt_embedding_dim: 512
     resample_factor: 32
     window_width: 0.625
+    frozen_weights: false  # Allow finetuning of PopulationTransformer weights
     # Model configuration for PopulationTransformer
     model_config:
       name: pt_model_custom

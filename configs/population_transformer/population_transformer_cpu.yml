@@ -1,10 +1,12 @@
-model_constructor_name: population_transformer_mlp
+model_constructor_name: population_transformer_end2end
 config_setter_name: population_transformer
 model_params:
   # These will be set by the config setter at runtime
   input_dim: 512  # PopulationTransformer embedding dimension
   output_dim: 50  # Word embedding dimension
   hidden_dims: [128, 64]  # Smaller hidden layers for CPU
+  dropout_rate: 0.2  # Dropout probability for regularization
+  use_layer_norm: true  # Whether to use LayerNorm
 training_params:
   batch_size: 8   # Smaller batch size for CPU
   epochs: 50      # Fewer epochs for faster testing
@@ -16,8 +18,8 @@ training_params:
   max_lag: 1000
   lag_step_size: 200
   fold_type: sequential_folds
-  loss_name: cosine_sim
-  metrics: [cosine_sim]
+  loss_name: nll_embedding
+  metrics: [cosine_sim, mse]
 data_params:
   # Cross model data_params
   data_root: data
@@ -25,7 +27,7 @@ data_params:
   embedding_layer: 24
   embedding_pca_dim: 50
   window_width: 0.625
-  preprocessing_fn_name: population_transformer_preprocessing_fn
+  preprocessing_fn_name: population_transformer_prepare_inputs_fn
   subject_ids: [1]
   # channel_reg_ex: LG[AB]*
   # PopulationTransformer CPU-optimized config
@@ -37,7 +39,7 @@ data_params:
     pt_embedding_dim: 512
     resample_factor: 32
     window_width: 0.625
-    frozen_weights: true  # Freeze weights for faster CPU inference
+    frozen_weights: false  # Enable fine-tuning on CPU
     # Model configuration for PopulationTransformer
     model_config:
       name: pt_model_custom

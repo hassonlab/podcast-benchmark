@@ -12,8 +12,9 @@ The PopulationTransformer integration allows you to:
 ## Components
 
 ### Model Architecture
-- **PopulationTransformerDecoder**: A simple MLP that decodes word embeddings from PopulationTransformer neural embeddings
+- **MLP Decoder**: Uses the exact same MLP architecture as Foundation Model for consistency
 - Follows the same pattern as the foundation_model approach but uses PopulationTransformer features
+- Local copy avoids dependency issues while maintaining architectural consistency
 
 ### Data Preprocessing
 - **population_transformer_preprocessing_fn**: Extracts features from neural data using a pre-trained PopulationTransformer model
@@ -78,12 +79,7 @@ The PopulationTransformer integration in podcast-benchmark follows the standard 
    make population-transformer-frozen
    ```
 
-3. **Fine-tuning** (end-to-end training):
-   ```bash
-   make population-transformer-finetune
-   ```
-
-4. **CPU-optimized** (for testing without GPU):
+3. **CPU-optimized** (for testing without GPU):
    ```bash
    make population-transformer-cpu
    ```
@@ -94,7 +90,6 @@ Four pre-configured experiments are available:
 
 - `configs/population_transformer/population_transformer_base.yml`: Standard configuration
 - `configs/population_transformer/population_transformer_frozen.yml`: Frozen PopulationTransformer weights
-- `configs/population_transformer/population_transformer_finetune.yml`: End-to-end fine-tuning
 - `configs/population_transformer/population_transformer_cpu.yml`: CPU-optimized for testing
 
 ### Key Parameters
@@ -102,7 +97,9 @@ Four pre-configured experiments are available:
 #### Model Parameters
 - `input_dim`: PopulationTransformer embedding dimension (default: 512)
 - `output_dim`: Word embedding dimension (default: 50)
-- `hidden_dims`: MLP decoder layer sizes (default: [256, 128])
+- `hidden_dims`: Hidden layer dimensions (default: [256, 100])
+- `dropout_rate`: Dropout probability for regularization (default: 0.2)
+- `use_layer_norm`: Whether to use LayerNorm (default: true)
 
 #### Preprocessing Parameters
 - `model_path`: Path to pre-trained PopulationTransformer weights
@@ -111,6 +108,55 @@ Four pre-configured experiments are available:
 - `frozen_weights`: Whether to freeze PopulationTransformer during training
 - `pt_embedding_dim`: Expected PopulationTransformer output dimension
 
+### End-to-end training (CPU)
+
+This setup fine-tunes the PopulationTransformer by running it inside the model forward pass, so gradients flow through the encoder and updated embeddings are used every step.
+
+Steps:
+
+1) Environment and data
+   - Activate your venv and install deps: `pip install -r requirements.txt`
+   - Ensure `.fif` data are valid (not tiny/corrupted)
+
+2) Run CPU config (end-to-end)
+   - `python main.py --config configs/population_transformer/population_transformer_cpu.yml`
+   - This uses:
+     - `model_constructor_name: population_transformer_end2end`
+     - `preprocessing_fn_name: population_transformer_prepare_inputs_fn` (prep-only; no PT forward)
+
+3) What happens under the hood
+   - Preprocessor formats inputs to `[batch, seq_len(electrodes), 768]`
+   - Model forward:
+     - Adds CLS token, builds attention mask and positions
+     - Runs PopulationTransformer with `intermediate_rep=True`
+     - Selects CLS (or mean) embedding
+     - Projects via shared MLP to 50-D word embeddings
+
+4) Fine-tuning knobs
+   - `preprocessor_params.frozen_weights: false` to enable fine-tuning (CPU config)
+   - `model_params.hidden_dims` to shrink head on CPU (e.g., `[128, 64]`)
+   - Training params: lower `batch_size`, fewer `epochs`/`n_folds`, tighter lag range
+
+5) Loss/metrics
+   - `loss_name: nll_embedding` (contrastive)
+   - `metrics: [cosine_sim, mse]` for monitoring
+
+### Data Padding: Why 320 → 768 Features?
+
+The PopulationTransformer model was pre-trained with a **fixed input dimension of 768 features** and cannot accept variable input sizes. Neural data has 320 timepoints per electrode, so we must pad to match the expected input size.
+
+**Why This Happens:**
+- **Pre-trained model constraint**: PopulationTransformer expects exactly 768 input features
+- **Your data**: Neural recordings with 320 timepoints per electrode
+- **Solution**: Pad with 448 zeros (768 - 320 = 448) to match model requirements
+
+**Current Implementation:**
+```python
+# From prepare_data_for_population_transformer()
+expected_input_dim = 768  # Fixed by pre-trained model
+padded_data = np.zeros((batch, electrodes, 768))
+padded_data[:, :, :320] = original_data  # 448 zeros added
+```
 ## Prerequisites
 
 1. **PopulationTransformer weights**: Download pre-trained weights from the [PopulationTransformer repository](https://github.com/czlwang/PopulationTransformer) or [HuggingFace](https://huggingface.co/PopulationTransformer/popt_brainbert_stft)
