@@ -21,6 +21,7 @@ training_params:
   min_lag: -2000
   max_lag: 1100
   lag_step_size: 200
+  smaller_is_better: true
 data_params:
   # Cross model data_params
   data_root: data
