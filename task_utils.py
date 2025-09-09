@@ -8,7 +8,7 @@ import embeddings
 import registry
 
 
-@registry.task_data_getter_registry()
+@registry.register_task_data_getter()
 def word_embedding_decoding_task(data_params: DataParams):
     """
     Loads and processes word-level data and retrieves corresponding embeddings based on specified parameters.
