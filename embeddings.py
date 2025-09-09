@@ -93,7 +93,7 @@ def get_glove_embeddings(df_word, data_params: DataParams):
     df_word = df_word[df_word["in_glove"]].reset_index()
 
     glove_embeddings = np.stack(glove_embeddings)
-    df_word["embedding"] = list(glove_embeddings)
+    df_word["target"] = list(glove_embeddings)
 
     return df_word
 
@@ -138,6 +138,6 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
         for idx in word_to_idx[word]:
             arbitrary_embeddings[idx] = arbitrary_embeddings_per_word[i]
 
-    df_word["embedding"] = list(arbitrary_embeddings)
+    df_word["target"] = list(arbitrary_embeddings)
 
     return df_word

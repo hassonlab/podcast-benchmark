@@ -44,7 +44,7 @@ def word_embedding_decoding_task(data_params: DataParams):
     )
 
     if data_params.embedding_type == "gpt-2xl":
-        df_word["embedding"] = list(aligned_embeddings)
+        df_word["target"] = list(aligned_embeddings)
     if data_params.embedding_type == "glove":
         df_word = embeddings.get_glove_embeddings(df_word, data_params)
     elif data_params.embedding_type == "arbitrary":
@@ -52,6 +52,6 @@ def word_embedding_decoding_task(data_params: DataParams):
 
     if data_params.embedding_pca_dim:
         pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver="auto")
-        df_word.target = list(pca.fit_transform(df_word.embedding.tolist()))
+        df_word["target"] = list(pca.fit_transform(df_word.embedding.tolist()))
 
     return df_word
