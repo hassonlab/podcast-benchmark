@@ -272,6 +272,8 @@ def train_decoding_model(
         history = {
             f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+        history["train_loss"] = []
+        history["val_loss"] = []
         history["num_epochs"] = None
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
