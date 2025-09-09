@@ -6,6 +6,7 @@ import numpy as np
 from config import ExperimentConfig
 import data_utils
 import decoding_utils
+import task_utils
 from loader import import_all_from_package
 import registry
 from config_utils import parse_known_args, load_config_with_overrides, get_nested_value
@@ -22,7 +23,9 @@ def main():
 
     # Load all data.
     raws = data_utils.load_raws(experiment_config.data_params)
-    df_word = data_utils.load_word_data(experiment_config.data_params)
+    df_word = registry.task_data_getter_registry[experiment_config.task_name](
+        experiment_config.data_params
+    )
 
     # Allow user defined function to alter config if necessary for their model.
     if experiment_config.config_setter_name:

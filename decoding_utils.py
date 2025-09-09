@@ -136,6 +136,7 @@ def train_decoding_model(
     Y: np.ndarray,
     selected_words: list[str],
     model_constructor_fn,
+    task_name: str,
     lag: int,
     model_params: dict,
     training_params: TrainingParams,
@@ -173,7 +174,14 @@ def train_decoding_model(
     cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
     cv_results["num_epochs"] = []
 
-    models, histories, roc_results = [], [], []
+    models, histories = [], []
+    # Clean this up later to get rid of this weird optional return value. Hardcoding for now since generalizing this
+    # would get complicated.
+    is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
+    if is_word_embedding_decoding_task:
+        roc_results = []
+    else:
+        roc_results = None
 
     def run_epoch(model, loader, optimizer=None):
         """
@@ -321,11 +329,13 @@ def train_decoding_model(
                 writer.add_scalar(f"{name}/test", val, fold)
             writer.close()
 
-        # word‐level ROC
-        roc = calculate_word_embeddings_roc_auc_logits(
-            model, X[te_idx], Y[te_idx], selected_words[te_idx], device
-        )
-        roc_results.append(roc)
+        # word‐level ROC. Only useful for word embedding task. Hardcoded for now since this would be a bit complicated
+        # to generalize at the moment.
+        if is_word_embedding_decoding_task:
+            roc = calculate_word_embeddings_roc_auc_logits(
+                model, X[te_idx], Y[te_idx], selected_words[te_idx], device
+            )
+            roc_results.append(roc)
 
         models.append(model)
         histories.append(history)
@@ -345,36 +355,16 @@ def train_decoding_model(
     if plot_results:
         plot_cv_results(cv_results)
 
-    # 8. Aggregate final word‐AUC
-    final_word_auc = {}
-    for r in roc_results:
-        final_word_auc.update(r["word_aucs"])
-    weighted_roc = summarize_roc_results(final_word_auc, selected_words)
+    # 8. Aggregate final word‐AUC if task is for word embedding decoding.
+    # Clean this up later to get rid of this weird optional return value.
+    weighted_roc = None
+    if is_word_embedding_decoding_task:
+        final_word_auc = {}
+        for r in roc_results:
+            final_word_auc.update(r["word_aucs"])
+        weighted_roc = summarize_roc_results(final_word_auc, selected_words)
 
     return models, histories, cv_results, roc_results, weighted_roc
-
-
-def calculate_cosine_similarity(
-    predictions: torch.Tensor, targets: torch.Tensor
-) -> torch.Tensor:
-    """
-    Calculate cosine similarity between each pair of rows in predictions and targets.
-
-    Args:
-        predictions: Tensor of shape [batch_size, embedding_dim]
-        targets: Tensor of shape [batch_size, embedding_dim]
-
-    Returns:
-        cosine_similarities: Tensor of shape [batch_size], with cosine similarity per sample
-    """
-    # Normalize along the embedding dimension
-    predictions = F.normalize(predictions, p=2, dim=1)
-    targets = F.normalize(targets, p=2, dim=1)
-
-    # Element-wise dot product across batch
-    cosine_similarities = torch.sum(predictions * targets, dim=1)
-
-    return cosine_similarities
 
 
 def plot_training_history(history, fold=None):
@@ -582,6 +572,7 @@ def run_training_over_lags(
     df_word: pd.DataFrame,
     preprocessing_fn,
     model_constructor_fn,
+    task_name: str,
     model_params: dict,
     training_params: TrainingParams,
     data_params: DataParams,
@@ -635,6 +626,7 @@ def run_training_over_lags(
                 Y_tensor,
                 selected_words,
                 model_constructor_fn,
+                task_name,
                 lag,
                 model_params=model_params,
                 training_params=training_params,
