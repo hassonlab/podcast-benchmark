@@ -89,11 +89,16 @@ def get_data(
         data = epochs.get_data(copy=False)
         selected_targets = df_word.target[epochs.selection]
 
-        selected_words = df_word.word.to_numpy()[epochs.selection]
+        # TODO: Clean this up so we don't need to pass around this potentially None variable.
+        if "word" in df_word.columns:
+            selected_words = df_word.word.to_numpy()[epochs.selection]
+        else:
+            selected_words = None
 
         # Make sure the number of samples match
         assert data.shape[0] == selected_targets.shape[0], "Sample counts don't match"
-        assert data.shape[0] == selected_words.shape[0], "Words don't match"
+        if selected_words:
+            assert data.shape[0] == selected_words.shape[0], "Words don't match"
 
         datas.append(data)
 

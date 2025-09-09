@@ -140,18 +140,16 @@ def register_metric(name=None):
 
 def register_task_data_getter(name=None):
     """
-    Decorator to register a task data getter function that can substitute for the 
-    load_word_data function in data_utils.py.
+    Decorator to register a task data getter function that gathers the data relevant for your task.
 
     The decorated function must follow the signature:
         task_data_getter(data_params: DataParams) -> pd.DataFrame
 
     Where:
         - data_params: DataParams object containing parameters for data loading
-        - Returns: A pandas DataFrame with required columns: 'start', 'end', 'word', 'target'
-                  - start: Start time of the word/token
-                  - end: End time of the word/token  
-                  - word: The actual word/token text
+        - Returns: A pandas DataFrame with required columns: 'start', 'target'
+                  - start: Time to center the neural data example around. Most likely the start time of the word/token but can vary depending on task.
+                  - word: The actual word/token text (Optional)
                   - target: The target variable for prediction tasks
 
     This function provides a way to load task-specific word-level data that follows
