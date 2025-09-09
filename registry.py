@@ -6,6 +6,8 @@ data_preprocessor_registry = {}
 config_setter_registry = {}
 # Registry of functions for metric calculations.
 metric_registry = {}
+# Registry of functions for loading task-specific word data.
+task_data_getter_registry = {}
 
 
 def register_model_constructor(name=None):
@@ -131,6 +133,43 @@ def register_metric(name=None):
     def decorator(fn):
         model_name = name or fn.__name__
         metric_registry[model_name] = fn
+        return fn
+
+    return decorator
+
+
+def register_task_data_getter(name=None):
+    """
+    Decorator to register a task data getter function that can substitute for the 
+    load_word_data function in data_utils.py.
+
+    The decorated function must follow the signature:
+        task_data_getter(data_params: DataParams) -> pd.DataFrame
+
+    Where:
+        - data_params: DataParams object containing parameters for data loading
+        - Returns: A pandas DataFrame with required columns: 'start', 'end', 'word', 'target'
+                  - start: Start time of the word/token
+                  - end: End time of the word/token  
+                  - word: The actual word/token text
+                  - target: The target variable for prediction tasks
+
+    This function provides a way to load task-specific word-level data that follows
+    the expected format for downstream processing while allowing customization of
+    data sources and preprocessing steps.
+
+    Args:
+        name (str, optional): Optional name to register the task data getter under.
+                              Defaults to the function's __name__.
+
+    Returns:
+        function: A decorator that registers the task data getter in
+                  task_data_getter_registry.
+    """
+
+    def decorator(fn):
+        task_data_getter_name = name or fn.__name__
+        task_data_getter_registry[task_data_getter_name] = fn
         return fn
 
     return decorator
