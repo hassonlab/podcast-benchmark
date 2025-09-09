@@ -97,7 +97,7 @@ def get_data(
 
         # Make sure the number of samples match
         assert data.shape[0] == selected_targets.shape[0], "Sample counts don't match"
-        if selected_words:
+        if selected_words is not None:
             assert data.shape[0] == selected_words.shape[0], "Words don't match"
 
         datas.append(data)
