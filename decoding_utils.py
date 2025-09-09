@@ -648,7 +648,8 @@ def run_training_over_lags(
             }
         )
         lag_metrics["lags"] = lag
-        lag_metrics["rocs"] = weighted_roc_mean
+        if weighted_roc_mean:
+            lag_metrics["rocs"] = weighted_roc_mean
 
         # Append new row to existing DataFrame and write to file
         existing_df = pd.concat(

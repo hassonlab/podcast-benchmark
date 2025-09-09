@@ -86,6 +86,7 @@ def main():
         df_word,
         preprocessing_fn,
         model_constructor_fn,
+        experiment_config.task_name,
         model_params=experiment_config.model_params,
         training_params=experiment_config.training_params,
         data_params=experiment_config.data_params,
