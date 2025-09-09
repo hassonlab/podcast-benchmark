@@ -536,11 +536,13 @@ def calculate_word_embeddings_roc_auc_logits(
     # Step 6: Calculate ROC-AUC for each frequent word
     for word in frequent_words:
         try:
-            roc_auc = roc_auc_score(
-                np.array(word_to_idx[word]["is_true"]),
-                np.array(word_to_idx[word]["logits"]),
-            )
-            word_aucs[word] = roc_auc
+            # Catch case where frequent training word doesn't appear in test set.
+            if word in word_to_idx:
+                roc_auc = roc_auc_score(
+                    np.array(word_to_idx[word]["is_true"]),
+                    np.array(word_to_idx[word]["logits"]),
+                )
+                word_aucs[word] = roc_auc
         except ValueError:
             print(
                 f"Skipping ROC-AUC calculation for '{word}' - insufficient class variety"
