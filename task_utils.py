@@ -52,6 +52,6 @@ def word_embedding_decoding_task(data_params: DataParams):
 
     if data_params.embedding_pca_dim:
         pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver="auto")
-        df_word["target"] = list(pca.fit_transform(df_word.embedding.tolist()))
+        df_word.target = list(pca.fit_transform(df_word.target.tolist()))
 
     return df_word
