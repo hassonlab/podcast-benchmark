@@ -333,7 +333,12 @@ def train_decoding_model(
         # to generalize at the moment.
         if is_word_embedding_decoding_task:
             roc = calculate_word_embeddings_roc_auc_logits(
-                model, X[te_idx], Y[te_idx], selected_words[te_idx], device
+                model,
+                X[te_idx],
+                Y[te_idx],
+                selected_words[tr_idx],
+                selected_words[te_idx],
+                device,
             )
             roc_results.append(roc)
 
@@ -450,7 +455,7 @@ def plot_cv_results(cv_results):
 
 
 def calculate_word_embeddings_roc_auc_logits(
-    model, X, Y, selected_words, device, min_repetitions=5
+    model, X, Y, train_val_words, test_set_words, device, min_repetitions=5
 ):
     """
     Calculate ROC-AUC for word embedding predictions using logits approach.
@@ -459,13 +464,15 @@ def calculate_word_embeddings_roc_auc_logits(
     via softmax transformation.
     """
     # Step 1: Get word frequency counts and filter for words with minimum repetitions
-    word_counts = Counter(selected_words)
+    train_word_counts = Counter(train_val_words)
     frequent_words = [
-        word for word, count in word_counts.items() if count >= min_repetitions
+        word for word, count in train_word_counts.items() if count >= min_repetitions
     ]
     print(
-        f"Found {len(frequent_words)} words with at least {min_repetitions} repetitions ({len(frequent_words)/len(set(selected_words))*100:.1f}% of unique words)"
+        f"Found {len(frequent_words)} words with at least {min_repetitions} repetitions ({len(frequent_words)/len(set(train_val_words))*100:.1f}% of unique words)"
     )
+
+    test_word_counts = Counter(test_set_words)
 
     X = X.to(device)
 
@@ -483,9 +490,9 @@ def calculate_word_embeddings_roc_auc_logits(
     # Step 3: Group all embeddings for each unique word
     # Y should be on cpu for comparisons.
     Y = Y.cpu()
-    unique_words = list(set(selected_words))
+    unique_words = list(set(test_set_words))
     word_to_embeddings = {
-        word: np.array(Y[np.array(selected_words) == word]) for word in unique_words
+        word: np.array(Y[np.array(test_set_words) == word]) for word in unique_words
     }
 
     # Step 4: Calculate average embeddings for each unique word
@@ -512,7 +519,7 @@ def calculate_word_embeddings_roc_auc_logits(
         logits = F.softmax(logits, dim=0).numpy()
 
         # For each instance, collect logits for the correct label and all other labels
-        true_word = selected_words[idx]
+        true_word = test_set_words[idx]
         true_word_idx = unique_words.index(true_word)
 
         # Update the logits for each word
@@ -540,9 +547,12 @@ def calculate_word_embeddings_roc_auc_logits(
             )
 
     # Step 7: Calculate weighted ROC-AUC based on word frequency
-    total_count = sum(word_counts[word] for word in frequent_words if word in word_aucs)
+    total_count = sum(
+        test_word_counts[word] for word in frequent_words if word in word_aucs
+    )
     weighted_auc = (
-        sum(word_aucs[word] * word_counts[word] for word in word_aucs) / total_count
+        sum(word_aucs[word] * test_word_counts[word] for word in word_aucs)
+        / total_count
     )
 
     return {
