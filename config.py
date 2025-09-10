@@ -43,7 +43,9 @@ class TrainingParams:
     early_stopping_patience: int = 10
     # Number of folds to train over per-lag.
     n_folds: int = 5
-    # Models will be trained over all lags in range(min_lag, max_lag, lag_step_size). In ms.
+    # If lag is specified then will train over just this lag relative to word onset. In ms.
+    lag: Optional[int] = None
+    # Otherwise models will be trained over all lags in range(min_lag, max_lag, lag_step_size). In ms.
     min_lag: int = -10_000
     max_lag: int = 10_000
     lag_step_size: int = 1000

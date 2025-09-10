@@ -72,11 +72,15 @@ def main():
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
         yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
-    lags = np.arange(
-        experiment_config.training_params.min_lag,
-        experiment_config.training_params.max_lag,
-        experiment_config.training_params.lag_step_size,
-    )
+    # Decide what lags we need to train over.
+    if experiment_config.training_params.lag:
+        lags = [experiment_config.training_params.lag]
+    else:
+        lags = np.arange(
+            experiment_config.training_params.min_lag,
+            experiment_config.training_params.max_lag,
+            experiment_config.training_params.lag_step_size,
+        )
     weighted_roc_means = decoding_utils.run_training_over_lags(
         lags,
         raws,
