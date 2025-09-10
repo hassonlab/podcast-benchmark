@@ -9,7 +9,7 @@ description = "ECoG decoding benchmark for podcast data"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
-    {name = "Zach Paris", email = "zparis@princeton.edu"}
+    {name = "Zach Paris", email = "zparis99@gmail.com"}
 ]
 
 dependencies = [
