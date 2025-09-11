@@ -98,6 +98,8 @@ else
             echo "Downloading: $file_url"
 
             # Download the file using cross-platform function
+            # Remove symlink if it exists
+            [ -L "$(basename "$file_url")" ] && rm "$(basename "$file_url")"
             download_file "$file_url" "$(basename "$file_url")" "true"
             
             # Move to proper directory if needed
