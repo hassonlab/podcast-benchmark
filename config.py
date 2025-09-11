@@ -74,6 +74,8 @@ class ExperimentConfig:
     model_constructor_name: str = ""
     # Config setter function name. Must be registered using @registry.register_config_setter()
     config_setter_name: Optional[str] = None
+    # Task to run for decoding. Must have a function registered using @registry.register_task_data_getter(). Defaults to decoding word embeddings.
+    task_name: str = "word_embedding_decoding_task"
     # Parameters for this model. Can be any user-defined dictionary.
     model_params: dict = field(default_factory=lambda: {})
     # Parameters for training.
