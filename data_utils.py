@@ -69,14 +69,29 @@ def get_data(
     """
     datas = []
     for raw in raws:
-        events = np.zeros((len(df_word), 3), dtype=int)
-        events[:, 0] = (df_word.start * raw.info["sfreq"]).astype(int)
+        # Calculate time bounds for filtering
+        tmin = lag / 1000 - window_width / 2
+        tmax = lag / 1000 + window_width / 2 - 2e-3
+        data_duration = raw.times[-1]  # End time of the data
+
+        # Filter out events where the time window falls outside data bounds
+        valid_mask = (df_word.start + tmin >= 0) & (
+            df_word.start + tmax <= data_duration
+        )
+        df_word_valid = df_word[valid_mask].reset_index(drop=True)
+
+        if len(df_word_valid) == 0:
+            # No valid events for this raw, skip
+            continue
+
+        events = np.zeros((len(df_word_valid), 3), dtype=int)
+        events[:, 0] = (df_word_valid.start * raw.info["sfreq"]).astype(int)
 
         epochs = mne.Epochs(
             raw,
             events,
-            tmin=lag / 1000 - window_width / 2,
-            tmax=lag / 1000 + window_width / 2 - 2e-3,
+            tmin=tmin,
+            tmax=tmax,
             baseline=None,
             proj=False,
             event_id=None,
@@ -87,11 +102,11 @@ def get_data(
         )
 
         data = epochs.get_data(copy=False)
-        selected_targets = df_word.target[epochs.selection]
+        selected_targets = df_word_valid.target[epochs.selection]
 
         # TODO: Clean this up so we don't need to pass around this potentially None variable.
-        if "word" in df_word.columns:
-            selected_words = df_word.word.to_numpy()[epochs.selection]
+        if "word" in df_word_valid.columns:
+            selected_words = df_word_valid.word.to_numpy()[epochs.selection]
         else:
             selected_words = None
 
@@ -101,6 +116,9 @@ def get_data(
             assert data.shape[0] == selected_words.shape[0], "Words don't match"
 
         datas.append(data)
+
+    if len(datas) == 0:
+        raise ValueError("No valid events found within data time bounds")
 
     datas = np.concatenate(datas, axis=1)
 
