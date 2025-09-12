@@ -46,6 +46,14 @@ def main():
         experiment_config.model_constructor_name
     ]
 
+    # Overwrite subject id's and set per-subject electrodes based on file if provided.
+    if experiment_config.data_params.electrode_file_path:
+        subject_electrode_map = data_utils.read_electrode_file(
+            experiment_config.data_params.electrode_file_path
+        )
+        experiment_config.data_params.subject_ids = subject_electrode_map.keys()
+        experiment_config.data_params.per_subject_electrodes = subject_electrode_map
+
     # Generate trial name if user specified format string.
     trial_name = experiment_config.trial_name
     if experiment_config.format_fields:

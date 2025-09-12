@@ -19,6 +19,13 @@ class DataParams:
     data_root: str = "data"
     # Number of embeddings to reduce the embeddings to using pca. If None, don't run PCA.
     embedding_pca_dim: Optional[int] = None
+    # CSV file with columns subject (subject integer id) and elec (string name of electrode).
+    # If not set then defaults to configured subject_ids and channel_reg_ex.
+    electrode_file_path: Optional[str] = None
+    # TODO: Transition to making this dictionary the only field that needs to be set for specifying electrodes.
+    # Per-subject electrode list, should be a dictionary from subject id's to a list of electrode names.
+    # Optional and can instead use channel_reg_ex if not set.
+    per_subject_electrodes: Optional[dict[int, list[str]]] = None
     # A regular expression to pick which channels you are interested in.
     # (i.e. "LG[AB]*" will select channels that start with "LGA" or "LGB")
     channel_reg_ex: Optional[str] = None

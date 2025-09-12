@@ -39,12 +39,62 @@ def load_raws(data_params: DataParams):
         )
 
         raw = mne.io.read_raw_fif(file_path, verbose=False)
-        if data_params.channel_reg_ex:
+        if data_params.per_subject_electrodes:
+            subject_electrode_names = data_params.per_subject_electrodes[sub_id]
+            picks = mne.pick_channels(raw.ch_names, subject_electrode_names)
+            raw = raw.pick(picks)
+        elif data_params.channel_reg_ex:
             picks = mne.pick_channels_regexp(raw.ch_names, data_params.channel_reg_ex)
             raw = raw.pick(picks)
         raws.append(raw)
 
     return raws
+
+
+def read_electrode_file(file_path: str):
+    """
+    Parse an electrode mapping CSV file to create a subject-to-electrodes mapping.
+
+    This function reads a CSV file containing electrode information organized by subject
+    and returns a dictionary mapping each subject ID to their list of electrode names.
+    Each subject can have multiple electrodes, and the electrode order is preserved
+    as it appears in the CSV file.
+
+    Args:
+        file_path (str): Path to the CSV file containing electrode data.
+                        The CSV must have columns 'subject' (int) and 'elec' (str).
+
+    Returns:
+        dict: A dictionary where keys are subject IDs (int) and values are lists
+              of electrode names (str) for that subject. For example:
+              {1: ['A1', 'A2', 'B1'], 2: ['C1', 'C2']}
+
+    Raises:
+        FileNotFoundError: If the specified file does not exist.
+        KeyError: If required columns 'subject' or 'elec' are missing from the CSV.
+
+    Example:
+        >>> # CSV file contains:
+        >>> # subject,elec
+        >>> # 1,A1
+        >>> # 1,A2
+        >>> # 2,C1
+        >>> result = read_electrode_file('electrodes.csv')
+        >>> print(result)
+        {1: ['A1', 'A2'], 2: ['C1']}
+    """
+    file_data = pd.read_csv(file_path)
+    subjects, electrodes = file_data.subject, file_data.elec
+
+    sub_elec_mapping = {}
+    for subject, electrode in zip(subjects, electrodes):
+        subject = int(subject)
+        if subject not in sub_elec_mapping.keys():
+            sub_elec_mapping[subject] = []
+
+        sub_elec_mapping[subject].append(electrode)
+
+    return sub_elec_mapping
 
 
 def get_data(
