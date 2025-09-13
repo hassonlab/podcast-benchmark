@@ -9,6 +9,69 @@ import registry
 
 
 @registry.register_task_data_getter()
+def sentence_onset_task(data_params: DataParams):
+    """
+    Binary classification dataset for sentence onset detection.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: 1.0 for sentence onset, 0.0 for negatives sampled away from onsets
+
+    Notes:
+      - Uses `data_params.sentence_csv_path` if provided; else defaults to
+        `<data_root>/all_sentences_podcast.csv`.
+      - Negative examples are sampled within each sentence, at least
+        `negative_margin_s` seconds after onset and at least one window width
+        before the sentence end.
+    """
+    # Resolve CSV path
+    default_csv = os.path.join(data_params.data_root, "all_sentences_podcast.csv")
+    csv_path = getattr(data_params, "sentence_csv_path", None) or default_csv
+
+    df = pd.read_csv(csv_path, index_col=0)
+
+    # Expect columns: sentence_onset, sentence_offset
+    if not {"sentence_onset", "sentence_offset"}.issubset(df.columns):
+        raise ValueError(
+            "Expected columns 'sentence_onset' and 'sentence_offset' in sentence CSV"
+        )
+
+    onsets = df["sentence_onset"].to_numpy()
+    offsets = df["sentence_offset"].to_numpy()
+
+    # Positives
+    pos = pd.DataFrame({"start": onsets, "target": 1.0})
+
+    # Negatives: sample away from onsets within the same sentence when possible
+    import numpy as np
+
+    window = getattr(data_params, "window_width", 0.625) or 0.625
+    negatives_per_positive = getattr(data_params, "negatives_per_positive", 1)
+    negative_margin_s = getattr(data_params, "negative_margin_s", 2.0)
+
+    rng = np.random.default_rng(0)
+    neg_starts = []
+    for onset, offset in zip(onsets, offsets):
+        # Start sampling after a margin to avoid including the onset in the window
+        left = onset + negative_margin_s
+        # Ensure we can still place a full window without touching sentence end
+        right = max(left, offset - window - 1e-3)
+        if right > left:
+            samples = rng.uniform(left, right, size=max(0, negatives_per_positive))
+            neg_starts.extend(samples.tolist())
+
+    neg = pd.DataFrame({"start": neg_starts, "target": 0.0})
+
+    df_out = (
+        pd.concat([pos, neg], ignore_index=True)
+        .sort_values("start")
+        .reset_index(drop=True)
+    )
+
+    return df_out
+
+
+@registry.register_task_data_getter()
 def word_embedding_decoding_task(data_params: DataParams):
     """
     Loads and processes word-level data and retrieves corresponding embeddings based on specified parameters.

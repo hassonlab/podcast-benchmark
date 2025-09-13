@@ -33,6 +33,11 @@ class DataParams:
     embedding_layer: Optional[int] = None
     # A user defined configuration for their specific models preprocessor function.
     preprocessor_params: Optional[dict] = None
+    # Optional path to sentence CSV with columns sentence_onset/sentence_offset
+    sentence_csv_path: Optional[str] = None
+    # Task-specific controls (used by sentence_onset_task)
+    negatives_per_positive: int = 1
+    negative_margin_s: float = 2.0
 
 
 @dataclass
