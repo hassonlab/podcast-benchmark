@@ -9,7 +9,11 @@ import pytest
 import torch
 import numpy as np
 from scipy.spatial.distance import cosine
-from decoding_utils import compute_cosine_distances, compute_class_scores
+from decoding_utils import (
+    compute_cosine_distances,
+    compute_class_scores,
+    build_vocabulary,
+)
 
 
 class TestComputeCosineDistances:
@@ -19,45 +23,56 @@ class TestComputeCosineDistances:
     def sample_word_embeddings(self):
         """Create sample word embeddings for testing."""
         # 4 words, each with 6-dimensional embeddings
-        return torch.tensor([
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # word 0
-            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # word 1
-            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # word 2
-            [0.5, 0.5, 0.0, 0.0, 0.0, 0.0],  # word 3 (mix of word 0 and 1)
-        ], dtype=torch.float32)
+        return torch.tensor(
+            [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # word 0
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # word 1
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # word 2
+                [0.5, 0.5, 0.0, 0.0, 0.0, 0.0],  # word 3 (mix of word 0 and 1)
+            ],
+            dtype=torch.float32,
+        )
 
     @pytest.fixture
     def sample_predictions_2d(self):
         """Create sample 2D predictions (single prediction per sample)."""
         # 3 samples, each with 6-dimensional prediction
-        return torch.tensor([
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # should be closest to word 0
-            [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # should be closest to word 1
-            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # should be closest to word 2
-        ], dtype=torch.float32)
+        return torch.tensor(
+            [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # should be closest to word 0
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # should be closest to word 1
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # should be closest to word 2
+            ],
+            dtype=torch.float32,
+        )
 
     @pytest.fixture
     def sample_predictions_3d(self):
         """Create sample 3D predictions (ensemble predictions)."""
         # 2 samples, 3 ensemble predictions each, 6-dimensional
-        return torch.tensor([
-            # Sample 0: ensemble predictions all close to word 0
+        return torch.tensor(
             [
-                [0.9, 0.1, 0.0, 0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.8, 0.2, 0.0, 0.0, 0.0, 0.0],
+                # Sample 0: ensemble predictions all close to word 0
+                [
+                    [0.9, 0.1, 0.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.8, 0.2, 0.0, 0.0, 0.0, 0.0],
+                ],
+                # Sample 1: ensemble predictions all close to word 1
+                [
+                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.1, 0.9, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.8, 0.2, 0.0, 0.0, 0.0],
+                ],
             ],
-            # Sample 1: ensemble predictions all close to word 1
-            [
-                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                [0.1, 0.9, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.8, 0.2, 0.0, 0.0, 0.0],
-            ],
-        ], dtype=torch.float32)
+            dtype=torch.float32,
+        )
 
     def test_basic_2d_predictions(self, sample_predictions_2d, sample_word_embeddings):
         """Test basic functionality with 2D predictions (single predictions)."""
-        distances = compute_cosine_distances(sample_predictions_2d, sample_word_embeddings)
+        distances = compute_cosine_distances(
+            sample_predictions_2d, sample_word_embeddings
+        )
 
         # Check output shape
         assert distances.shape == (3, 4)  # 3 samples, 4 words
@@ -74,7 +89,9 @@ class TestComputeCosineDistances:
 
     def test_basic_3d_predictions(self, sample_predictions_3d, sample_word_embeddings):
         """Test basic functionality with 3D predictions (ensemble predictions)."""
-        distances = compute_cosine_distances(sample_predictions_3d, sample_word_embeddings)
+        distances = compute_cosine_distances(
+            sample_predictions_3d, sample_word_embeddings
+        )
 
         # Check output shape
         assert distances.shape == (2, 4)  # 2 samples, 4 words
@@ -100,14 +117,20 @@ class TestComputeCosineDistances:
     def test_orthogonal_vectors_give_unit_distance(self):
         """Test that orthogonal vectors give cosine distance of 1."""
         # Create orthogonal vectors
-        word_embeddings = torch.tensor([
-            [1.0, 0.0],  # word 0
-            [0.0, 1.0],  # word 1 (orthogonal to word 0)
-        ], dtype=torch.float32)
+        word_embeddings = torch.tensor(
+            [
+                [1.0, 0.0],  # word 0
+                [0.0, 1.0],  # word 1 (orthogonal to word 0)
+            ],
+            dtype=torch.float32,
+        )
 
-        predictions = torch.tensor([
-            [1.0, 0.0],  # prediction identical to word 0
-        ], dtype=torch.float32)
+        predictions = torch.tensor(
+            [
+                [1.0, 0.0],  # prediction identical to word 0
+            ],
+            dtype=torch.float32,
+        )
 
         distances = compute_cosine_distances(predictions, word_embeddings)
 
@@ -120,18 +143,32 @@ class TestComputeCosineDistances:
     def test_ensemble_averaging(self):
         """Test that ensemble predictions are properly averaged."""
         # Create word embeddings
-        word_embeddings = torch.tensor([
-            [1.0, 0.0, 0.0],  # word 0
-            [0.0, 1.0, 0.0],  # word 1
-        ], dtype=torch.float32)
+        word_embeddings = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],  # word 0
+                [0.0, 1.0, 0.0],  # word 1
+            ],
+            dtype=torch.float32,
+        )
 
         # Create ensemble with predictions pointing to different words
-        ensemble_predictions = torch.tensor([
+        ensemble_predictions = torch.tensor(
             [
-                [1.0, 0.0, 0.0],  # prediction 1: distance 0 to word 0, distance 1 to word 1
-                [0.0, 1.0, 0.0],  # prediction 2: distance 1 to word 0, distance 0 to word 1
-            ]
-        ], dtype=torch.float32)
+                [
+                    [
+                        1.0,
+                        0.0,
+                        0.0,
+                    ],  # prediction 1: distance 0 to word 0, distance 1 to word 1
+                    [
+                        0.0,
+                        1.0,
+                        0.0,
+                    ],  # prediction 2: distance 1 to word 0, distance 0 to word 1
+                ]
+            ],
+            dtype=torch.float32,
+        )
 
         distances = compute_cosine_distances(ensemble_predictions, word_embeddings)
 
@@ -144,9 +181,13 @@ class TestComputeCosineDistances:
         assert abs(distances[0, 0].item() - expected_distance) < 1e-6
         assert abs(distances[0, 1].item() - expected_distance) < 1e-6
 
-    def test_consistency_with_scipy_cosine(self, sample_predictions_2d, sample_word_embeddings):
+    def test_consistency_with_scipy_cosine(
+        self, sample_predictions_2d, sample_word_embeddings
+    ):
         """Test that results are consistent with scipy's cosine distance."""
-        distances = compute_cosine_distances(sample_predictions_2d, sample_word_embeddings)
+        distances = compute_cosine_distances(
+            sample_predictions_2d, sample_word_embeddings
+        )
 
         # Compare with scipy calculations
         for i, pred in enumerate(sample_predictions_2d):
@@ -240,10 +281,13 @@ class TestComputeCosineDistances:
     def test_numerical_stability_with_zero_vectors(self, sample_word_embeddings):
         """Test numerical stability when dealing with zero vectors."""
         # Create predictions with a zero vector
-        predictions = torch.tensor([
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # zero vector
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # normal vector
-        ], dtype=torch.float32)
+        predictions = torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # zero vector
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # normal vector
+            ],
+            dtype=torch.float32,
+        )
 
         # Function should not crash and should return finite values
         distances = compute_cosine_distances(predictions, sample_word_embeddings)
@@ -253,7 +297,9 @@ class TestComputeCosineDistances:
 
     def test_output_range(self, sample_predictions_2d, sample_word_embeddings):
         """Test that output distances are in valid range [0, 2]."""
-        distances = compute_cosine_distances(sample_predictions_2d, sample_word_embeddings)
+        distances = compute_cosine_distances(
+            sample_predictions_2d, sample_word_embeddings
+        )
 
         # Cosine distance should be between 0 and 2
         # (0 for identical vectors, 2 for opposite vectors)
@@ -262,17 +308,22 @@ class TestComputeCosineDistances:
 
     def test_deterministic_output(self, sample_predictions_2d, sample_word_embeddings):
         """Test that function produces deterministic output."""
-        distances_1 = compute_cosine_distances(sample_predictions_2d, sample_word_embeddings)
-        distances_2 = compute_cosine_distances(sample_predictions_2d, sample_word_embeddings)
+        distances_1 = compute_cosine_distances(
+            sample_predictions_2d, sample_word_embeddings
+        )
+        distances_2 = compute_cosine_distances(
+            sample_predictions_2d, sample_word_embeddings
+        )
 
         assert torch.allclose(distances_1, distances_2, atol=1e-7)
 
     def test_single_sample_single_ensemble(self, sample_word_embeddings):
         """Test edge case with single sample and single ensemble member."""
         # Single sample, single ensemble member (equivalent to 2D case)
-        predictions = torch.tensor([
-            [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # 1 sample, 1 ensemble, 6 dims
-        ], dtype=torch.float32)
+        predictions = torch.tensor(
+            [[[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]]],  # 1 sample, 1 ensemble, 6 dims
+            dtype=torch.float32,
+        )
 
         distances = compute_cosine_distances(predictions, sample_word_embeddings)
 
@@ -292,10 +343,13 @@ class TestComputeCosineDistances:
 
         predictions = ensemble.unsqueeze(0)  # Add batch dimension
 
-        word_embeddings = torch.tensor([
-            [1.0, 0.0, 0.0],  # target word
-            [0.0, 1.0, 0.0],  # different word
-        ], dtype=torch.float32)
+        word_embeddings = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],  # target word
+                [0.0, 1.0, 0.0],  # different word
+            ],
+            dtype=torch.float32,
+        )
 
         distances = compute_cosine_distances(predictions, word_embeddings)
 
@@ -313,11 +367,14 @@ class TestComputeClassScores:
     def sample_distances_and_labels(self):
         """Create sample cosine distances and word labels for testing."""
         # 3 samples, 6 word embeddings
-        cosine_distances = torch.tensor([
-            [0.1, 0.9, 0.2, 0.8, 0.3, 0.7],  # sample 0
-            [0.8, 0.2, 0.7, 0.3, 0.6, 0.4],  # sample 1
-            [0.4, 0.6, 0.5, 0.5, 0.1, 0.9],  # sample 2
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.9, 0.2, 0.8, 0.3, 0.7],  # sample 0
+                [0.8, 0.2, 0.7, 0.3, 0.6, 0.4],  # sample 1
+                [0.4, 0.6, 0.5, 0.5, 0.1, 0.9],  # sample 2
+            ],
+            dtype=torch.float32,
+        )
 
         # 6 word embeddings belong to 3 classes (2 embeddings per class)
         word_labels = torch.tensor([0, 0, 1, 1, 2, 2], dtype=torch.long)
@@ -344,9 +401,12 @@ class TestComputeClassScores:
     def test_class_averaging_logic(self):
         """Test that distances are properly averaged within each class."""
         # Create simple test case where we can manually calculate expected values
-        cosine_distances = torch.tensor([
-            [0.1, 0.3, 0.2, 0.8],  # 1 sample, 4 word embeddings
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.3, 0.2, 0.8],  # 1 sample, 4 word embeddings
+            ],
+            dtype=torch.float32,
+        )
 
         # Class 0: embeddings 0,1 (distances 0.1, 0.3) -> average = 0.2
         # Class 1: embeddings 2,3 (distances 0.2, 0.8) -> average = 0.5
@@ -362,9 +422,12 @@ class TestComputeClassScores:
 
     def test_single_embedding_per_class(self):
         """Test case where each class has only one embedding."""
-        cosine_distances = torch.tensor([
-            [0.2, 0.5, 0.8],  # 1 sample, 3 word embeddings
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.2, 0.5, 0.8],  # 1 sample, 3 word embeddings
+            ],
+            dtype=torch.float32,
+        )
 
         # Each embedding belongs to a different class
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
@@ -378,9 +441,12 @@ class TestComputeClassScores:
 
     def test_different_class_sizes(self):
         """Test with classes having different numbers of word embeddings."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],  # 1 sample, 6 word embeddings
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],  # 1 sample, 6 word embeddings
+            ],
+            dtype=torch.float32,
+        )
 
         # Class 0: 1 embedding, Class 1: 2 embeddings, Class 2: 3 embeddings
         word_labels = torch.tensor([0, 1, 1, 2, 2, 2], dtype=torch.long)
@@ -399,9 +465,12 @@ class TestComputeClassScores:
     def test_softmax_probabilities(self):
         """Test that softmax transformation is applied correctly."""
         # Simple case with known logits
-        cosine_distances = torch.tensor([
-            [0.0, 1.0, 0.5],  # distances
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.0, 1.0, 0.5],  # distances
+            ],
+            dtype=torch.float32,
+        )
 
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
@@ -417,10 +486,13 @@ class TestComputeClassScores:
 
     def test_multiple_samples(self):
         """Test with multiple samples."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.9],  # sample 0
-            [0.8, 0.2],  # sample 1
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.9],  # sample 0
+                [0.8, 0.2],  # sample 1
+            ],
+            dtype=torch.float32,
+        )
 
         word_labels = torch.tensor([0, 1], dtype=torch.long)
 
@@ -431,18 +503,23 @@ class TestComputeClassScores:
         assert logits.shape == (2, 2)
 
         # Expected logits for each sample
-        expected_logits = torch.tensor([
-            [0.9, 0.1],  # sample 0: [1-0.1, 1-0.9]
-            [0.2, 0.8],  # sample 1: [1-0.8, 1-0.2]
-        ])
+        expected_logits = torch.tensor(
+            [
+                [0.9, 0.1],  # sample 0: [1-0.1, 1-0.9]
+                [0.2, 0.8],  # sample 1: [1-0.8, 1-0.2]
+            ]
+        )
 
         assert torch.allclose(logits, expected_logits, atol=1e-6)
 
     def test_consistent_class_ordering(self):
         """Test that class ordering is consistent (classes are always sorted internally)."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.2, 0.3],
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.2, 0.3],
+            ],
+            dtype=torch.float32,
+        )
 
         # Test with different label orderings but same mapping
         word_labels_1 = torch.tensor([0, 1, 2], dtype=torch.long)
@@ -457,18 +534,25 @@ class TestComputeClassScores:
         # Test that classes are in sorted order internally
         # Labels 2, 0, 1 should result in classes ordered as 0, 1, 2
         labels_unsorted = torch.tensor([2, 0, 1], dtype=torch.long)
-        distances_for_unsorted = torch.tensor([[0.3, 0.1, 0.2]], dtype=torch.float32)  # corresponding to labels 2,0,1
+        distances_for_unsorted = torch.tensor(
+            [[0.3, 0.1, 0.2]], dtype=torch.float32
+        )  # corresponding to labels 2,0,1
 
-        _, logits_unsorted = compute_class_scores(distances_for_unsorted, labels_unsorted)
+        _, logits_unsorted = compute_class_scores(
+            distances_for_unsorted, labels_unsorted
+        )
 
         # Should have same shape as original
         assert logits_unsorted.shape == logits_1.shape
 
     def test_empty_class_handling(self):
         """Test handling of edge cases with class gaps."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.2, 0.3],
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.2, 0.3],
+            ],
+            dtype=torch.float32,
+        )
 
         # Classes 0, 2, 5 (gaps in numbering)
         word_labels = torch.tensor([0, 2, 5], dtype=torch.long)
@@ -484,9 +568,13 @@ class TestComputeClassScores:
 
     def test_gradient_flow(self):
         """Test that gradients flow through the computation."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.9, 0.2, 0.8],
-        ], dtype=torch.float32, requires_grad=True)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.9, 0.2, 0.8],
+            ],
+            dtype=torch.float32,
+            requires_grad=True,
+        )
 
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
@@ -500,25 +588,34 @@ class TestComputeClassScores:
         # Check that gradients were computed
         assert cosine_distances.grad is not None
         assert cosine_distances.grad.shape == cosine_distances.shape
-        assert not torch.allclose(cosine_distances.grad, torch.zeros_like(cosine_distances.grad))
+        assert not torch.allclose(
+            cosine_distances.grad, torch.zeros_like(cosine_distances.grad)
+        )
 
     def test_device_consistency(self):
         """Test that function works with different devices."""
-        cosine_distances = torch.tensor([
-            [0.1, 0.2, 0.3, 0.4],
-        ], dtype=torch.float32)
+        cosine_distances = torch.tensor(
+            [
+                [0.1, 0.2, 0.3, 0.4],
+            ],
+            dtype=torch.float32,
+        )
 
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
         # Test on CPU
-        probabilities_cpu, logits_cpu = compute_class_scores(cosine_distances, word_labels)
+        probabilities_cpu, logits_cpu = compute_class_scores(
+            cosine_distances, word_labels
+        )
 
         # Move to GPU if available
         if torch.cuda.is_available():
             cosine_distances_gpu = cosine_distances.cuda()
             word_labels_gpu = word_labels.cuda()
 
-            probabilities_gpu, logits_gpu = compute_class_scores(cosine_distances_gpu, word_labels_gpu)
+            probabilities_gpu, logits_gpu = compute_class_scores(
+                cosine_distances_gpu, word_labels_gpu
+            )
 
             # Results should be the same
             assert torch.allclose(probabilities_cpu, probabilities_gpu.cpu(), atol=1e-6)
@@ -527,24 +624,34 @@ class TestComputeClassScores:
     def test_numerical_stability(self):
         """Test numerical stability with extreme values."""
         # Test with very small distances (high similarity)
-        cosine_distances_small = torch.tensor([
-            [1e-7, 1e-8, 1e-6],
-        ], dtype=torch.float32)
+        cosine_distances_small = torch.tensor(
+            [
+                [1e-7, 1e-8, 1e-6],
+            ],
+            dtype=torch.float32,
+        )
 
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
-        probabilities_small, logits_small = compute_class_scores(cosine_distances_small, word_labels)
+        probabilities_small, logits_small = compute_class_scores(
+            cosine_distances_small, word_labels
+        )
 
         # Should not have NaN or Inf values
         assert torch.isfinite(probabilities_small).all()
         assert torch.isfinite(logits_small).all()
 
         # Test with distances close to 2 (very dissimilar)
-        cosine_distances_large = torch.tensor([
-            [1.999, 1.998, 1.997],
-        ], dtype=torch.float32)
+        cosine_distances_large = torch.tensor(
+            [
+                [1.999, 1.998, 1.997],
+            ],
+            dtype=torch.float32,
+        )
 
-        probabilities_large, logits_large = compute_class_scores(cosine_distances_large, word_labels)
+        probabilities_large, logits_large = compute_class_scores(
+            cosine_distances_large, word_labels
+        )
 
         # Should not have NaN or Inf values
         assert torch.isfinite(probabilities_large).all()
@@ -553,17 +660,23 @@ class TestComputeClassScores:
     def test_integration_with_compute_cosine_distances(self):
         """Test integration with compute_cosine_distances function."""
         # Create test data
-        predictions = torch.tensor([
-            [1.0, 0.0, 0.0],  # should be closest to word 0
-            [0.0, 1.0, 0.0],  # should be closest to word 1
-        ], dtype=torch.float32)
+        predictions = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],  # should be closest to word 0
+                [0.0, 1.0, 0.0],  # should be closest to word 1
+            ],
+            dtype=torch.float32,
+        )
 
-        word_embeddings = torch.tensor([
-            [1.0, 0.0, 0.0],  # class 0
-            [0.8, 0.2, 0.0],  # class 0 (similar to above)
-            [0.0, 1.0, 0.0],  # class 1
-            [0.0, 0.8, 0.2],  # class 1 (similar to above)
-        ], dtype=torch.float32)
+        word_embeddings = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],  # class 0
+                [0.8, 0.2, 0.0],  # class 0 (similar to above)
+                [0.0, 1.0, 0.0],  # class 1
+                [0.0, 0.8, 0.2],  # class 1 (similar to above)
+            ],
+            dtype=torch.float32,
+        )
 
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
@@ -579,3 +692,240 @@ class TestComputeClassScores:
 
         # Second prediction should be more likely to be class 1
         assert probabilities[1, 1] > probabilities[1, 0]
+
+    def test_can_handle_no_provided_word_labels(self, sample_distances_and_labels):
+        """Test basic functionality of compute_class_scores."""
+        cosine_distances, _ = sample_distances_and_labels
+
+        probabilities, logits = compute_class_scores(cosine_distances)
+
+        # Check output shapes
+        assert probabilities.shape == (3, 6)  # 3 samples, 3 classes
+        assert logits.shape == (3, 6)
+
+        # Check that probabilities sum to 1 for each sample
+        for i in range(3):
+            assert abs(probabilities[i].sum().item() - 1.0) < 1e-6
+
+        # Check that probabilities are non-negative
+        assert (probabilities >= 0).all()
+
+
+class TestBuildVocabulary:
+    """Test build_vocabulary function for creating word-to-ID mappings."""
+
+    def test_basic_functionality(self):
+        """Test basic functionality with unique words."""
+        words = ["apple", "banana", "cherry"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Check word_to_id mapping
+        assert word_to_id == {"apple": 0, "banana": 1, "cherry": 2}
+
+        # Check id_to_word mapping
+        assert id_to_word == {0: "apple", 1: "banana", 2: "cherry"}
+
+        # Check position_to_id mapping
+        assert position_to_id == [0, 1, 2]
+
+    def test_with_repeated_words(self):
+        """Test functionality with repeated words."""
+        words = ["apple", "banana", "apple", "cherry", "banana", "apple"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Check word_to_id mapping - should assign IDs in order of first appearance
+        assert word_to_id == {"apple": 0, "banana": 1, "cherry": 2}
+
+        # Check id_to_word mapping
+        assert id_to_word == {0: "apple", 1: "banana", 2: "cherry"}
+
+        # Check position_to_id mapping - should map each position to correct word ID
+        expected_position_to_id = [
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+        ]  # apple, banana, apple, cherry, banana, apple
+        assert position_to_id == expected_position_to_id
+
+    def test_empty_list(self):
+        """Test with empty word list."""
+        words = []
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {}
+        assert id_to_word == {}
+        assert position_to_id == []
+
+    def test_single_word(self):
+        """Test with single word."""
+        words = ["hello"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {"hello": 0}
+        assert id_to_word == {0: "hello"}
+        assert position_to_id == [0]
+
+    def test_single_word_repeated(self):
+        """Test with single word repeated multiple times."""
+        words = ["hello", "hello", "hello"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {"hello": 0}
+        assert id_to_word == {0: "hello"}
+        assert position_to_id == [0, 0, 0]
+
+    def test_order_preservation(self):
+        """Test that word IDs are assigned in order of first appearance."""
+        words = ["zebra", "apple", "banana", "zebra", "apple"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # IDs should be assigned based on first appearance order
+        assert word_to_id == {"zebra": 0, "apple": 1, "banana": 2}
+        assert id_to_word == {0: "zebra", 1: "apple", 2: "banana"}
+        assert position_to_id == [0, 1, 2, 0, 1]  # zebra, apple, banana, zebra, apple
+
+    def test_case_sensitivity(self):
+        """Test that function treats different cases as different words."""
+        words = ["Apple", "apple", "APPLE", "Apple"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Should treat different cases as different words
+        assert word_to_id == {"Apple": 0, "apple": 1, "APPLE": 2}
+        assert id_to_word == {0: "Apple", 1: "apple", 2: "APPLE"}
+        assert position_to_id == [0, 1, 2, 0]  # Apple, apple, APPLE, Apple
+
+    def test_with_special_characters(self):
+        """Test with words containing special characters."""
+        words = ["hello-world", "test_word", "word@symbol", "hello-world"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {"hello-world": 0, "test_word": 1, "word@symbol": 2}
+        assert id_to_word == {0: "hello-world", 1: "test_word", 2: "word@symbol"}
+        assert position_to_id == [0, 1, 2, 0]
+
+    def test_with_numbers_as_strings(self):
+        """Test with numeric strings."""
+        words = ["1", "2", "10", "1", "3", "2"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {"1": 0, "2": 1, "10": 2, "3": 3}
+        assert id_to_word == {0: "1", 1: "2", 2: "10", 3: "3"}
+        assert position_to_id == [0, 1, 2, 0, 3, 1]
+
+    def test_with_empty_strings(self):
+        """Test with empty strings in the word list."""
+        words = ["hello", "", "world", "", "hello"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Empty string should be treated as a valid word
+        assert word_to_id == {"hello": 0, "": 1, "world": 2}
+        assert id_to_word == {0: "hello", 1: "", 2: "world"}
+        assert position_to_id == [0, 1, 2, 1, 0]
+
+    def test_consistency_across_calls(self):
+        """Test that multiple calls with same input produce consistent results."""
+        words = ["apple", "banana", "apple", "cherry"]
+
+        word_to_id1, id_to_word1, position_to_id1 = build_vocabulary(words)
+        word_to_id2, id_to_word2, position_to_id2 = build_vocabulary(words)
+
+        assert word_to_id1 == word_to_id2
+        assert id_to_word1 == id_to_word2
+        assert position_to_id1 == position_to_id2
+
+    def test_large_vocabulary(self):
+        """Test with a larger vocabulary to ensure scalability."""
+        # Create a list with 1000 unique words plus repetitions
+        unique_words = [f"word_{i}" for i in range(1000)]
+        words = unique_words + unique_words[:100]  # Add some repetitions
+
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Check that all unique words got IDs
+        assert len(word_to_id) == 1000
+        assert len(id_to_word) == 1000
+
+        # Check that position_to_id has correct length
+        assert len(position_to_id) == 1100  # 1000 unique + 100 repetitions
+
+        # Check that all IDs are in valid range
+        assert all(0 <= word_id < 1000 for word_id in word_to_id.values())
+        assert all(0 <= word_id < 1000 for word_id in id_to_word.keys())
+        assert all(0 <= pos_id < 1000 for pos_id in position_to_id)
+
+    def test_return_types(self):
+        """Test that function returns correct types."""
+        words = ["apple", "banana", "apple"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Check types
+        assert isinstance(word_to_id, dict)
+        assert isinstance(id_to_word, dict)
+        assert isinstance(position_to_id, list)
+
+        # Check that all dict keys are strings and values are ints
+        for word, word_id in word_to_id.items():
+            assert isinstance(word, str)
+            assert isinstance(word_id, int)
+
+        # Check that all id_to_word keys are ints and values are strings
+        for word_id, word in id_to_word.items():
+            assert isinstance(word_id, int)
+            assert isinstance(word, str)
+
+        # Check that all list elements are ints
+        for pos_id in position_to_id:
+            assert isinstance(pos_id, int)
+
+    def test_word_to_id_completeness(self):
+        """Test that word_to_id contains all unique words from input."""
+        words = ["cat", "dog", "cat", "bird", "dog", "fish", "cat"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        unique_words = set(words)
+        assert set(word_to_id.keys()) == unique_words
+        assert set(id_to_word.values()) == unique_words
+        assert len(word_to_id) == len(unique_words)
+        assert len(id_to_word) == len(unique_words)
+
+    def test_position_to_id_correctness(self):
+        """Test that position_to_id correctly maps each position to the right word ID."""
+        words = ["red", "green", "blue", "red", "yellow", "blue", "green"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        # Verify each position maps to correct word
+        for i, word in enumerate(words):
+            expected_id = word_to_id[word]
+            actual_id = position_to_id[i]
+            assert (
+                actual_id == expected_id
+            ), f"Position {i}: expected {expected_id}, got {actual_id}"
+
+            # Also verify reverse mapping consistency
+            assert (
+                id_to_word[actual_id] == word
+            ), f"Reverse mapping failed for ID {actual_id}"
+
+    def test_unicode_words(self):
+        """Test with unicode/non-ASCII words."""
+        words = ["café", "naïve", "résumé", "café", "piñata"]
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {"café": 0, "naïve": 1, "résumé": 2, "piñata": 3}
+        assert id_to_word == {0: "café", 1: "naïve", 2: "résumé", 3: "piñata"}
+        assert position_to_id == [0, 1, 2, 0, 3]
+
+    def test_very_long_words(self):
+        """Test with very long word strings."""
+        long_word = "a" * 1000
+        short_word = "b"
+        words = [long_word, short_word, long_word, short_word]
+
+        word_to_id, id_to_word, position_to_id = build_vocabulary(words)
+
+        assert word_to_id == {long_word: 0, short_word: 1}
+        assert id_to_word == {0: long_word, 1: short_word}
+        assert position_to_id == [0, 1, 0, 1]

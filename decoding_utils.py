@@ -449,6 +449,38 @@ def plot_cv_results(cv_results):
     plt.show()
 
 
+def build_vocabulary(words):
+    """
+    Build vocabulary mappings from a list of words.
+
+    Args:
+        words: List of words (may contain repetitions)
+
+    Returns:
+        word_to_id: Dictionary mapping word -> unique_id
+        id_to_word: Dictionary mapping unique_id -> word
+        postion_to_id: List specifying what the ith word maps to which unique id.
+    """
+    word_to_id = {}
+    position_to_id = []
+    next_id = 0
+
+    for word in words:
+        if word not in word_to_id:
+            # First time seeing this word - assign new ID
+            word_to_id[word] = next_id
+            next_id += 1
+
+        # Add current position to the word's position list
+        word_id = word_to_id[word]
+        position_to_id.append(word_id)
+
+    # Build reverse mapping
+    id_to_word = {word_id: word for word, word_id in word_to_id.items()}
+
+    return word_to_id, id_to_word, position_to_id
+
+
 def compute_cosine_distances(predictions, word_embeddings):
     """
     Compute cosine distances between predicted embeddings and word embeddings.
@@ -500,7 +532,7 @@ def compute_cosine_distances(predictions, word_embeddings):
     return cosine_distances.mean(dim=1)  # [num_samples, num_words]
 
 
-def compute_class_scores(cosine_distances, word_labels):
+def compute_class_scores(cosine_distances, word_labels=None):
     """
     Compute class scores from cosine distances by averaging over word embeddings
     belonging to the same class and applying softmax transformation.
@@ -514,7 +546,7 @@ def compute_class_scores(cosine_distances, word_labels):
     Args:
         cosine_distances: torch tensor of shape [num_samples, num_words] containing
                          cosine distances between predictions and word embeddings
-        word_labels: torch tensor of shape [num_words] containing integer class IDs
+        word_labels: Optional torch tensor of shape [num_words] containing integer class IDs
                     for each word embedding
 
     Returns:
@@ -523,26 +555,29 @@ def compute_class_scores(cosine_distances, word_labels):
         class_logits: torch tensor of shape [num_samples, num_classes] containing
                      the logits (negative averaged distances) before softmax
     """
-    device = cosine_distances.device
-    num_samples = cosine_distances.shape[0]
+    if word_labels is not None:
+        device = cosine_distances.device
+        num_samples = cosine_distances.shape[0]
 
-    # Get unique class labels and sort them for consistent ordering
-    unique_classes = torch.unique(word_labels).sort()[0]
-    num_classes = len(unique_classes)
+        # Get unique class labels and sort them for consistent ordering
+        unique_classes = torch.unique(word_labels).sort()[0]
+        num_classes = len(unique_classes)
 
-    # Initialize tensors for class-averaged distances
-    class_distances = torch.zeros(num_samples, num_classes, device=device)
+        # Initialize tensors for class-averaged distances
+        class_distances = torch.zeros(num_samples, num_classes, device=device)
 
-    # For each unique class, average the distances across all word embeddings
-    # belonging to that class
-    for i, class_id in enumerate(unique_classes):
-        # Find indices of word embeddings belonging to this class
-        class_mask = (word_labels == class_id)
-        class_indices = torch.where(class_mask)[0]
+        # For each unique class, average the distances across all word embeddings
+        # belonging to that class
+        for i, class_id in enumerate(unique_classes):
+            # Find indices of word embeddings belonging to this class
+            class_mask = word_labels == class_id
+            class_indices = torch.where(class_mask)[0]
 
-        if len(class_indices) > 0:
-            # Average distances for this class across all its word embeddings
-            class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
+            if len(class_indices) > 0:
+                # Average distances for this class across all its word embeddings
+                class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
+    else:
+        class_distances = cosine_distances
 
     # Convert distances to similarities (logits)
     # Since cosine distance = 1 - cosine_similarity, we convert back:
