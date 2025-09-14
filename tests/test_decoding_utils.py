@@ -7,7 +7,6 @@ between predictions and word embeddings, with support for ensemble predictions.
 
 import pytest
 import torch
-import numpy as np
 from scipy.spatial.distance import cosine
 from decoding_utils import (
     compute_cosine_distances,

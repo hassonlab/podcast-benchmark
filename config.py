@@ -73,6 +73,9 @@ class TrainingParams:
     smaller_is_better: bool = False
     # Number of gradient accumulation steps.
     grad_accumulation_steps: int = 1
+    # TODO: Generalize parameters to metrics based on config.
+    # Minimum number of occurences of a word in training set to be used for ROC-AUC calculation if used.
+    min_train_freq_auc: int = 5
 
 
 @dataclass
