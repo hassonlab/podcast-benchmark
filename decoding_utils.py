@@ -500,6 +500,61 @@ def compute_cosine_distances(predictions, word_embeddings):
     return cosine_distances.mean(dim=1)  # [num_samples, num_words]
 
 
+def compute_class_scores(cosine_distances, word_labels):
+    """
+    Compute class scores from cosine distances by averaging over word embeddings
+    belonging to the same class and applying softmax transformation.
+
+    This implements the logic: "we computed the cosine distance between each of
+    the predicted embeddings and the embeddings of all instances of each unique
+    word label. The distances were averaged across unique word labels, yielding
+    one score for each word label (that is, logit). We used a Softmax
+    transformation on these scores (logits)."
+
+    Args:
+        cosine_distances: torch tensor of shape [num_samples, num_words] containing
+                         cosine distances between predictions and word embeddings
+        word_labels: torch tensor of shape [num_words] containing integer class IDs
+                    for each word embedding
+
+    Returns:
+        class_probabilities: torch tensor of shape [num_samples, num_classes] containing
+                           softmax probabilities for each class
+        class_logits: torch tensor of shape [num_samples, num_classes] containing
+                     the logits (negative averaged distances) before softmax
+    """
+    device = cosine_distances.device
+    num_samples = cosine_distances.shape[0]
+
+    # Get unique class labels and sort them for consistent ordering
+    unique_classes = torch.unique(word_labels).sort()[0]
+    num_classes = len(unique_classes)
+
+    # Initialize tensors for class-averaged distances
+    class_distances = torch.zeros(num_samples, num_classes, device=device)
+
+    # For each unique class, average the distances across all word embeddings
+    # belonging to that class
+    for i, class_id in enumerate(unique_classes):
+        # Find indices of word embeddings belonging to this class
+        class_mask = (word_labels == class_id)
+        class_indices = torch.where(class_mask)[0]
+
+        if len(class_indices) > 0:
+            # Average distances for this class across all its word embeddings
+            class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
+
+    # Convert distances to similarities (logits)
+    # Since cosine distance = 1 - cosine_similarity, we convert back:
+    # logits = 1 - distance = cosine_similarity
+    class_logits = 1 - class_distances
+
+    # Apply softmax transformation to get probabilities
+    class_probabilities = F.softmax(class_logits, dim=1)
+
+    return class_probabilities, class_logits
+
+
 def calculate_word_embeddings_roc_auc_logits(
     model, X, Y, selected_words, device, min_repetitions=5
 ):

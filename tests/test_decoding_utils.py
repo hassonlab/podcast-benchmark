@@ -9,7 +9,7 @@ import pytest
 import torch
 import numpy as np
 from scipy.spatial.distance import cosine
-from decoding_utils import compute_cosine_distances
+from decoding_utils import compute_cosine_distances, compute_class_scores
 
 
 class TestComputeCosineDistances:
@@ -304,3 +304,278 @@ class TestComputeCosineDistances:
 
         # Distance to target should be small due to averaging effect
         assert distances[0, 0].item() < 0.1
+
+
+class TestComputeClassScores:
+    """Test compute_class_scores function for converting cosine distances to class probabilities."""
+
+    @pytest.fixture
+    def sample_distances_and_labels(self):
+        """Create sample cosine distances and word labels for testing."""
+        # 3 samples, 6 word embeddings
+        cosine_distances = torch.tensor([
+            [0.1, 0.9, 0.2, 0.8, 0.3, 0.7],  # sample 0
+            [0.8, 0.2, 0.7, 0.3, 0.6, 0.4],  # sample 1
+            [0.4, 0.6, 0.5, 0.5, 0.1, 0.9],  # sample 2
+        ], dtype=torch.float32)
+
+        # 6 word embeddings belong to 3 classes (2 embeddings per class)
+        word_labels = torch.tensor([0, 0, 1, 1, 2, 2], dtype=torch.long)
+
+        return cosine_distances, word_labels
+
+    def test_basic_functionality(self, sample_distances_and_labels):
+        """Test basic functionality of compute_class_scores."""
+        cosine_distances, word_labels = sample_distances_and_labels
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Check output shapes
+        assert probabilities.shape == (3, 3)  # 3 samples, 3 classes
+        assert logits.shape == (3, 3)
+
+        # Check that probabilities sum to 1 for each sample
+        for i in range(3):
+            assert abs(probabilities[i].sum().item() - 1.0) < 1e-6
+
+        # Check that probabilities are non-negative
+        assert (probabilities >= 0).all()
+
+    def test_class_averaging_logic(self):
+        """Test that distances are properly averaged within each class."""
+        # Create simple test case where we can manually calculate expected values
+        cosine_distances = torch.tensor([
+            [0.1, 0.3, 0.2, 0.8],  # 1 sample, 4 word embeddings
+        ], dtype=torch.float32)
+
+        # Class 0: embeddings 0,1 (distances 0.1, 0.3) -> average = 0.2
+        # Class 1: embeddings 2,3 (distances 0.2, 0.8) -> average = 0.5
+        word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Expected class distances: [0.2, 0.5]
+        # Expected logits: [1-0.2, 1-0.5] = [0.8, 0.5]
+        expected_logits = torch.tensor([[0.8, 0.5]], dtype=torch.float32)
+
+        assert torch.allclose(logits, expected_logits, atol=1e-6)
+
+    def test_single_embedding_per_class(self):
+        """Test case where each class has only one embedding."""
+        cosine_distances = torch.tensor([
+            [0.2, 0.5, 0.8],  # 1 sample, 3 word embeddings
+        ], dtype=torch.float32)
+
+        # Each embedding belongs to a different class
+        word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Logits should be 1 - distance for each embedding
+        expected_logits = torch.tensor([[0.8, 0.5, 0.2]], dtype=torch.float32)
+
+        assert torch.allclose(logits, expected_logits, atol=1e-6)
+
+    def test_different_class_sizes(self):
+        """Test with classes having different numbers of word embeddings."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],  # 1 sample, 6 word embeddings
+        ], dtype=torch.float32)
+
+        # Class 0: 1 embedding, Class 1: 2 embeddings, Class 2: 3 embeddings
+        word_labels = torch.tensor([0, 1, 1, 2, 2, 2], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Expected class averages:
+        # Class 0: 0.1 (1 embedding)
+        # Class 1: (0.2 + 0.3) / 2 = 0.25 (2 embeddings)
+        # Class 2: (0.4 + 0.5 + 0.6) / 3 = 0.5 (3 embeddings)
+        expected_class_distances = torch.tensor([0.1, 0.25, 0.5])
+        expected_logits = torch.tensor([[1 - 0.1, 1 - 0.25, 1 - 0.5]])
+
+        assert torch.allclose(logits, expected_logits, atol=1e-6)
+
+    def test_softmax_probabilities(self):
+        """Test that softmax transformation is applied correctly."""
+        # Simple case with known logits
+        cosine_distances = torch.tensor([
+            [0.0, 1.0, 0.5],  # distances
+        ], dtype=torch.float32)
+
+        word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Expected logits: [1.0, 0.0, 0.5]
+        expected_logits = torch.tensor([[1.0, 0.0, 0.5]])
+        assert torch.allclose(logits, expected_logits, atol=1e-6)
+
+        # Check that softmax was applied correctly
+        expected_probabilities = torch.softmax(expected_logits, dim=1)
+        assert torch.allclose(probabilities, expected_probabilities, atol=1e-6)
+
+    def test_multiple_samples(self):
+        """Test with multiple samples."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.9],  # sample 0
+            [0.8, 0.2],  # sample 1
+        ], dtype=torch.float32)
+
+        word_labels = torch.tensor([0, 1], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Check shapes
+        assert probabilities.shape == (2, 2)  # 2 samples, 2 classes
+        assert logits.shape == (2, 2)
+
+        # Expected logits for each sample
+        expected_logits = torch.tensor([
+            [0.9, 0.1],  # sample 0: [1-0.1, 1-0.9]
+            [0.2, 0.8],  # sample 1: [1-0.8, 1-0.2]
+        ])
+
+        assert torch.allclose(logits, expected_logits, atol=1e-6)
+
+    def test_consistent_class_ordering(self):
+        """Test that class ordering is consistent (classes are always sorted internally)."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.2, 0.3],
+        ], dtype=torch.float32)
+
+        # Test with different label orderings but same mapping
+        word_labels_1 = torch.tensor([0, 1, 2], dtype=torch.long)
+        word_labels_2 = torch.tensor([0, 1, 2], dtype=torch.long)  # Same labels
+
+        _, logits_1 = compute_class_scores(cosine_distances, word_labels_1)
+        _, logits_2 = compute_class_scores(cosine_distances, word_labels_2)
+
+        # Results should be identical
+        assert torch.allclose(logits_1, logits_2, atol=1e-6)
+
+        # Test that classes are in sorted order internally
+        # Labels 2, 0, 1 should result in classes ordered as 0, 1, 2
+        labels_unsorted = torch.tensor([2, 0, 1], dtype=torch.long)
+        distances_for_unsorted = torch.tensor([[0.3, 0.1, 0.2]], dtype=torch.float32)  # corresponding to labels 2,0,1
+
+        _, logits_unsorted = compute_class_scores(distances_for_unsorted, labels_unsorted)
+
+        # Should have same shape as original
+        assert logits_unsorted.shape == logits_1.shape
+
+    def test_empty_class_handling(self):
+        """Test handling of edge cases with class gaps."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.2, 0.3],
+        ], dtype=torch.float32)
+
+        # Classes 0, 2, 5 (gaps in numbering)
+        word_labels = torch.tensor([0, 2, 5], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Should have 3 classes (corresponding to the unique labels)
+        assert probabilities.shape == (1, 3)
+        assert logits.shape == (1, 3)
+
+        # Probabilities should still sum to 1
+        assert abs(probabilities[0].sum().item() - 1.0) < 1e-6
+
+    def test_gradient_flow(self):
+        """Test that gradients flow through the computation."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.9, 0.2, 0.8],
+        ], dtype=torch.float32, requires_grad=True)
+
+        word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+
+        # Use a meaningful loss (not sum of probabilities which is always 1)
+        # Take probability of first class as loss
+        loss = probabilities[0, 0]
+        loss.backward()
+
+        # Check that gradients were computed
+        assert cosine_distances.grad is not None
+        assert cosine_distances.grad.shape == cosine_distances.shape
+        assert not torch.allclose(cosine_distances.grad, torch.zeros_like(cosine_distances.grad))
+
+    def test_device_consistency(self):
+        """Test that function works with different devices."""
+        cosine_distances = torch.tensor([
+            [0.1, 0.2, 0.3, 0.4],
+        ], dtype=torch.float32)
+
+        word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+        # Test on CPU
+        probabilities_cpu, logits_cpu = compute_class_scores(cosine_distances, word_labels)
+
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            cosine_distances_gpu = cosine_distances.cuda()
+            word_labels_gpu = word_labels.cuda()
+
+            probabilities_gpu, logits_gpu = compute_class_scores(cosine_distances_gpu, word_labels_gpu)
+
+            # Results should be the same
+            assert torch.allclose(probabilities_cpu, probabilities_gpu.cpu(), atol=1e-6)
+            assert torch.allclose(logits_cpu, logits_gpu.cpu(), atol=1e-6)
+
+    def test_numerical_stability(self):
+        """Test numerical stability with extreme values."""
+        # Test with very small distances (high similarity)
+        cosine_distances_small = torch.tensor([
+            [1e-7, 1e-8, 1e-6],
+        ], dtype=torch.float32)
+
+        word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
+
+        probabilities_small, logits_small = compute_class_scores(cosine_distances_small, word_labels)
+
+        # Should not have NaN or Inf values
+        assert torch.isfinite(probabilities_small).all()
+        assert torch.isfinite(logits_small).all()
+
+        # Test with distances close to 2 (very dissimilar)
+        cosine_distances_large = torch.tensor([
+            [1.999, 1.998, 1.997],
+        ], dtype=torch.float32)
+
+        probabilities_large, logits_large = compute_class_scores(cosine_distances_large, word_labels)
+
+        # Should not have NaN or Inf values
+        assert torch.isfinite(probabilities_large).all()
+        assert torch.isfinite(logits_large).all()
+
+    def test_integration_with_compute_cosine_distances(self):
+        """Test integration with compute_cosine_distances function."""
+        # Create test data
+        predictions = torch.tensor([
+            [1.0, 0.0, 0.0],  # should be closest to word 0
+            [0.0, 1.0, 0.0],  # should be closest to word 1
+        ], dtype=torch.float32)
+
+        word_embeddings = torch.tensor([
+            [1.0, 0.0, 0.0],  # class 0
+            [0.8, 0.2, 0.0],  # class 0 (similar to above)
+            [0.0, 1.0, 0.0],  # class 1
+            [0.0, 0.8, 0.2],  # class 1 (similar to above)
+        ], dtype=torch.float32)
+
+        word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+        # Compute distances then class scores
+        distances = compute_cosine_distances(predictions, word_embeddings)
+        probabilities, logits = compute_class_scores(distances, word_labels)
+
+        # Check shapes
+        assert probabilities.shape == (2, 2)  # 2 samples, 2 classes
+
+        # First prediction should be more likely to be class 0
+        assert probabilities[0, 0] > probabilities[0, 1]
+
+        # Second prediction should be more likely to be class 1
+        assert probabilities[1, 1] > probabilities[1, 0]
