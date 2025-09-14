@@ -449,6 +449,57 @@ def plot_cv_results(cv_results):
     plt.show()
 
 
+def compute_cosine_distances(predictions, word_embeddings):
+    """
+    Compute cosine distances between predicted embeddings and word embeddings.
+    Supports ensemble predictions.
+
+    Args:
+        predictions: torch tensor of shape [num_samples, embedding_dim] or
+                    [num_samples, n_ensemble, embedding_dim] for ensemble predictions
+        word_embeddings: torch tensor of shape [num_words, embedding_dim]
+
+    Returns:
+        scores: torch tensor of shape [num_samples, num_words] containing
+                cosine distances for each word given each prediction
+    """
+    # Normalize word embeddings once
+    word_embeddings_norm = F.normalize(word_embeddings, p=2, dim=1)
+
+    # Handle both 2D and 3D cases by reshaping 2D to 3D with singleton dimension
+    if predictions.dim() == 2:
+        # Single prediction case: [num_samples, embedding_dim] -> [num_samples, 1, embedding_dim]
+        predictions = predictions.unsqueeze(1)
+    elif predictions.dim() != 3:
+        raise ValueError(
+            f"Predictions must be 2D or 3D tensor, got {predictions.dim()}D"
+        )
+
+    # Now we have: [num_samples, n_ensemble, embedding_dim]
+    num_samples, n_ensemble, embedding_dim = predictions.shape
+
+    # Reshape to treat each ensemble prediction separately
+    predictions_reshaped = predictions.view(num_samples * n_ensemble, embedding_dim)
+
+    # Normalize ensemble predictions
+    predictions_norm = F.normalize(predictions_reshaped, p=2, dim=1)
+
+    # Compute cosine similarity for all ensemble predictions
+    cosine_similarities = torch.mm(predictions_norm, word_embeddings_norm.t())
+    # Shape: [num_samples * n_ensemble, num_words]
+
+    # Convert to cosine distance
+    cosine_distances = 1 - cosine_similarities
+
+    # Reshape back to separate ensemble dimension
+    cosine_distances = cosine_distances.view(
+        num_samples, n_ensemble, word_embeddings.shape[0]
+    )
+
+    # Average across ensemble dimension (for single predictions, n_ensemble=1, so this is a no-op)
+    return cosine_distances.mean(dim=1)  # [num_samples, num_words]
+
+
 def calculate_word_embeddings_roc_auc_logits(
     model, X, Y, selected_words, device, min_repetitions=5
 ):
