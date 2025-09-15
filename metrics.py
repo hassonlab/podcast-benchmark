@@ -105,7 +105,9 @@ def calculate_auc_roc(
         include_class = include_class & (freq >= thresh)
 
     print(
-        f"Fraction of examples included in AUC-ROC calculation: {include_class.sum() / include_class.shape[0]}, ({include_class.sum()} / {include_class.shape[0]})",
+        f"Fraction of examples included in AUC-ROC calculation:",
+        f"{include_class.sum() / include_class.shape[0]:.4f},",
+        f"({include_class.sum()} / {include_class.shape[0]})",
     )
     include_example = include_class[groundtruth]
 
