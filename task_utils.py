@@ -30,6 +30,12 @@ def sentence_onset_task(data_params: DataParams):
 
     df = pd.read_csv(csv_path, index_col=0)
 
+    # Convert ms -> seconds if needed (CSV stores ms; pipeline expects seconds)
+    # Heuristic: if values are large (e.g., >1e4), treat as ms.
+    if df["sentence_onset"].max() > 1e4 or df["sentence_offset"].max() > 1e4:
+        df["sentence_onset"] = df["sentence_onset"] / 1000.0
+        df["sentence_offset"] = df["sentence_offset"] / 1000.0
+
     # Expect columns: sentence_onset, sentence_offset
     if not {"sentence_onset", "sentence_offset"}.issubset(df.columns):
         raise ValueError(
@@ -67,6 +73,16 @@ def sentence_onset_task(data_params: DataParams):
         .sort_values("start")
         .reset_index(drop=True)
     )
+
+    # Print dataset summary for inspection
+    print(f"\n=== SENTENCE ONSET DATASET ===")
+    print(f"Total examples: {len(df_out)}")
+    print(f"Positives: {len(pos)} ({len(pos)/len(df_out)*100:.1f}%)")
+    print(f"Negatives: {len(neg)} ({len(neg)/len(df_out)*100:.1f}%)")
+    print(f"Time range: {df_out['start'].min():.2f}s - {df_out['start'].max():.2f}s")
+    print(f"First 10 examples:")
+    print(df_out.head(10))
+    print("=" * 50)
 
     return df_out
 

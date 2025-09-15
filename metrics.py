@@ -12,6 +12,12 @@ def mse_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     return F.mse_loss(predicted, groundtruth)
 
 
+@register_metric("bce_with_logits")
+def bce_with_logits_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+    """BCE loss for binary classification, expects raw logits."""
+    return F.binary_cross_entropy_with_logits(predicted, groundtruth)
+
+
 @register_metric("cosine_sim")
 def cosine_similarity(pred: torch.Tensor, true: torch.Tensor) -> float:
     return F.cosine_similarity(pred, true, dim=-1).mean()
