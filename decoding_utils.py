@@ -192,10 +192,10 @@ def train_decoding_model(
 
         for k_val in training_params.top_k_thresholds:
             # Test type is split between "word" and "occ" where word is averaged over
-            # average word occurences and occ is per-each occurence of the word so is
+            # each time a word occurs and occ is per-each occurence of the word so is
             # more difficult and depends on contextual embeddings.
             for test_type in ["word", "occ"]:
-                metric_str = "test_{test_type}_top_{k_val}"
+                metric_str = f"test_{test_type}_top_{k_val}"
                 cv_results[metric_str] = []
                 embedding_metrics.append(metric_str)
 
@@ -689,8 +689,8 @@ def run_training_over_lags(
             word_column=data_params.word_column,
         )
 
-        X_tensor = torch.FloatTensor(np.array(X))
-        Y_tensor = torch.FloatTensor(np.array(Y))
+        X_tensor = torch.FloatTensor(X)
+        Y_tensor = torch.FloatTensor(Y)
 
         print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
 
