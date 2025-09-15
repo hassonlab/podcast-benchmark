@@ -614,7 +614,7 @@ def compute_word_embedding_task_metrics(
         distances, torch.from_numpy(position_to_id[test_index])
     )
     # Get a mapping from over-all class index -> test class index.
-    class_to_test_idxs = np.empty(np.max(position_to_id) + 1)
+    class_to_test_idxs = np.empty(np.max(position_to_id) + 1, dtype=int)
     class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
 
     word_scores_np = word_scores.cpu().numpy()

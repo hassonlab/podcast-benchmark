@@ -99,6 +99,10 @@ def calculate_auc_roc(
                the minimum frequency threshold. 0th is unwieghted, 1st is weighted by train frequency,
                2nd is weighted by test frequency.
     """
+    # Ensure frequencies are always arrays for consistent handling
+    train_frequencies = np.atleast_1d(train_frequencies)
+    test_frequencies = np.atleast_1d(test_frequencies)
+
     # Only include labels that meet the minimum frequency level.
     include_trains = train_frequencies >= min_train_freq
     include_tests = test_frequencies >= min_test_freq

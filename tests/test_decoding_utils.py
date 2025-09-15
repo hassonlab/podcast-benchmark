@@ -1340,7 +1340,7 @@ class TestComputeWordEmbeddingTaskMetrics:
 
         # Verify the function produces valid results
         assert isinstance(results, dict)
-        assert len(results) == 7  # 2 occ + 2 word + 3 auc metrics
+        assert len(results) == 9  # 2 occ + 2 word + 3 auc metrics + 2 perplexity metrics
 
         # All values should be numeric and finite
         for key, value in results.items():
