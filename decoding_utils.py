@@ -584,6 +584,8 @@ def compute_word_embedding_task_metrics(
     # Put model in evaluation mode
     model.eval()
 
+    X_test, Y_test = X_test.to(device), Y_test.to(device)
+
     # Get predictions
     predictions = get_predictions(X_test, model, device)
 
