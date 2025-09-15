@@ -381,7 +381,7 @@ def train_decoding_model(
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]
-            print("Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+            print(f"Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
     if plot_results:
         plot_cv_results(cv_results)

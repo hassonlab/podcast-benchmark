@@ -102,12 +102,10 @@ def calculate_auc_roc(
     for freq, thresh in zip(frequencies, min_frequencies):
         if include_class is None:
             include_class = np.ones_like(freq, dtype=bool)
-        print(freq)
         include_class = include_class & (freq >= thresh)
+
     print(
-        "Fraction of examples included in AUC-ROC calculation:",
-        include_class.sum() / include_class.shape[0],
-        "({include_class.sum()} / {include_class.shape[0]})",
+        f"Fraction of examples included in AUC-ROC calculation: {include_class.sum() / include_class.shape[0]}, ({include_class.sum()} / {include_class.shape[0]})",
     )
     include_example = include_class[groundtruth]
 
@@ -164,7 +162,7 @@ def perplexity(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
         float: Perplexity score (lower is better, minimum is 1.0)
     """
     if len(predictions) == 0:
-        return float('inf')
+        return float("inf")
 
     # Ensure predictions are valid probabilities
     predictions = np.clip(predictions, 1e-12, 1.0)
@@ -174,7 +172,7 @@ def perplexity(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
     cross_entropy = -np.mean(np.log2(true_class_probs))
 
     # Perplexity = 2^(cross_entropy)
-    return 2 ** cross_entropy
+    return 2**cross_entropy
 
 
 def top_k_accuracy(predictions: np.ndarray, ground_truth: np.ndarray, k: int) -> float:
