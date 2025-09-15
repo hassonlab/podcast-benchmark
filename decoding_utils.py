@@ -600,6 +600,9 @@ def compute_word_embedding_task_metrics(
         results[f"test_occ_top_{k_val}"] = metrics.top_k_accuracy(
             occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
         )
+    results["test_occ_perplexity"] = metrics.perplexity(
+        occurence_scores_np, np.arange(occurence_scores_np.shape[0])
+    )
 
     # Group by words for an easier task.
     # Build vocabulary. While in most cases we would not want to include
@@ -610,13 +613,21 @@ def compute_word_embedding_task_metrics(
     word_scores, _, test_class_idxs = compute_class_scores(
         distances, torch.from_numpy(position_to_id[test_index])
     )
+    # Get a mapping from over-all class index -> test class index.
+    class_to_test_idxs = np.empty(np.max(position_to_id) + 1)
+    class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
+
     word_scores_np = word_scores.cpu().numpy()
     train_frequencies = np.bincount(
-        position_to_id[train_index], minlength=max(position_to_id) + 1
+        position_to_id[train_index], minlength=np.max(position_to_id) + 1
     )
+    # Limit train frequencies to only those in the test set.
+    train_frequencies = train_frequencies[test_class_idxs]
+
     test_frequencies = np.bincount(
-        position_to_id[test_index], minlength=max(position_to_id) + 1
+        position_to_id[test_index], minlength=np.max(position_to_id) + 1
     )
+    test_frequencies = test_frequencies[test_class_idxs]
     avg_auc, train_weighted_auc, test_weighted_auc = metrics.calculate_auc_roc(
         word_scores_np,
         position_to_id[test_index],
@@ -624,7 +635,6 @@ def compute_word_embedding_task_metrics(
         test_frequencies,
         min_train_freq_auc,
         min_test_freq_auc,
-        test_class_idxs.cpu().numpy(),
     )
     results["test_word_avg_auc_roc"] = avg_auc
     results["test_word_train_weighted_auc_roc"] = train_weighted_auc
@@ -632,8 +642,11 @@ def compute_word_embedding_task_metrics(
 
     for k_val in top_k_thresholds:
         results[f"test_word_top_{k_val}"] = metrics.top_k_accuracy(
-            word_scores_np, position_to_id[test_index], k_val
+            word_scores_np, class_to_test_idxs[position_to_id[test_index]], k_val
         )
+    results["test_word_perplexity"] = metrics.perplexity(
+        word_scores_np, class_to_test_idxs[position_to_id[test_index]]
+    )
 
     return results
 
