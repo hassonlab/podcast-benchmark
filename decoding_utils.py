@@ -628,9 +628,12 @@ def compute_word_embedding_task_metrics(
         position_to_id[test_index], minlength=np.max(position_to_id) + 1
     )
     test_frequencies = test_frequencies[test_class_idxs]
+
+    # Translate to vocab of word ID's.
+    test_word_ids = class_to_test_idxs[position_to_id[test_index]]
     avg_auc, train_weighted_auc, test_weighted_auc = metrics.calculate_auc_roc(
         word_scores_np,
-        position_to_id[test_index],
+        test_word_ids,
         train_frequencies,
         test_frequencies,
         min_train_freq_auc,
@@ -642,11 +645,9 @@ def compute_word_embedding_task_metrics(
 
     for k_val in top_k_thresholds:
         results[f"test_word_top_{k_val}"] = metrics.top_k_accuracy(
-            word_scores_np, class_to_test_idxs[position_to_id[test_index]], k_val
+            word_scores_np, test_word_ids, k_val
         )
-    results["test_word_perplexity"] = metrics.perplexity(
-        word_scores_np, class_to_test_idxs[position_to_id[test_index]]
-    )
+    results["test_word_perplexity"] = metrics.perplexity(word_scores_np, test_word_ids)
 
     return results
 
