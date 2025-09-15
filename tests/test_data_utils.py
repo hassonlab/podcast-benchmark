@@ -77,11 +77,27 @@ class TestGetDataOutOfBounds:
             raws=[mock_raw],
             df_word=df_word_in_bounds,
             window_width=window_width,
+            word_column="word",
         )
 
         assert data.shape[0] == len(df_word_in_bounds)
         assert len(targets) == len(df_word_in_bounds)
         assert len(words) == len(df_word_in_bounds)
+
+    def test_get_data_without_word_column(self, mock_raw, df_word_in_bounds):
+        """Test that get_data works correctly with in-bounds events."""
+        lag = 0
+        window_width = 0.5
+
+        data, targets, words = get_data(
+            lag=lag,
+            raws=[mock_raw],
+            df_word=df_word_in_bounds,
+            window_width=window_width,
+        )
+
+        assert data.shape[0] == len(df_word_in_bounds)
+        assert len(targets) == len(df_word_in_bounds)
 
     def test_get_data_out_of_bounds_bug(self, mock_raw, df_word_out_of_bounds):
         """Test that out-of-bounds events raise ValueError instead of creating empty epochs."""
@@ -137,7 +153,11 @@ class TestGetDataOutOfBounds:
         window_width = 1.0
 
         data, targets, words = get_data(
-            lag=lag, raws=[mock_raw], df_word=df_word_mixed, window_width=window_width
+            lag=lag,
+            raws=[mock_raw],
+            df_word=df_word_mixed,
+            window_width=window_width,
+            word_column="word",
         )
 
         expected_valid_events = 2
@@ -194,9 +214,9 @@ class TestGetDataOutOfBounds:
             raws=[mock_raw],
             df_word=df_word_mixed_neg,
             window_width=window_width,
+            word_column="word",
         )
 
-        print(words)
         expected_valid_events = 3
         assert data.shape[0] == expected_valid_events
         assert len(targets) == expected_valid_events
@@ -217,13 +237,13 @@ def temp_electrode_csv():
 3,D3
 3,E1
 """
-    
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(electrode_data)
         temp_path = f.name
-    
+
     yield temp_path
-    
+
     # Cleanup
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -237,13 +257,13 @@ def temp_single_subject_csv():
 5,X2
 5,Y1
 """
-    
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(electrode_data)
         temp_path = f.name
-    
+
     yield temp_path
-    
+
     # Cleanup
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -254,13 +274,13 @@ def temp_empty_csv():
     """Create a temporary empty CSV file with headers only."""
     electrode_data = """subject,elec
 """
-    
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         f.write(electrode_data)
         temp_path = f.name
-    
+
     yield temp_path
-    
+
     # Cleanup
     if os.path.exists(temp_path):
         os.unlink(temp_path)
@@ -272,13 +292,9 @@ class TestReadElectrodeFile:
     def test_read_electrode_file_multiple_subjects(self, temp_electrode_csv):
         """Test reading CSV with multiple subjects and electrodes."""
         result = read_electrode_file(temp_electrode_csv)
-        
-        expected = {
-            1: ['A1', 'A2', 'B1'],
-            2: ['C1', 'C2'],
-            3: ['D1', 'D2', 'D3', 'E1']
-        }
-        
+
+        expected = {1: ["A1", "A2", "B1"], 2: ["C1", "C2"], 3: ["D1", "D2", "D3", "E1"]}
+
         assert result == expected
         assert len(result) == 3
         assert len(result[1]) == 3
@@ -288,9 +304,9 @@ class TestReadElectrodeFile:
     def test_read_electrode_file_single_subject(self, temp_single_subject_csv):
         """Test reading CSV with single subject and multiple electrodes."""
         result = read_electrode_file(temp_single_subject_csv)
-        
-        expected = {5: ['X1', 'X2', 'Y1']}
-        
+
+        expected = {5: ["X1", "X2", "Y1"]}
+
         assert result == expected
         assert len(result) == 1
         assert len(result[5]) == 3
@@ -298,22 +314,22 @@ class TestReadElectrodeFile:
     def test_read_electrode_file_empty_data(self, temp_empty_csv):
         """Test reading CSV with headers but no data."""
         result = read_electrode_file(temp_empty_csv)
-        
+
         assert result == {}
         assert len(result) == 0
 
     def test_read_electrode_file_electrode_order_preserved(self, temp_electrode_csv):
         """Test that electrode order is preserved as they appear in CSV."""
         result = read_electrode_file(temp_electrode_csv)
-        
+
         # Check that electrode order matches CSV order
-        assert result[1] == ['A1', 'A2', 'B1']
-        assert result[3] == ['D1', 'D2', 'D3', 'E1']
+        assert result[1] == ["A1", "A2", "B1"]
+        assert result[3] == ["D1", "D2", "D3", "E1"]
 
     def test_read_electrode_file_subject_types(self, temp_electrode_csv):
         """Test that subject IDs are converted to integers."""
         result = read_electrode_file(temp_electrode_csv)
-        
+
         # All keys should be integers
         for subject_id in result.keys():
             assert isinstance(subject_id, int)
@@ -321,7 +337,7 @@ class TestReadElectrodeFile:
     def test_read_electrode_file_electrode_types(self, temp_electrode_csv):
         """Test that electrode names remain as strings."""
         result = read_electrode_file(temp_electrode_csv)
-        
+
         # All electrode names should be strings
         for electrodes in result.values():
             for electrode in electrodes:
@@ -336,28 +352,30 @@ class TestReadElectrodeFile:
 @pytest.fixture
 def mock_raw_with_channels():
     """Create a factory function for mock MNE Raw objects with specific channel names."""
+
     def _create_mock_raw():
         n_channels = 6
         sfreq = 1000
         duration = 10
         n_samples = int(sfreq * duration)
-        
+
         data = np.random.randn(n_channels, n_samples)
-        ch_names = ['LGA1', 'LGA2', 'LGB1', 'LGB2', 'RGA1', 'RGA2']
+        ch_names = ["LGA1", "LGA2", "LGB1", "LGB2", "RGA1", "RGA2"]
         info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="seeg")
         raw = mne.io.RawArray(data, info, verbose=False)
         return raw
-    
+
     return _create_mock_raw
 
 
 @pytest.fixture
 def bids_temp_files(mock_raw_with_channels):
     """Create temporary BIDS-structured .fif files for testing."""
+
     def _create_temp_files(temp_dir, subject_ids):
         """Create temporary files for given subject IDs using BIDSPath structure."""
         from mne_bids import BIDSPath
-        
+
         created_files = []
         for sub_id in subject_ids:
             # Use BIDSPath with same parameters as load_raws to get correct path structure
@@ -370,183 +388,190 @@ def bids_temp_files(mock_raw_with_channels):
                 suffix="ieeg",
                 extension=".fif",
             )
-            
+
             # Create directory structure
             os.makedirs(file_path.directory, exist_ok=True)
-            
+
             # Save mock data to the BIDSPath location
             mock_raw_with_channels().save(str(file_path), overwrite=True, verbose=False)
             created_files.append(str(file_path))
-        
+
         return created_files
-    
+
     return _create_temp_files
 
 
 class TestLoadRaws:
     """Test load_raws function for loading multiple subjects with different configurations."""
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
-    def test_load_raws_multiple_subjects(self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels):
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
+    def test_load_raws_multiple_subjects(
+        self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
+    ):
         """Test loading raw data for multiple subjects."""
         # Setup mocks
         mock_bids_path.return_value = "/fake/path/sub-01_task-podcast_ieeg.fif"
         mock_read_raw_fif.return_value = mock_raw_with_channels()
-        
+
         # Create DataParams for multiple subjects
-        data_params = DataParams(
-            subject_ids=[1, 2, 3],
-            data_root="/fake/data"
-        )
-        
+        data_params = DataParams(subject_ids=[1, 2, 3], data_root="/fake/data")
+
         raws = load_raws(data_params)
-        
+
         # Verify results
         assert len(raws) == 3
         assert mock_read_raw_fif.call_count == 3
         assert mock_bids_path.call_count == 3
-        
+
         # Check that BIDSPath was called with correct parameters for each subject
         expected_calls = [
             {
-                'root': '/fake/data/derivatives/ecogprep',
-                'subject': '01',
-                'task': 'podcast',
-                'datatype': 'ieeg',
-                'description': 'highgamma',
-                'suffix': 'ieeg',
-                'extension': '.fif'
+                "root": "/fake/data/derivatives/ecogprep",
+                "subject": "01",
+                "task": "podcast",
+                "datatype": "ieeg",
+                "description": "highgamma",
+                "suffix": "ieeg",
+                "extension": ".fif",
             },
             {
-                'root': '/fake/data/derivatives/ecogprep',
-                'subject': '02',
-                'task': 'podcast',
-                'datatype': 'ieeg',
-                'description': 'highgamma',
-                'suffix': 'ieeg',
-                'extension': '.fif'
+                "root": "/fake/data/derivatives/ecogprep",
+                "subject": "02",
+                "task": "podcast",
+                "datatype": "ieeg",
+                "description": "highgamma",
+                "suffix": "ieeg",
+                "extension": ".fif",
             },
             {
-                'root': '/fake/data/derivatives/ecogprep',
-                'subject': '03',
-                'task': 'podcast',
-                'datatype': 'ieeg',
-                'description': 'highgamma',
-                'suffix': 'ieeg',
-                'extension': '.fif'
-            }
+                "root": "/fake/data/derivatives/ecogprep",
+                "subject": "03",
+                "task": "podcast",
+                "datatype": "ieeg",
+                "description": "highgamma",
+                "suffix": "ieeg",
+                "extension": ".fif",
+            },
         ]
-        
+
         for i, call_args in enumerate(mock_bids_path.call_args_list):
             call_kwargs = call_args[1]  # Get keyword arguments
             expected = expected_calls[i]
             for key, value in expected.items():
                 assert call_kwargs[key] == value
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
-    def test_load_raws_single_subject(self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels):
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
+    def test_load_raws_single_subject(
+        self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
+    ):
         """Test loading raw data for a single subject."""
         mock_bids_path.return_value = "/fake/path/sub-05_task-podcast_ieeg.fif"
         mock_read_raw_fif.return_value = mock_raw_with_channels()
-        
-        data_params = DataParams(
-            subject_ids=[5],
-            data_root="/fake/data"
-        )
-        
+
+        data_params = DataParams(subject_ids=[5], data_root="/fake/data")
+
         raws = load_raws(data_params)
-        
+
         assert len(raws) == 1
         assert mock_read_raw_fif.call_count == 1
         assert mock_bids_path.call_count == 1
-        
+
         # Check BIDSPath was called with correct subject
         call_kwargs = mock_bids_path.call_args_list[0][1]
-        assert call_kwargs['subject'] == '05'
+        assert call_kwargs["subject"] == "05"
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
     def test_load_raws_no_subjects(self, mock_bids_path, mock_read_raw_fif):
         """Test loading raw data with empty subject list."""
-        data_params = DataParams(
-            subject_ids=[],
-            data_root="/fake/data"
-        )
-        
+        data_params = DataParams(subject_ids=[], data_root="/fake/data")
+
         raws = load_raws(data_params)
-        
+
         assert len(raws) == 0
         assert mock_read_raw_fif.call_count == 0
         assert mock_bids_path.call_count == 0
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
-    def test_load_raws_per_subject_electrodes(self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels):
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
+    def test_load_raws_per_subject_electrodes(
+        self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
+    ):
         """Test loading raw data with per_subject_electrodes filtering."""
         mock_bids_path.return_value = "/fake/path/sub-01_task-podcast_ieeg.fif"
         # Use side_effect to create fresh mock for each call to avoid channel selection side effects
-        mock_read_raw_fif.side_effect = [mock_raw_with_channels(), mock_raw_with_channels()]
-        
+        mock_read_raw_fif.side_effect = [
+            mock_raw_with_channels(),
+            mock_raw_with_channels(),
+        ]
+
         # Create DataParams with per_subject_electrodes - use channels that exist in mock_raw_with_channels
         per_subject_electrodes = {
-            1: ['LGA1', 'LGB1'],  # Select only 2 channels from the 6 available
-            2: ['LGA2', 'RGA1']   # Select different channels for subject 2 (all must exist in mock)
+            1: ["LGA1", "LGB1"],  # Select only 2 channels from the 6 available
+            2: [
+                "LGA2",
+                "RGA1",
+            ],  # Select different channels for subject 2 (all must exist in mock)
         }
-        
+
         data_params = DataParams(
             subject_ids=[1, 2],
             data_root="/fake/data",
-            per_subject_electrodes=per_subject_electrodes
+            per_subject_electrodes=per_subject_electrodes,
         )
-        
+
         raws = load_raws(data_params)
-        
+
         assert len(raws) == 2
         # Each raw should have only the selected channels
         # Note: In the mock, we can't easily test the actual channel picking,
         # but we can verify that the function completed without errors
         assert mock_read_raw_fif.call_count == 2
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
-    def test_load_raws_channel_reg_ex(self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels):
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
+    def test_load_raws_channel_reg_ex(
+        self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
+    ):
         """Test loading raw data with channel_reg_ex filtering."""
         mock_bids_path.return_value = "/fake/path/sub-01_task-podcast_ieeg.fif"
         mock_read_raw_fif.return_value = mock_raw_with_channels()
-        
+
         # Create DataParams with channel_reg_ex
         data_params = DataParams(
             subject_ids=[1, 2],
             data_root="/fake/data",
-            channel_reg_ex="LG.*"  # Should match LGA1, LGA2, LGB1, LGB2
+            channel_reg_ex="LG.*",  # Should match LGA1, LGA2, LGB1, LGB2
         )
-        
+
         raws = load_raws(data_params)
-        
+
         assert len(raws) == 2
         assert mock_read_raw_fif.call_count == 2
 
-    @patch('data_utils.mne.io.read_raw_fif')
-    @patch('data_utils.BIDSPath')
-    def test_load_raws_per_subject_electrodes_priority(self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels):
+    @patch("data_utils.mne.io.read_raw_fif")
+    @patch("data_utils.BIDSPath")
+    def test_load_raws_per_subject_electrodes_priority(
+        self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
+    ):
         """Test that per_subject_electrodes takes priority over channel_reg_ex."""
         mock_bids_path.return_value = "/fake/path/sub-01_task-podcast_ieeg.fif"
         mock_read_raw_fif.return_value = mock_raw_with_channels()
-        
+
         # Set both per_subject_electrodes and channel_reg_ex
-        per_subject_electrodes = {1: ['LGA1']}
-        
+        per_subject_electrodes = {1: ["LGA1"]}
+
         data_params = DataParams(
             subject_ids=[1],
             data_root="/fake/data",
             per_subject_electrodes=per_subject_electrodes,
-            channel_reg_ex="RG.*"  # This should be ignored
+            channel_reg_ex="RG.*",  # This should be ignored
         )
-        
+
         raws = load_raws(data_params)
-        
+
         assert len(raws) == 1
         # Function should complete without errors, indicating per_subject_electrodes was used
 
@@ -555,60 +580,59 @@ class TestLoadRaws:
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create temporary .fif files using the fixture
             bids_temp_files(temp_dir, [1, 2])
-            
+
             # Test loading with real files
-            data_params = DataParams(
-                subject_ids=[1, 2],
-                data_root=temp_dir
-            )
-            
+            data_params = DataParams(subject_ids=[1, 2], data_root=temp_dir)
+
             raws = load_raws(data_params)
-            
+
             assert len(raws) == 2
             for raw in raws:
                 assert isinstance(raw, mne.io.Raw)
                 assert len(raw.ch_names) == 6  # All channels should be present
 
-    def test_load_raws_with_real_temp_files_per_subject_electrodes(self, bids_temp_files):
+    def test_load_raws_with_real_temp_files_per_subject_electrodes(
+        self, bids_temp_files
+    ):
         """Test load_raws with real files and per_subject_electrodes filtering."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create temporary .fif file using the fixture
             bids_temp_files(temp_dir, [1])
-            
+
             # Test with per_subject_electrodes
-            per_subject_electrodes = {1: ['LGA1', 'LGB1']}
+            per_subject_electrodes = {1: ["LGA1", "LGB1"]}
             data_params = DataParams(
                 subject_ids=[1],
                 data_root=temp_dir,
-                per_subject_electrodes=per_subject_electrodes
+                per_subject_electrodes=per_subject_electrodes,
             )
-            
+
             raws = load_raws(data_params)
-            
+
             assert len(raws) == 1
             # Should have only the selected channels
             assert len(raws[0].ch_names) == 2
-            assert 'LGA1' in raws[0].ch_names
-            assert 'LGB1' in raws[0].ch_names
-            assert 'LGA2' not in raws[0].ch_names
+            assert "LGA1" in raws[0].ch_names
+            assert "LGB1" in raws[0].ch_names
+            assert "LGA2" not in raws[0].ch_names
 
     def test_load_raws_with_real_temp_files_channel_reg_ex(self, bids_temp_files):
         """Test load_raws with real files and channel_reg_ex filtering."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create temporary .fif file using the fixture
             bids_temp_files(temp_dir, [1])
-            
+
             # Test with channel_reg_ex
             data_params = DataParams(
                 subject_ids=[1],
                 data_root=temp_dir,
-                channel_reg_ex="LG.*"  # Should match LGA1, LGA2, LGB1, LGB2
+                channel_reg_ex="LG.*",  # Should match LGA1, LGA2, LGB1, LGB2
             )
-            
+
             raws = load_raws(data_params)
-            
+
             assert len(raws) == 1
             # Should have 4 channels matching the regex
             assert len(raws[0].ch_names) == 4
             for ch_name in raws[0].ch_names:
-                assert ch_name.startswith('LG')
+                assert ch_name.startswith("LG")

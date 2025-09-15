@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import numpy as np
 import mne
@@ -104,6 +105,7 @@ def get_data(
     window_width: float,
     preprocessing_fn=None,
     preprocessor_params: dict = None,
+    word_column: Optional[str] = None,
 ):
     """Gather data for every word in df_word from raw.
 
@@ -116,6 +118,7 @@ def get_data(
             Should have contract:
                 preprocessing_fn(data: np.array of shape [num_words, num_electrodes, timesteps],
                                 preprocessor_params)  -> array of shape [num_words, ...]
+        word_column: If provided, will return the column of words specified here.
     """
     datas = []
     for raw in raws:
@@ -155,8 +158,8 @@ def get_data(
         selected_targets = df_word_valid.target[epochs.selection]
 
         # TODO: Clean this up so we don't need to pass around this potentially None variable.
-        if "word" in df_word_valid.columns:
-            selected_words = df_word_valid.word.to_numpy()[epochs.selection]
+        if word_column:
+            selected_words = df_word_valid[word_column].to_numpy()[epochs.selection]
         else:
             selected_words = None
 

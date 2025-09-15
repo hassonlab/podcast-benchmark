@@ -7,11 +7,13 @@ between predictions and word embeddings, with support for ensemble predictions.
 
 import pytest
 import torch
+import numpy as np
 from scipy.spatial.distance import cosine
 from decoding_utils import (
     compute_cosine_distances,
     compute_class_scores,
     build_vocabulary,
+    compute_word_embedding_task_metrics,
 )
 
 
@@ -77,13 +79,8 @@ class TestComputeCosineDistances:
         assert distances.shape == (3, 4)  # 3 samples, 4 words
 
         # Check that predictions are closest to expected words
-        # Sample 0 should be closest to word 0
         assert torch.argmin(distances[0]).item() == 0
-
-        # Sample 1 should be closest to word 1
         assert torch.argmin(distances[1]).item() == 1
-
-        # Sample 2 should be closest to word 2
         assert torch.argmin(distances[2]).item() == 2
 
     def test_basic_3d_predictions(self, sample_predictions_3d, sample_word_embeddings):
@@ -96,10 +93,7 @@ class TestComputeCosineDistances:
         assert distances.shape == (2, 4)  # 2 samples, 4 words
 
         # Check that ensemble predictions are closest to expected words
-        # Sample 0 ensemble should be closest to word 0
         assert torch.argmin(distances[0]).item() == 0
-
-        # Sample 1 ensemble should be closest to word 1
         assert torch.argmin(distances[1]).item() == 1
 
     def test_perfect_matches_give_zero_distance(self, sample_word_embeddings):
@@ -109,7 +103,6 @@ class TestComputeCosineDistances:
 
         distances = compute_cosine_distances(predictions, sample_word_embeddings)
 
-        # Diagonal should be zeros (or very close due to floating point)
         for i in range(len(sample_word_embeddings)):
             assert distances[i, i].item() < 1e-6
 
@@ -928,3 +921,427 @@ class TestBuildVocabulary:
         assert word_to_id == {long_word: 0, short_word: 1}
         assert id_to_word == {0: long_word, 1: short_word}
         assert position_to_id == [0, 1, 0, 1]
+
+
+class TestComputeWordEmbeddingTaskMetrics:
+    """Test compute_word_embedding_task_metrics function for brain data decoding metrics."""
+
+    @pytest.fixture
+    def mock_model(self):
+        """Create a mock model that returns predictable outputs."""
+
+        class MockModel:
+            def __init__(self):
+                self.eval_called = False
+
+            def eval(self):
+                self.eval_called = True
+                return self
+
+            def __call__(self, x):
+                # Return a simple linear transformation for predictable results
+                # Each sample gets transformed to embeddings close to specific words
+                batch_size = x.shape[0]
+                embedding_dim = 4
+
+                # Create embeddings that will be close to word 0, 1, 0, 1... pattern
+                predictions = torch.zeros(batch_size, embedding_dim)
+                for i in range(batch_size):
+                    if i % 2 == 0:
+                        predictions[i] = torch.tensor(
+                            [1.0, 0.0, 0.0, 0.0]
+                        )  # Close to word 0
+                    else:
+                        predictions[i] = torch.tensor(
+                            [0.0, 1.0, 0.0, 0.0]
+                        )  # Close to word 1
+
+                return predictions
+
+        return MockModel()
+
+    @pytest.fixture
+    def sample_data(self):
+        """Create sample brain data and word embeddings for testing."""
+        # 4 test samples, 10 brain features
+        X_test = torch.randn(4, 10)
+
+        # 4 word embeddings, 4 dimensions each
+        Y_test = torch.tensor(
+            [
+                [1.0, 0.0, 0.0, 0.0],  # word 0 - class 0
+                [0.9, 0.1, 0.0, 0.0],  # word 0 variant - class 0
+                [0.0, 1.0, 0.0, 0.0],  # word 1 - class 1
+                [0.1, 0.9, 0.0, 0.0],  # word 1 variant - class 1
+            ],
+            dtype=torch.float32,
+        )
+
+        # Selected words for vocabulary (enough for both test and train indices)
+        selected_words = [
+            "dog",
+            "cat",
+            "dog",
+            "cat",
+            "dog",
+            "cat",
+            "bird",
+            "fish",
+            "dog",
+            "cat",
+        ]
+
+        # Indices for test and train (disjoint to prevent data leakage)
+        test_index = np.array([0, 1, 2, 3])  # test uses first 4 positions
+        train_index = np.array([4, 5, 6, 7, 8, 9])  # train uses different positions
+
+        # Top-k thresholds and min frequency for AUC
+        top_k_thresholds = [1, 3, 5]
+        min_train_freq_auc = 2
+
+        return {
+            "X_test": X_test,
+            "Y_test": Y_test,
+            "selected_words": selected_words,
+            "test_index": test_index,
+            "train_index": train_index,
+            "top_k_thresholds": top_k_thresholds,
+            "min_train_freq_auc": min_train_freq_auc,
+            "min_test_freq_auc": 1,
+        }
+
+    def test_basic_functionality(self, mock_model, sample_data):
+        """Test basic functionality with mock data."""
+        device = torch.device("cpu")
+
+        results = compute_word_embedding_task_metrics(
+            sample_data["X_test"],
+            sample_data["Y_test"],
+            mock_model,
+            device,
+            sample_data["selected_words"],
+            sample_data["test_index"],
+            sample_data["train_index"],
+            sample_data["top_k_thresholds"],
+            sample_data["min_train_freq_auc"],
+            sample_data["min_test_freq_auc"],
+        )
+
+        # Check that all expected metrics are returned
+        expected_keys = [
+            "test_occ_top_1",
+            "test_occ_top_3",
+            "test_occ_top_5",
+            "test_word_auc_roc",
+            "test_word_top_1",
+            "test_word_top_3",
+            "test_word_top_5",
+        ]
+
+        for key in expected_keys:
+            assert key in results, f"Missing metric: {key}"
+
+        # Check that metrics are reasonable values
+        for key in expected_keys:
+            if "auc" not in key:  # top-k accuracies should be between 0 and 1
+                assert 0 <= results[key] <= 1, f"Invalid {key}: {results[key]}"
+
+        # AUC should be between 0 and 1
+        assert 0 <= results["test_word_auc_roc"] <= 1
+
+        # Model should have been put in eval mode
+        assert mock_model.eval_called
+
+    def test_perfect_predictions(self):
+        """Test with perfect predictions where model predicts exact word embeddings."""
+        device = torch.device("cpu")
+
+        # Create a model that returns exact word embeddings
+        class PerfectModel:
+            def __init__(self):
+                self.call_count = 0
+
+            def eval(self):
+                return self
+
+            def __call__(self, x):
+                # The get_predictions function calls this once per sample
+                # Return the appropriate prediction for each call
+                if self.call_count == 0:
+                    result = torch.tensor(
+                        [[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32
+                    )  # word 0
+                else:
+                    result = torch.tensor(
+                        [[0.0, 1.0, 0.0, 0.0]], dtype=torch.float32
+                    )  # word 1
+                self.call_count += 1
+                return result
+
+        # Test data
+        X_test = torch.randn(2, 5)
+        Y_test = torch.tensor(
+            [
+                [1.0, 0.0, 0.0, 0.0],  # word 0
+                [0.0, 1.0, 0.0, 0.0],  # word 1
+            ],
+            dtype=torch.float32,
+        )
+
+        selected_words = [
+            "word0",
+            "word1",
+            "word0",
+            "word1",
+        ]  # enough for both test and train
+        test_index = np.array([0, 1])  # test uses positions 0, 1
+        train_index = np.array([2, 3])  # train uses positions 2, 3 (disjoint)
+        top_k_thresholds = [1]
+        min_train_freq_auc = 1
+
+        results = compute_word_embedding_task_metrics(
+            X_test,
+            Y_test,
+            PerfectModel(),
+            device,
+            selected_words,
+            test_index,
+            train_index,
+            top_k_thresholds,
+            min_train_freq_auc,
+            1,  # min_test_freq_auc
+        )
+
+        # With perfect predictions, top-1 accuracy should be 1.0
+        assert results["test_occ_top_1"] == 1.0
+        assert results["test_word_top_1"] == 1.0
+
+    def test_random_predictions(self):
+        """Test with random predictions to ensure metrics are computed."""
+        device = torch.device("cpu")
+
+        class RandomModel:
+            def eval(self):
+                return self
+
+            def __call__(self, x):
+                batch_size = x.shape[0]
+                return torch.randn(batch_size, 4)
+
+        # Test data
+        X_test = torch.randn(6, 8)
+        Y_test = torch.randn(6, 4)
+        selected_words = [
+            "a",
+            "b",
+            "c",
+            "a",
+            "b",
+            "c",
+            "a",
+            "b",
+            "c",
+            "a",
+        ]  # 10 words total
+        test_index = np.array([0, 1, 2, 3, 4, 5])  # test uses first 6 positions
+        train_index = np.array([6, 7, 8, 9])  # train uses last 4 positions (disjoint)
+        top_k_thresholds = [1, 2]
+        min_train_freq_auc = 1
+
+        results = compute_word_embedding_task_metrics(
+            X_test,
+            Y_test,
+            RandomModel(),
+            device,
+            selected_words,
+            test_index,
+            train_index,
+            top_k_thresholds,
+            min_train_freq_auc,
+            1,  # min_test_freq_auc
+        )
+
+        # With random predictions, metrics should be computed but not perfect
+        assert 0 <= results["test_occ_top_1"] <= 1
+        assert 0 <= results["test_word_auc_roc"] <= 1
+        assert results["test_occ_top_2"] >= results["test_occ_top_1"]  # top-2 >= top-1
+
+    def test_edge_case_single_sample(self):
+        """Test with single sample edge case."""
+        device = torch.device("cpu")
+
+        class SimpleModel:
+            def eval(self):
+                return self
+
+            def __call__(self, x):
+                return torch.tensor([[1.0, 0.0]], dtype=torch.float32)
+
+        X_test = torch.randn(1, 3)
+        Y_test = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
+        selected_words = ["word", "word", "word"]  # 3 words total
+        test_index = np.array([0])  # test uses position 0
+        train_index = np.array([1, 2])  # train uses positions 1, 2 (disjoint)
+        top_k_thresholds = [1]
+        min_train_freq_auc = 1
+
+        results = compute_word_embedding_task_metrics(
+            X_test,
+            Y_test,
+            SimpleModel(),
+            device,
+            selected_words,
+            test_index,
+            train_index,
+            top_k_thresholds,
+            min_train_freq_auc,
+            1,  # min_test_freq_auc
+        )
+
+        # Should work with single sample
+        assert "test_occ_top_1" in results
+        assert "test_word_auc_roc" in results
+
+    def test_different_top_k_values(self, mock_model, sample_data):
+        """Test with different top-k threshold values."""
+        device = torch.device("cpu")
+
+        # Test with various k values
+        top_k_thresholds = [1, 2, 3, 5, 10]
+        sample_data["top_k_thresholds"] = top_k_thresholds
+
+        results = compute_word_embedding_task_metrics(
+            sample_data["X_test"],
+            sample_data["Y_test"],
+            mock_model,
+            device,
+            sample_data["selected_words"],
+            sample_data["test_index"],
+            sample_data["train_index"],
+            top_k_thresholds,
+            sample_data["min_train_freq_auc"],
+            sample_data["min_test_freq_auc"],
+        )
+
+        # Check that all top-k metrics are present
+        for k in top_k_thresholds:
+            assert f"test_occ_top_{k}" in results
+            assert f"test_word_top_{k}" in results
+
+        # Top-k accuracy should be non-decreasing as k increases
+        occ_accuracies = [results[f"test_occ_top_{k}"] for k in top_k_thresholds]
+        word_accuracies = [results[f"test_word_top_{k}"] for k in top_k_thresholds]
+
+        for i in range(1, len(occ_accuracies)):
+            assert occ_accuracies[i] >= occ_accuracies[i - 1]
+            assert word_accuracies[i] >= word_accuracies[i - 1]
+
+    def test_different_vocabulary_sizes(self):
+        """Test with different vocabulary sizes."""
+        device = torch.device("cpu")
+
+        class IdentityModel:
+            def eval(self):
+                return self
+
+            def __call__(self, x):
+                # Return first few dimensions as embedding
+                return x[:, :3]
+
+        # Test with larger vocabulary
+        X_test = torch.randn(8, 5)
+        Y_test = torch.randn(8, 3)
+        selected_words = [
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+        ]  # 12 words total
+        test_index = np.array([0, 1, 2, 3, 4, 5, 6, 7])  # test uses first 8 positions
+        train_index = np.array([8, 9, 10, 11])  # train uses last 4 positions (disjoint)
+        top_k_thresholds = [1, 2]
+        min_train_freq_auc = 1
+
+        results = compute_word_embedding_task_metrics(
+            X_test,
+            Y_test,
+            IdentityModel(),
+            device,
+            selected_words,
+            test_index,
+            train_index,
+            top_k_thresholds,
+            min_train_freq_auc,
+            1,  # min_test_freq_auc
+        )
+
+        # Should handle larger vocabulary
+        assert all(
+            key in results
+            for key in ["test_occ_top_1", "test_word_top_1", "test_word_auc_roc"]
+        )
+
+    def test_integration_with_actual_functions(self):
+        """Test integration with actual decoding_utils functions."""
+        device = torch.device("cpu")
+
+        # Use a simple linear model that can be called
+        class SimpleLinearModel:
+            def __init__(self):
+                self.weight = torch.randn(3, 5)  # 5 input features -> 3 output dims
+
+            def eval(self):
+                return self
+
+            def __call__(self, x):
+                return torch.mm(x, self.weight.t())
+
+        model = SimpleLinearModel()
+        X_test = torch.randn(4, 5)
+        Y_test = torch.randn(4, 3)
+        selected_words = [
+            "cat",
+            "dog",
+            "cat",
+            "dog",
+            "cat",
+            "dog",
+            "bird",
+        ]  # 7 words total
+        test_index = np.array([0, 1, 2, 3])  # test uses first 4 positions
+        train_index = np.array([4, 5, 6])  # train uses last 3 positions (disjoint)
+        top_k_thresholds = [1, 2]
+        min_train_freq_auc = 1  # reduced since we have fewer train samples
+
+        results = compute_word_embedding_task_metrics(
+            X_test,
+            Y_test,
+            model,
+            device,
+            selected_words,
+            test_index,
+            train_index,
+            top_k_thresholds,
+            min_train_freq_auc,
+            1,  # min_test_freq_auc
+        )
+
+        # Verify the function produces valid results
+        assert isinstance(results, dict)
+        assert len(results) == 5  # 2 occ + 2 word + 1 auc metrics
+
+        # All values should be numeric and finite
+        for key, value in results.items():
+            assert isinstance(value, (int, float, torch.Tensor))
+            if isinstance(value, torch.Tensor):
+                assert torch.isfinite(value).all()
+            else:
+                assert not np.isnan(value) and not np.isinf(value)

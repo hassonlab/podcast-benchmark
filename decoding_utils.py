@@ -176,15 +176,18 @@ def train_decoding_model(
     # would get complicated.
     is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
     if is_word_embedding_decoding_task:
-        # Metrics for specific occurence. Useful for checking contextual embeddings.
-        # Can't use AUC-ROC since each example is treated as its own class.
-        # cv_results["test_occ_top_1"] = []
-        # cv_results["test_occ_top_5"] = []
-
+        embedding_metrics = ["test_word_auc_roc"]
         # Metrics averaged over words and all their occurences.
         cv_results["test_word_auc_roc"] = []
-        # cv_results["test_word_top_1"] = []
-        # cv_results["test_word_top_5"] = []
+
+        for k_val in training_params.top_k_thresholds:
+            # Test type is split between "word" and "occ" where word is averaged over
+            # average word occurences and occ is per-each occurence of the word so is
+            # more difficult and depends on contextual embeddings.
+            for test_type in ["word", "occ"]:
+                metric_str = "test_{test_type}_top_{k_val}"
+                cv_results[metric_str] = []
+                embedding_metrics.append(metric_str)
 
     models, histories = [], []
 
@@ -338,24 +341,20 @@ def train_decoding_model(
         # Hardcoded for now since this would be a bit complicated
         # to generalize at the moment.
         if is_word_embedding_decoding_task:
-            _, _, position_to_id = build_vocabulary(selected_words)
-            predictions = get_predictions(X[te_idx], model, device)
-            distances, _ = compute_cosine_distances(predictions, Y)
-
-            # Measure performance based on each individual word occurence. Can the model
-            # predict which occurence of "dog" in context we care about?
-            occurence_scores = compute_class_scores(distances)
-
-            # Group by words for a slightly easier task.
-            word_scores = compute_class_scores(distances, position_to_id[te_idx])
-            train_frequencies = np.bincount(position_to_id[tr_idx])
-            word_auc = metrics.calculate_auc_roc(
-                word_scores,
-                position_to_id[te_idx],
-                train_frequencies,
+            results = compute_word_embedding_task_metrics(
+                X[te_idx],
+                Y[te_idx],
+                model,
+                device,
+                selected_words,
+                te_idx,
+                tr_idx,
+                training_params.top_k_thresholds,
                 training_params.min_train_freq_auc,
+                training_params.min_test_freq_auc,
             )
-            cv_results["test_word_auc_roc"].append(word_auc)
+            for key, val in results.items():
+                cv_results[key].append(val)
 
         models.append(model)
         histories.append(history)
@@ -371,6 +370,10 @@ def train_decoding_model(
         for name in metric_names:
             vals = cv_results[f"{phase}_{name}"]
             print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+    if is_word_embedding_decoding_task:
+        for metric_name in embedding_metrics:
+            vals = cv_results[metric_name]
+            print("Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
     if plot_results:
         plot_cv_results(cv_results)
@@ -470,9 +473,13 @@ def get_predictions(X, model, device):
             input_data = X[i : i + 1]
             pred = model(input_data)
 
-        model_predictions.append(pred.squeeze())
+        # Only squeeze the batch dimension (first dimension), keep the embedding dimension
+        if pred.dim() > 1:
+            pred = pred.squeeze(0)  # Remove only the first dimension
+        model_predictions.append(pred)
 
-    return torch.cat(model_predictions)
+    # Stack to ensure we get a 2D tensor [num_samples, embedding_dim]
+    return torch.stack(model_predictions)
 
 
 def build_vocabulary(words):
@@ -485,7 +492,7 @@ def build_vocabulary(words):
     Returns:
         word_to_id: Dictionary mapping word -> unique_id
         id_to_word: Dictionary mapping unique_id -> word
-        postion_to_id: List specifying what the ith word maps to which unique id.
+        postion_to_id: Numpy array specifying what the ith word maps to which unique id.
     """
     word_to_id = {}
     position_to_id = []
@@ -616,18 +623,86 @@ def compute_class_scores(cosine_distances, word_labels=None):
     return class_probabilities, class_logits
 
 
-def summarize_roc_results(word_aucs, selected_words, min_repetitions=5):
-    word_counts = Counter(selected_words)
-    frequent_words = [
-        word for word, count in word_counts.items() if count >= min_repetitions
-    ]
+def compute_word_embedding_task_metrics(
+    X_test,
+    Y_test,
+    model,
+    device,
+    selected_words,
+    test_index,
+    train_index,
+    top_k_thresholds,
+    min_train_freq_auc,
+    min_test_freq_auc,
+):
+    """
+    Calculate top-k metrics and AUC-ROC for decoding from brain data.
 
-    total_count = sum(word_counts[word] for word in frequent_words if word in word_aucs)
-    weighted_auc = (
-        sum(word_aucs[word] * word_counts[word] for word in word_aucs) / total_count
+    Args:
+        X_test: Test brain data
+        Y: All word embeddings across all folds.
+        model: Trained model
+        device: PyTorch device
+        selected_words: List of selected words for vocabulary.
+        test_index: Test indices for indexing into position_to_id
+        train_index: Train indices for indexing into position_to_id
+        top_k_thresholds: List of k values for top-k accuracy
+        min_train_freq_auc: Minimum training frequency for AUC calculation
+        min_test_freq_auc: Minimum test frequency for AUC calculation
+
+    Returns:
+        dict: Dictionary containing computed metrics
+    """
+    results = {}
+
+    # Put model in evaluation mode
+    model.eval()
+
+    # Get predictions
+    predictions = get_predictions(X_test, model, device)
+
+    # Compute cosine distances
+    distances = compute_cosine_distances(predictions, Y_test)
+
+    # Measure performance based on each individual word occurrence
+    occurence_scores, _ = compute_class_scores(distances)
+    occurence_scores_np = occurence_scores.cpu().numpy()
+    for k_val in top_k_thresholds:
+        # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
+        results[f"test_occ_top_{k_val}"] = metrics.top_k_accuracy(
+            occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
+        )
+
+    # Group by words for an easier task.
+    # Build vocabulary. While in most cases we would not want to include
+    # the test set in the vocabulary building process, we remove any
+    _, _, position_to_id = build_vocabulary(selected_words)
+    position_to_id = np.array(position_to_id)
+
+    word_scores, _ = compute_class_scores(
+        distances, torch.from_numpy(position_to_id[test_index])
     )
+    word_scores_np = word_scores.cpu().numpy()
+    train_frequencies = np.bincount(
+        position_to_id[train_index], minlength=max(position_to_id) + 1
+    )
+    test_frequencies = np.bincount(
+        position_to_id[test_index], minlength=max(position_to_id) + 1
+    )
+    word_auc = metrics.calculate_auc_roc(
+        word_scores_np,
+        position_to_id[test_index],
+        [train_frequencies, test_frequencies],
+        [min_train_freq_auc, min_test_freq_auc],
+    )
+    results["test_word_auc_roc"] = word_auc
 
-    return weighted_auc
+    for k_val in top_k_thresholds:
+        results[f"test_word_top_{k_val}"] = metrics.top_k_accuracy(
+            word_scores_np, position_to_id[test_index], k_val
+        )
+
+    return results
 
 
 def run_training_over_lags(
@@ -677,6 +752,7 @@ def run_training_over_lags(
             data_params.window_width,
             preprocessing_fn,
             data_params.preprocessor_params,
+            word_column=data_params.word_column,
         )
 
         X_tensor = torch.FloatTensor(X)

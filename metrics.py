@@ -86,9 +86,9 @@ def calculate_auc_roc(
         predictions: Array of shape [num_samples, num_vocab] where each row is a
                     probability distribution over the vocabulary
         groundtruth: Array of shape [num_samples] containing class predictions
-        frequencies: Array of shape [num_vocab] containing the number of appearances
+        frequencies: Lost of Arrays of shape [num_vocab] containing the number of appearances
                     of each vocab item for filtering
-        min_frequencies: Minimum number of appearances required for a vocab item
+        min_frequencies: List of inimum number of appearances required for a vocab item
                        to be included in the calculation
         average: How the AUC ROC score should be averaged across classes. Options
                 include 'weighted', 'macro', 'micro', etc.
@@ -98,7 +98,16 @@ def calculate_auc_roc(
                the minimum frequency threshold
     """
     # Only include labels that meet the minimum frequency level.
-    include_class = frequencies >= min_frequencies
+    include_class = None
+    for freq, thresh in zip(frequencies, min_frequencies):
+        if include_class is None:
+            include_class = np.ones_like(freq, dtype=bool)
+        print(freq)
+        include_class = include_class & (freq >= thresh)
+    print(
+        "Fraction of examples included in AUC-ROC calculation:",
+        include_class.sum() / include_class.shape[0],
+    )
     include_example = include_class[groundtruth]
 
     # Filter examples
@@ -134,3 +143,35 @@ def calculate_auc_roc(
             average=average,
             multi_class="ovr",
         )
+
+
+def top_k_accuracy(predictions: np.ndarray, ground_truth: np.ndarray, k: int) -> float:
+    """
+    Calculate top-k accuracy for multiclass classification.
+
+    Args:
+        predictions: Array of shape [num_samples, num_classes] where each row
+                    contains prediction scores/probabilities for each class
+        ground_truth: Array of shape [num_samples] containing the true class
+                     indices for each sample
+        k: Number of top predictions to consider
+
+    Returns:
+        float: Top-k accuracy as a fraction between 0 and 1
+    """
+    if len(predictions) == 0:
+        return 0.0
+
+    if k <= 0:
+        return 0.0
+
+    # Get the indices of the top-k predictions for each sample
+    # argsort returns indices in ascending order, so we take the last k and reverse
+    top_k_indices = np.argsort(predictions, axis=1)[:, -k:]
+
+    # Check if ground truth is in the top-k predictions for each sample
+    correct = np.array(
+        [ground_truth[i] in top_k_indices[i] for i in range(len(ground_truth))]
+    )
+
+    return np.mean(correct)

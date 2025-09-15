@@ -1,5 +1,6 @@
 import os
 
+from nltk.stem import WordNetLemmatizer as wl
 import pandas as pd
 from sklearn.decomposition import PCA
 
@@ -42,6 +43,10 @@ def word_embedding_decoding_task(data_params: DataParams):
     df_word = df_contextual.groupby("word_idx").agg(
         dict(word="first", start="first", end="last")
     )
+    df_word["norm_word"] = df_word.word.str.lower().str.replace(
+        r"^[^\w\s]+|[^\w\s]+$", "", regex=True
+    )
+    df_word["lemmatized_word"] = df_word.norm_word.apply(lambda x: wl().lemmatize(x))
 
     if data_params.embedding_type == "gpt-2xl":
         df_word["target"] = list(aligned_embeddings)
