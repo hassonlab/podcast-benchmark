@@ -1032,7 +1032,9 @@ class TestComputeWordEmbeddingTaskMetrics:
             "test_occ_top_1",
             "test_occ_top_3",
             "test_occ_top_5",
-            "test_word_auc_roc",
+            "test_word_avg_auc_roc",
+            "test_word_train_weighted_auc_roc",
+            "test_word_test_weighted_auc_roc",
             "test_word_top_1",
             "test_word_top_3",
             "test_word_top_5",
@@ -1047,7 +1049,9 @@ class TestComputeWordEmbeddingTaskMetrics:
                 assert 0 <= results[key] <= 1, f"Invalid {key}: {results[key]}"
 
         # AUC should be between 0 and 1
-        assert 0 <= results["test_word_auc_roc"] <= 1
+        assert 0 <= results["test_word_avg_auc_roc"] <= 1
+        assert 0 <= results["test_word_train_weighted_auc_roc"] <= 1
+        assert 0 <= results["test_word_test_weighted_auc_roc"] <= 1
 
         # Model should have been put in eval mode
         assert mock_model.eval_called
@@ -1163,7 +1167,7 @@ class TestComputeWordEmbeddingTaskMetrics:
 
         # With random predictions, metrics should be computed but not perfect
         assert 0 <= results["test_occ_top_1"] <= 1
-        assert 0 <= results["test_word_auc_roc"] <= 1
+        assert 0 <= results["test_word_avg_auc_roc"] <= 1
         assert results["test_occ_top_2"] >= results["test_occ_top_1"]  # top-2 >= top-1
 
     def test_edge_case_single_sample(self):
@@ -1200,7 +1204,7 @@ class TestComputeWordEmbeddingTaskMetrics:
 
         # Should work with single sample
         assert "test_occ_top_1" in results
-        assert "test_word_auc_roc" in results
+        assert "test_word_avg_auc_roc" in results
 
     def test_different_top_k_values(self, mock_model, sample_data):
         """Test with different top-k threshold values."""
@@ -1286,7 +1290,7 @@ class TestComputeWordEmbeddingTaskMetrics:
         # Should handle larger vocabulary
         assert all(
             key in results
-            for key in ["test_occ_top_1", "test_word_top_1", "test_word_auc_roc"]
+            for key in ["test_occ_top_1", "test_word_top_1", "test_word_avg_auc_roc"]
         )
 
     def test_integration_with_actual_functions(self):
@@ -1336,7 +1340,7 @@ class TestComputeWordEmbeddingTaskMetrics:
 
         # Verify the function produces valid results
         assert isinstance(results, dict)
-        assert len(results) == 5  # 2 occ + 2 word + 1 auc metrics
+        assert len(results) == 7  # 2 occ + 2 word + 3 auc metrics
 
         # All values should be numeric and finite
         for key, value in results.items():

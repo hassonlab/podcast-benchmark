@@ -178,7 +178,9 @@ def train_decoding_model(
     is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
     if is_word_embedding_decoding_task:
         embedding_metrics = [
-            "test_word_auc_roc",
+            "test_word_avg_auc_roc",
+            "test_word_train_weighted_auc_roc",
+            "test_word_test_weighted_auc_roc",
             "test_word_perplexity",
             "test_occ_perplexity",
         ]
@@ -617,13 +619,17 @@ def compute_word_embedding_task_metrics(
     test_frequencies = np.bincount(
         position_to_id[test_index], minlength=max(position_to_id) + 1
     )
-    word_auc = metrics.calculate_auc_roc(
+    avg_auc, train_weighted_auc, test_weighted_auc = metrics.calculate_auc_roc(
         word_scores_np,
         position_to_id[test_index],
-        [train_frequencies, test_frequencies],
-        [min_train_freq_auc, min_test_freq_auc],
+        train_frequencies,
+        test_frequencies,
+        min_train_freq_auc,
+        min_test_freq_auc,
     )
-    results["test_word_auc_roc"] = word_auc
+    results["test_word_avg_auc_roc"] = avg_auc
+    results["test_word_train_weighted_auc_roc"] = train_weighted_auc
+    results["test_word_test_weighted_auc_roc"] = test_weighted_auc
 
     for k_val in top_k_thresholds:
         results[f"test_word_top_{k_val}"] = metrics.top_k_accuracy(

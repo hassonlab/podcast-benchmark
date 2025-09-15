@@ -18,21 +18,31 @@ class TestCalculateAucRoc:
         )
 
         groundtruth = np.array([0, 1, 2, 3])
-        frequencies = [
-            np.array([5, 5, 5, 5]),
-            np.array([3, 3, 3, 3]),
-        ]  # All classes frequent
-        min_frequencies = [2, 3]  # Include all classes
+        train_frequencies = np.array([5, 5, 5, 5])
+        test_frequencies = np.array([3, 3, 3, 3])
+        min_train_freq = 2  # Include all classes
+        min_test_freq = 3  # Include all classes
 
-        auc_score = calculate_auc_roc(
-            predictions, groundtruth, frequencies, min_frequencies, average="weighted"
+        avg_auc, train_weighted_auc, test_weighted_auc = calculate_auc_roc(
+            predictions,
+            groundtruth,
+            train_frequencies,
+            test_frequencies,
+            min_train_freq,
+            min_test_freq,
         )
 
-        # Should return a valid AUC score
-        assert isinstance(auc_score, (float, np.floating))
-        assert 0.0 <= auc_score <= 1.0
+        # Should return valid AUC scores
+        assert isinstance(avg_auc, (float, np.floating))
+        assert isinstance(train_weighted_auc, (float, np.floating))
+        assert isinstance(test_weighted_auc, (float, np.floating))
+        assert 0.0 <= avg_auc <= 1.0
+        assert 0.0 <= train_weighted_auc <= 1.0
+        assert 0.0 <= test_weighted_auc <= 1.0
         # With good predictions, should be high
-        assert auc_score > 0.8
+        assert avg_auc > 0.8
+        assert train_weighted_auc > 0.8
+        assert test_weighted_auc > 0.8
 
     def test_frequency_filtering_excludes_bad_predictions(self):
         """Test that filtering works by excluding badly predicted low-frequency classes."""
@@ -43,15 +53,15 @@ class TestCalculateAucRoc:
                 [0.0, 1.0, 0.0, 0.0],  # sample 1: perfect for class 1
                 # Terrible predictions for classes 2,3 (will be excluded)
                 [
+                    0.0,
+                    0.0,
+                    0.0,
                     1.0,
-                    0.0,
-                    0.0,
-                    0.0,
                 ],  # sample 2: predicts class 0, actually class 2 (wrong!)
                 [
                     0.0,
-                    1.0,
                     0.0,
+                    1.0,
                     0.0,
                 ],  # sample 3: predicts class 1, actually class 3 (wrong!)
             ]
@@ -60,16 +70,71 @@ class TestCalculateAucRoc:
         groundtruth = np.array([0, 1, 2, 3])
 
         # Classes 0,1 have high frequency (included), classes 2,3 have low frequency (excluded)
-        frequencies = [np.array([10, 10, 1, 5]), np.array([10, 10, 1, 1])]
-        min_frequencies = [5, 6]  # Exclude classes 2,3
+        train_frequencies = np.array([10, 10, 1, 1])
+        test_frequencies = np.array([10, 10, 1, 1])
+        min_train_freq = 5  # Exclude classes 2,3
+        min_test_freq = 5  # Exclude classes 2,3
 
-        auc_score = calculate_auc_roc(
-            predictions, groundtruth, frequencies, min_frequencies, average="weighted"
+        avg_auc, train_weighted_auc, test_weighted_auc = calculate_auc_roc(
+            predictions,
+            groundtruth,
+            train_frequencies,
+            test_frequencies,
+            min_train_freq,
+            min_test_freq,
         )
 
         # Since we only include the perfectly predicted samples (classes 0,1),
         # AUC should be very high despite terrible predictions for classes 2,3
-        assert auc_score > 0.95
+        assert avg_auc > 0.99
+        assert train_weighted_auc > 0.99
+        assert test_weighted_auc > 0.99
+
+    def test_correctly_weights_frequencies(self):
+        """Test that filtering works by excluding badly predicted low-frequency classes."""
+        predictions = np.array(
+            [
+                # Perfect predictions for classes 0,1 (will be included)
+                [1.0, 0.0, 0.0, 0.0],  # sample 0: perfect for class 0
+                [0.0, 1.0, 0.0, 0.0],  # sample 1: perfect for class 1
+                # Terrible predictions for classes 2,3 (will be excluded)
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ],  # sample 2: predicts class 0, actually class 2 (wrong!)
+                [
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                ],  # sample 3: predicts class 1, actually class 3 (wrong!)
+            ]
+        )
+
+        groundtruth = np.array([0, 3, 2, 3])
+
+        # Classes 0,4 have high frequency (included), classes 1,2 have low frequency (excluded)
+        train_frequencies = np.array([100, 0, 0, 1])
+        test_frequencies = np.array([1, 0, 0, 100])
+        min_train_freq = 1  # Exclude classes 2,3
+        min_test_freq = 1  # Exclude classes 2,3
+
+        avg_auc, train_weighted_auc, test_weighted_auc = calculate_auc_roc(
+            predictions,
+            groundtruth,
+            train_frequencies,
+            test_frequencies,
+            min_train_freq,
+            min_test_freq,
+        )
+
+        # Average should be somewhere in the middle. train should be high (high freq of good class).
+        # test should be low (high freq of bad class)
+        assert avg_auc > 0.5 and avg_auc < 0.75
+        assert train_weighted_auc > 0.8
+        assert test_weighted_auc < 0.3
 
 
 class TestTopKAccuracy:
@@ -186,12 +251,14 @@ class TestPerplexity:
 
     def test_perfect_predictions(self):
         """Test perplexity with perfect predictions (should be 1.0)."""
-        predictions = np.array([
-            [1.0, 0.0, 0.0, 0.0],  # Perfect prediction for class 0
-            [0.0, 1.0, 0.0, 0.0],  # Perfect prediction for class 1
-            [0.0, 0.0, 1.0, 0.0],  # Perfect prediction for class 2
-            [0.0, 0.0, 0.0, 1.0],  # Perfect prediction for class 3
-        ])
+        predictions = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],  # Perfect prediction for class 0
+                [0.0, 1.0, 0.0, 0.0],  # Perfect prediction for class 1
+                [0.0, 0.0, 1.0, 0.0],  # Perfect prediction for class 2
+                [0.0, 0.0, 0.0, 1.0],  # Perfect prediction for class 3
+            ]
+        )
         ground_truth = np.array([0, 1, 2, 3])
 
         ppl = perplexity(predictions, ground_truth)
@@ -201,12 +268,14 @@ class TestPerplexity:
     def test_uniform_predictions(self):
         """Test perplexity with uniform predictions."""
         num_classes = 4
-        predictions = np.array([
-            [0.25, 0.25, 0.25, 0.25],  # Uniform predictions
-            [0.25, 0.25, 0.25, 0.25],
-            [0.25, 0.25, 0.25, 0.25],
-            [0.25, 0.25, 0.25, 0.25],
-        ])
+        predictions = np.array(
+            [
+                [0.25, 0.25, 0.25, 0.25],  # Uniform predictions
+                [0.25, 0.25, 0.25, 0.25],
+                [0.25, 0.25, 0.25, 0.25],
+                [0.25, 0.25, 0.25, 0.25],
+            ]
+        )
         ground_truth = np.array([0, 1, 2, 3])
 
         ppl = perplexity(predictions, ground_truth)
@@ -227,19 +296,23 @@ class TestPerplexity:
     def test_varying_quality_predictions(self):
         """Test perplexity increases with worse predictions."""
         # Good predictions
-        good_predictions = np.array([
-            [0.9, 0.05, 0.03, 0.02],
-            [0.05, 0.9, 0.03, 0.02],
-            [0.05, 0.03, 0.9, 0.02],
-        ])
+        good_predictions = np.array(
+            [
+                [0.9, 0.05, 0.03, 0.02],
+                [0.05, 0.9, 0.03, 0.02],
+                [0.05, 0.03, 0.9, 0.02],
+            ]
+        )
         ground_truth = np.array([0, 1, 2])
 
         # Bad predictions
-        bad_predictions = np.array([
-            [0.3, 0.3, 0.3, 0.1],
-            [0.3, 0.3, 0.3, 0.1],
-            [0.3, 0.3, 0.3, 0.1],
-        ])
+        bad_predictions = np.array(
+            [
+                [0.3, 0.3, 0.3, 0.1],
+                [0.3, 0.3, 0.3, 0.1],
+                [0.3, 0.3, 0.3, 0.1],
+            ]
+        )
 
         good_ppl = perplexity(good_predictions, ground_truth)
         bad_ppl = perplexity(bad_predictions, ground_truth)
@@ -247,15 +320,17 @@ class TestPerplexity:
         # Bad predictions should have higher perplexity
         assert bad_ppl > good_ppl
         assert good_ppl < 2.0  # Good predictions should be close to 1.0
-        assert bad_ppl > 3.0   # Bad predictions should be higher
+        assert bad_ppl > 3.0  # Bad predictions should be higher
 
     def test_edge_cases(self):
         """Test edge cases like very small probabilities."""
         # Predictions with very small probability for true class
-        predictions = np.array([
-            [1e-10, 0.9999999999, 0.0, 0.0],  # Very small prob for class 0
-            [0.0, 1.0, 0.0, 0.0],              # Normal prediction
-        ])
+        predictions = np.array(
+            [
+                [1e-10, 0.9999999999, 0.0, 0.0],  # Very small prob for class 0
+                [0.0, 1.0, 0.0, 0.0],  # Normal prediction
+            ]
+        )
         ground_truth = np.array([0, 1])
 
         ppl = perplexity(predictions, ground_truth)
@@ -274,11 +349,13 @@ class TestPerplexity:
 
     def test_binary_classification(self):
         """Test perplexity with binary classification."""
-        predictions = np.array([
-            [0.8, 0.2],  # Good prediction for class 0
-            [0.3, 0.7],  # Good prediction for class 1
-            [0.6, 0.4],  # Moderate prediction for class 0
-        ])
+        predictions = np.array(
+            [
+                [0.8, 0.2],  # Good prediction for class 0
+                [0.3, 0.7],  # Good prediction for class 1
+                [0.6, 0.4],  # Moderate prediction for class 0
+            ]
+        )
         ground_truth = np.array([0, 1, 0])
 
         ppl = perplexity(predictions, ground_truth)
@@ -288,11 +365,13 @@ class TestPerplexity:
 
     def test_numerical_stability(self):
         """Test numerical stability with probabilities close to 0 and 1."""
-        predictions = np.array([
-            [1.0 - 1e-15, 1e-15, 0.0, 0.0],     # Very close to 1
-            [1e-15, 1.0 - 1e-15, 0.0, 0.0],     # Very close to 1
-            [0.5, 0.5, 0.0, 0.0],               # Normal case
-        ])
+        predictions = np.array(
+            [
+                [1.0 - 1e-15, 1e-15, 0.0, 0.0],  # Very close to 1
+                [1e-15, 1.0 - 1e-15, 0.0, 0.0],  # Very close to 1
+                [0.5, 0.5, 0.0, 0.0],  # Normal case
+            ]
+        )
         ground_truth = np.array([0, 1, 0])
 
         ppl = perplexity(predictions, ground_truth)

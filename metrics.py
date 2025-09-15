@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_curve, auc
 
 
 from registry import register_metric
@@ -75,9 +75,10 @@ def similarity_entropy(predicted_embeddings, actual_embeddings):
 def calculate_auc_roc(
     predictions,
     groundtruth,
-    frequencies,
-    min_frequencies,
-    average="weighted",
+    train_frequencies,
+    test_frequencies,
+    min_train_freq,
+    min_test_freq,
 ):
     """
     Calculate AUC-ROC score with frequency-based filtering.
@@ -86,64 +87,56 @@ def calculate_auc_roc(
         predictions: Array of shape [num_samples, num_vocab] where each row is a
                     probability distribution over the vocabulary
         groundtruth: Array of shape [num_samples] containing class predictions
-        frequencies: Lost of Arrays of shape [num_vocab] containing the number of appearances
-                    of each vocab item for filtering
-        min_frequencies: List of inimum number of appearances required for a vocab item
-                       to be included in the calculation
+        train_frequencies: Array of shape [num_vocab] containing the number of appearances
+                    of each vocab item in train set.
+        test_frequencies: Array of shape [num_vocab] containing the number of appearances
+                    of each vocab item in test set.
+        min_train_freq: Minimum number of occurences in train set to include class.
+        min_test_freq: Minimum number of occurences in test set to include class.
         average: How the AUC ROC score should be averaged across classes. Options
                 include 'weighted', 'macro', 'micro', etc.
 
     Returns:
-        float: AUC-ROC score calculated only for vocabulary items that meet
-               the minimum frequency threshold
+        tuple[float, float, flaot]: AUC-ROC score calculated only for vocabulary items that meet
+               the minimum frequency threshold. 0th is unwieghted, 1st is weighted by train frequency,
+               2nd is weighted by test frequency.
     """
     # Only include labels that meet the minimum frequency level.
-    include_class = None
-    for freq, thresh in zip(frequencies, min_frequencies):
-        if include_class is None:
-            include_class = np.ones_like(freq, dtype=bool)
-        include_class = include_class & (freq >= thresh)
+    include_class = train_frequencies >= min_train_freq
+    include_class = include_class & (test_frequencies >= min_test_freq)
 
     print(
         f"Fraction of examples included in AUC-ROC calculation:",
         f"{include_class.sum() / include_class.shape[0]:.4f},",
         f"({include_class.sum()} / {include_class.shape[0]})",
     )
-    include_example = include_class[groundtruth]
-
-    # Filter examples
-    filtered_groundtruth = groundtruth[include_example]
-    filtered_predictions = predictions[include_example]
-
     # Get the original class indices that are included
     included_class_indices = np.where(include_class)[0]
+    scores = []
 
-    # Filter prediction columns to only include frequent classes
-    filtered_predictions = filtered_predictions[:, included_class_indices]
+    one_hots = np.eye(groundtruth.max() + 1)[groundtruth]
 
-    # Remap groundtruth classes to consecutive indices
-    # Create mapping from original class index to new consecutive index
-    class_mapping = {
-        original_idx: new_idx
-        for new_idx, original_idx in enumerate(included_class_indices)
-    }
-    remapped_groundtruth = np.array(
-        [class_mapping[cls] for cls in filtered_groundtruth]
-    )
+    # Due to limitations in sklearn roc_auc_score we calculate this ourselves here.
+    for class_index in included_class_indices:
+        probs = predictions[:, class_index]
+        c_labels = one_hots[:, class_index]
+        fpr, tpr, _ = roc_curve(c_labels, probs)
+        score = auc(fpr, tpr)
+        scores.append(score)
 
-    # Handle binary vs multiclass cases
-    n_classes = len(included_class_indices)
-    if n_classes == 2:
-        # Binary classification: use probabilities of positive class (class 1)
-        return roc_auc_score(remapped_groundtruth, filtered_predictions[:, 1])
-    else:
-        # Multiclass classification
-        return roc_auc_score(
-            remapped_groundtruth,
-            filtered_predictions,
-            average=average,
-            multi_class="ovr",
-        )
+    scores = np.array(scores)
+    avg_auc = np.mean(scores)
+
+    # Only use frequencies for included classes
+    included_train_freqs = train_frequencies[included_class_indices]
+    normed_freqs = included_train_freqs / included_train_freqs.sum()
+    train_weighted_auc = (scores * normed_freqs).sum()
+
+    included_test_freqs = test_frequencies[included_class_indices]
+    normed_freqs = included_test_freqs / included_test_freqs.sum()
+    test_weighted_auc = (scores * normed_freqs).sum()
+
+    return avg_auc, train_weighted_auc, test_weighted_auc
 
 
 @register_metric("perplexity")
