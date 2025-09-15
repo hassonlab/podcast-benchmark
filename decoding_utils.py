@@ -177,6 +177,9 @@ def train_decoding_model(
     # get complicated.
     is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
     if is_word_embedding_decoding_task:
+        # Test type is split between "word" and "occ" where word is averaged over
+        # each time a word occurs and occ is per-each occurence of the word so is
+        # more difficult and depends on contextual embeddings.
         embedding_metrics = [
             "test_word_avg_auc_roc",
             "test_word_train_weighted_auc_roc",
@@ -184,20 +187,14 @@ def train_decoding_model(
             "test_word_perplexity",
             "test_occ_perplexity",
         ]
-        # Metrics where each word occurence is treated as separate.
-        cv_results["test_occ_perplexity"] = []
-        # Metrics averaged over words and all their occurences.
-        cv_results["test_word_auc_roc"] = []
-        cv_results["test_word_perplexity"] = []
 
+        # Top-K metrics.
         for k_val in training_params.top_k_thresholds:
-            # Test type is split between "word" and "occ" where word is averaged over
-            # each time a word occurs and occ is per-each occurence of the word so is
-            # more difficult and depends on contextual embeddings.
             for test_type in ["word", "occ"]:
-                metric_str = f"test_{test_type}_top_{k_val}"
-                cv_results[metric_str] = []
-                embedding_metrics.append(metric_str)
+                embedding_metrics.append(f"test_{test_type}_top_{k_val}")
+
+        for metric in embedding_metrics:
+            cv_results[metric] = []
 
     models, histories = [], []
 
