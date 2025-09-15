@@ -1,7 +1,5 @@
 import os
 
-import nltk
-from nltk.stem import WordNetLemmatizer as wl
 import pandas as pd
 from sklearn.decomposition import PCA
 
@@ -28,7 +26,16 @@ def word_embedding_decoding_task(data_params: DataParams):
         Tuple[pd.DataFrame, np.ndarray]: A DataFrame containing word-level information (word, start time, end time),
         and a NumPy array of corresponding word-level embeddings under the header target.
     """
-    nltk.download("wordnet")
+    import nltk
+    from nltk.stem import WordNetLemmatizer as wl
+
+    try:
+        nltk.data.find("corpora/wordnet")
+        print("WordNet already downloaded")
+    except LookupError:
+        print("Downloading WordNet...")
+        nltk.download("wordnet")
+        nltk.download("wordnet")
 
     transcript_path = os.path.join(
         data_params.data_root, "stimuli/gpt2-xl/transcript.tsv"
