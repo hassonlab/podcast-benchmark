@@ -1,6 +1,6 @@
 import numpy as np
 
-from metrics import calculate_auc_roc, top_k_accuracy
+from metrics import calculate_auc_roc, top_k_accuracy, perplexity
 
 
 class TestCalculateAucRoc:
@@ -179,3 +179,123 @@ class TestTopKAccuracy:
 
         # At least the second sample should be correct for k>=1
         assert accuracy_top2 >= 0.5
+
+
+class TestPerplexity:
+    """Test perplexity function for LLM evaluation."""
+
+    def test_perfect_predictions(self):
+        """Test perplexity with perfect predictions (should be 1.0)."""
+        predictions = np.array([
+            [1.0, 0.0, 0.0, 0.0],  # Perfect prediction for class 0
+            [0.0, 1.0, 0.0, 0.0],  # Perfect prediction for class 1
+            [0.0, 0.0, 1.0, 0.0],  # Perfect prediction for class 2
+            [0.0, 0.0, 0.0, 1.0],  # Perfect prediction for class 3
+        ])
+        ground_truth = np.array([0, 1, 2, 3])
+
+        ppl = perplexity(predictions, ground_truth)
+        # Perfect predictions should give perplexity of 1.0
+        assert abs(ppl - 1.0) < 1e-10
+
+    def test_uniform_predictions(self):
+        """Test perplexity with uniform predictions."""
+        num_classes = 4
+        predictions = np.array([
+            [0.25, 0.25, 0.25, 0.25],  # Uniform predictions
+            [0.25, 0.25, 0.25, 0.25],
+            [0.25, 0.25, 0.25, 0.25],
+            [0.25, 0.25, 0.25, 0.25],
+        ])
+        ground_truth = np.array([0, 1, 2, 3])
+
+        ppl = perplexity(predictions, ground_truth)
+        # Uniform predictions should give perplexity equal to num_classes
+        expected_ppl = num_classes
+        assert abs(ppl - expected_ppl) < 1e-10
+
+    def test_single_sample(self):
+        """Test perplexity with a single sample."""
+        predictions = np.array([[0.6, 0.2, 0.1, 0.1]])
+        ground_truth = np.array([0])
+
+        ppl = perplexity(predictions, ground_truth)
+        # Perplexity = 2^(-log2(0.6)) = 1/0.6 ≈ 1.667
+        expected_ppl = 1.0 / 0.6
+        assert abs(ppl - expected_ppl) < 1e-10
+
+    def test_varying_quality_predictions(self):
+        """Test perplexity increases with worse predictions."""
+        # Good predictions
+        good_predictions = np.array([
+            [0.9, 0.05, 0.03, 0.02],
+            [0.05, 0.9, 0.03, 0.02],
+            [0.05, 0.03, 0.9, 0.02],
+        ])
+        ground_truth = np.array([0, 1, 2])
+
+        # Bad predictions
+        bad_predictions = np.array([
+            [0.3, 0.3, 0.3, 0.1],
+            [0.3, 0.3, 0.3, 0.1],
+            [0.3, 0.3, 0.3, 0.1],
+        ])
+
+        good_ppl = perplexity(good_predictions, ground_truth)
+        bad_ppl = perplexity(bad_predictions, ground_truth)
+
+        # Bad predictions should have higher perplexity
+        assert bad_ppl > good_ppl
+        assert good_ppl < 2.0  # Good predictions should be close to 1.0
+        assert bad_ppl > 3.0   # Bad predictions should be higher
+
+    def test_edge_cases(self):
+        """Test edge cases like very small probabilities."""
+        # Predictions with very small probability for true class
+        predictions = np.array([
+            [1e-10, 0.9999999999, 0.0, 0.0],  # Very small prob for class 0
+            [0.0, 1.0, 0.0, 0.0],              # Normal prediction
+        ])
+        ground_truth = np.array([0, 1])
+
+        ppl = perplexity(predictions, ground_truth)
+        # Should handle very small probabilities without numerical issues
+        assert not np.isnan(ppl)
+        assert not np.isinf(ppl)
+        assert ppl > 1.0
+
+    def test_empty_input(self):
+        """Test perplexity with empty input."""
+        predictions = np.array([]).reshape(0, 4)
+        ground_truth = np.array([])
+
+        ppl = perplexity(predictions, ground_truth)
+        assert np.isinf(ppl)
+
+    def test_binary_classification(self):
+        """Test perplexity with binary classification."""
+        predictions = np.array([
+            [0.8, 0.2],  # Good prediction for class 0
+            [0.3, 0.7],  # Good prediction for class 1
+            [0.6, 0.4],  # Moderate prediction for class 0
+        ])
+        ground_truth = np.array([0, 1, 0])
+
+        ppl = perplexity(predictions, ground_truth)
+        # Should be reasonable value
+        assert 1.0 <= ppl <= 10.0
+        assert not np.isnan(ppl)
+
+    def test_numerical_stability(self):
+        """Test numerical stability with probabilities close to 0 and 1."""
+        predictions = np.array([
+            [1.0 - 1e-15, 1e-15, 0.0, 0.0],     # Very close to 1
+            [1e-15, 1.0 - 1e-15, 0.0, 0.0],     # Very close to 1
+            [0.5, 0.5, 0.0, 0.0],               # Normal case
+        ])
+        ground_truth = np.array([0, 1, 0])
+
+        ppl = perplexity(predictions, ground_truth)
+        assert not np.isnan(ppl)
+        assert not np.isinf(ppl)
+        assert ppl > 0

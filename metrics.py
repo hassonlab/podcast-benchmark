@@ -107,6 +107,7 @@ def calculate_auc_roc(
     print(
         "Fraction of examples included in AUC-ROC calculation:",
         include_class.sum() / include_class.shape[0],
+        "({include_class.sum()} / {include_class.shape[0]})",
     )
     include_example = include_class[groundtruth]
 
@@ -143,6 +144,37 @@ def calculate_auc_roc(
             average=average,
             multi_class="ovr",
         )
+
+
+@register_metric("perplexity")
+def perplexity(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
+    """
+    Calculate perplexity of predictions as used for LLM evaluation.
+
+    Perplexity = 2^(cross_entropy) where cross_entropy is the average negative
+    log-likelihood of the true labels.
+
+    Args:
+        predictions: Array of shape [num_samples, num_classes] where each row
+                    contains prediction probabilities for each class (should sum to 1)
+        ground_truth: Array of shape [num_samples] containing the true class
+                     indices for each sample
+
+    Returns:
+        float: Perplexity score (lower is better, minimum is 1.0)
+    """
+    if len(predictions) == 0:
+        return float('inf')
+
+    # Ensure predictions are valid probabilities
+    predictions = np.clip(predictions, 1e-12, 1.0)
+
+    # Calculate cross-entropy: -1/N * sum(log(p_i)) where p_i is probability of true class
+    true_class_probs = predictions[np.arange(len(ground_truth)), ground_truth]
+    cross_entropy = -np.mean(np.log2(true_class_probs))
+
+    # Perplexity = 2^(cross_entropy)
+    return 2 ** cross_entropy
 
 
 def top_k_accuracy(predictions: np.ndarray, ground_truth: np.ndarray, k: int) -> float:
