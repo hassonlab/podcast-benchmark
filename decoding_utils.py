@@ -18,6 +18,7 @@ import data_utils
 from config import TrainingParams, DataParams
 from fold_utils import get_sequential_folds, get_zero_shot_folds
 import metrics
+from plot_utils import plot_cv_results, plot_training_history
 from registry import metric_registry
 
 
@@ -172,13 +173,20 @@ def train_decoding_model(
     cv_results["num_epochs"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.
-    # Clean this up later to get rid of this weird optional return value. Hardcoding for now since generalizing this
-    # would get complicated.
+    # Clean this up later. Hardcoding for now since generalizing this like other metrics would
+    # get complicated.
     is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
     if is_word_embedding_decoding_task:
-        embedding_metrics = ["test_word_auc_roc"]
+        embedding_metrics = [
+            "test_word_auc_roc",
+            "test_word_perplexity",
+            "test_occ_perplexity",
+        ]
+        # Metrics where each word occurence is treated as separate.
+        cv_results["test_occ_perplexity"] = []
         # Metrics averaged over words and all their occurences.
         cv_results["test_word_auc_roc"] = []
+        cv_results["test_word_perplexity"] = []
 
         for k_val in training_params.top_k_thresholds:
             # Test type is split between "word" and "occ" where word is averaged over
@@ -379,88 +387,6 @@ def train_decoding_model(
         plot_cv_results(cv_results)
 
     return models, histories, cv_results
-
-
-def plot_training_history(history, fold=None):
-    """
-    Plot the training and validation loss and cosine similarity.
-
-    Args:
-        history: Dictionary containing training history
-        fold: Fold number (optional)
-    """
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-    # Plot loss
-    ax1.plot(history["train_loss"], label="Training Loss")
-    ax1.plot(history["val_loss"], label="Validation Loss")
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Loss (MSE)")
-    title = "Training and Validation Loss"
-    if fold is not None:
-        title = f"Fold {fold}: {title}"
-    ax1.set_title(title)
-    ax1.legend()
-    ax1.grid(True)
-
-    # Plot cosine similarity
-    ax2.plot(history["train_cosine"], label="Training Cosine Similarity")
-    ax2.plot(history["val_cosine"], label="Validation Cosine Similarity")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Cosine Similarity")
-    title = "Training and Validation Cosine Similarity"
-    if fold is not None:
-        title = f"Fold {fold}: {title}"
-    ax2.set_title(title)
-    ax2.legend()
-    ax2.grid(True)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_cv_results(cv_results):
-    """
-    Plot cross-validation results.
-
-    Args:
-        cv_results: Dictionary containing cross-validation results
-    """
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-    # Prepare data
-    folds = range(1, len(cv_results["train_loss"]) + 1)
-
-    # Plot loss
-    ax1.plot(folds, cv_results["train_loss"], "o-", label="Training Loss")
-    ax1.plot(folds, cv_results["val_loss"], "o-", label="Validation Loss")
-    ax1.plot(folds, cv_results["test_loss"], "o-", label="Test Loss")
-    ax1.set_xlabel("Fold")
-    ax1.set_ylabel("Loss (MSE)")
-    ax1.set_title("Cross-Validation Loss")
-    ax1.set_xticks(folds)
-    ax1.legend()
-    ax1.grid(True)
-
-    # Plot cosine similarity
-    ax2.plot(
-        folds, cv_results["train_cosine"], "o-", label="Training Cosine Similarity"
-    )
-    ax2.plot(
-        folds, cv_results["val_cosine"], "o-", label="Validation Cosine Similarity"
-    )
-    ax2.plot(folds, cv_results["test_cosine"], "o-", label="Test Cosine Similarity")
-    ax2.set_xlabel("Fold")
-    ax2.set_ylabel("Cosine Similarity")
-    ax2.set_title("Cross-Validation Cosine Similarity")
-    ax2.set_xticks(folds)
-    ax2.legend()
-    ax2.grid(True)
-
-    plt.tight_layout()
-    plt.show()
 
 
 def get_predictions(X, model, device):
