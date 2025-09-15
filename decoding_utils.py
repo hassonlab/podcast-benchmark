@@ -683,8 +683,8 @@ def run_training_over_lags(
             word_column=data_params.word_column,
         )
 
-        X_tensor = torch.FloatTensor(X)
-        Y_tensor = torch.FloatTensor(Y)
+        X_tensor = torch.FloatTensor(np.array(X))
+        Y_tensor = torch.FloatTensor(np.array(Y))
 
         print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
 
