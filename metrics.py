@@ -79,6 +79,7 @@ def calculate_auc_roc(
     test_frequencies,
     min_train_freq,
     min_test_freq,
+    map_class_idxs=None,
 ):
     """
     Calculate AUC-ROC score with frequency-based filtering.
@@ -93,8 +94,8 @@ def calculate_auc_roc(
                     of each vocab item in test set.
         min_train_freq: Minimum number of occurences in train set to include class.
         min_test_freq: Minimum number of occurences in test set to include class.
-        average: How the AUC ROC score should be averaged across classes. Options
-                include 'weighted', 'macro', 'micro', etc.
+        map_class_idxs: An optional mapping to apply to the class indices of predictions.
+            Useful in cases where the test set only has a subset of the words of training set.
 
     Returns:
         tuple[float, float, flaot]: AUC-ROC score calculated only for vocabulary items that meet
@@ -102,8 +103,9 @@ def calculate_auc_roc(
                2nd is weighted by test frequency.
     """
     # Only include labels that meet the minimum frequency level.
-    include_class = train_frequencies >= min_train_freq
-    include_class = include_class & (test_frequencies >= min_test_freq)
+    include_trains = train_frequencies >= min_train_freq
+    include_tests = test_frequencies >= min_test_freq
+    include_class = include_trains & include_tests
 
     print(
         f"Fraction of examples included in AUC-ROC calculation:",
@@ -118,7 +120,10 @@ def calculate_auc_roc(
 
     # Due to limitations in sklearn roc_auc_score we calculate this ourselves here.
     for class_index in included_class_indices:
-        probs = predictions[:, class_index]
+        if map_class_idxs is not None:
+            probs = predictions[:, map_class_idxs == class_index]
+        else:
+            probs = predictions[:, class_index]
         c_labels = one_hots[:, class_index]
         fpr, tpr, _ = roc_curve(c_labels, probs)
         score = auc(fpr, tpr)

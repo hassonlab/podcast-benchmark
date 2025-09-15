@@ -377,7 +377,7 @@ class TestComputeClassScores:
         """Test basic functionality of compute_class_scores."""
         cosine_distances, word_labels = sample_distances_and_labels
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Check output shapes
         assert probabilities.shape == (3, 3)  # 3 samples, 3 classes
@@ -404,7 +404,7 @@ class TestComputeClassScores:
         # Class 1: embeddings 2,3 (distances 0.2, 0.8) -> average = 0.5
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Expected class distances: [0.2, 0.5]
         # Expected logits: [1-0.2, 1-0.5] = [0.8, 0.5]
@@ -424,7 +424,7 @@ class TestComputeClassScores:
         # Each embedding belongs to a different class
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Logits should be 1 - distance for each embedding
         expected_logits = torch.tensor([[0.8, 0.5, 0.2]], dtype=torch.float32)
@@ -443,7 +443,7 @@ class TestComputeClassScores:
         # Class 0: 1 embedding, Class 1: 2 embeddings, Class 2: 3 embeddings
         word_labels = torch.tensor([0, 1, 1, 2, 2, 2], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Expected class averages:
         # Class 0: 0.1 (1 embedding)
@@ -466,7 +466,7 @@ class TestComputeClassScores:
 
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Expected logits: [1.0, 0.0, 0.5]
         expected_logits = torch.tensor([[1.0, 0.0, 0.5]])
@@ -488,7 +488,7 @@ class TestComputeClassScores:
 
         word_labels = torch.tensor([0, 1], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Check shapes
         assert probabilities.shape == (2, 2)  # 2 samples, 2 classes
@@ -517,8 +517,8 @@ class TestComputeClassScores:
         word_labels_1 = torch.tensor([0, 1, 2], dtype=torch.long)
         word_labels_2 = torch.tensor([0, 1, 2], dtype=torch.long)  # Same labels
 
-        _, logits_1 = compute_class_scores(cosine_distances, word_labels_1)
-        _, logits_2 = compute_class_scores(cosine_distances, word_labels_2)
+        _, logits_1, _ = compute_class_scores(cosine_distances, word_labels_1)
+        _, logits_2, _ = compute_class_scores(cosine_distances, word_labels_2)
 
         # Results should be identical
         assert torch.allclose(logits_1, logits_2, atol=1e-6)
@@ -530,7 +530,7 @@ class TestComputeClassScores:
             [[0.3, 0.1, 0.2]], dtype=torch.float32
         )  # corresponding to labels 2,0,1
 
-        _, logits_unsorted = compute_class_scores(
+        _, logits_unsorted, _ = compute_class_scores(
             distances_for_unsorted, labels_unsorted
         )
 
@@ -549,7 +549,7 @@ class TestComputeClassScores:
         # Classes 0, 2, 5 (gaps in numbering)
         word_labels = torch.tensor([0, 2, 5], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Should have 3 classes (corresponding to the unique labels)
         assert probabilities.shape == (1, 3)
@@ -570,7 +570,7 @@ class TestComputeClassScores:
 
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
-        probabilities, logits = compute_class_scores(cosine_distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances, word_labels)
 
         # Use a meaningful loss (not sum of probabilities which is always 1)
         # Take probability of first class as loss
@@ -596,7 +596,7 @@ class TestComputeClassScores:
         word_labels = torch.tensor([0, 0, 1, 1], dtype=torch.long)
 
         # Test on CPU
-        probabilities_cpu, logits_cpu = compute_class_scores(
+        probabilities_cpu, logits_cpu, unique_classes_cpu = compute_class_scores(
             cosine_distances, word_labels
         )
 
@@ -605,7 +605,7 @@ class TestComputeClassScores:
             cosine_distances_gpu = cosine_distances.cuda()
             word_labels_gpu = word_labels.cuda()
 
-            probabilities_gpu, logits_gpu = compute_class_scores(
+            probabilities_gpu, logits_gpu, unique_classes_gpu = compute_class_scores(
                 cosine_distances_gpu, word_labels_gpu
             )
 
@@ -625,7 +625,7 @@ class TestComputeClassScores:
 
         word_labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
-        probabilities_small, logits_small = compute_class_scores(
+        probabilities_small, logits_small, unique_classes_small = compute_class_scores(
             cosine_distances_small, word_labels
         )
 
@@ -641,7 +641,7 @@ class TestComputeClassScores:
             dtype=torch.float32,
         )
 
-        probabilities_large, logits_large = compute_class_scores(
+        probabilities_large, logits_large, unique_classes_large = compute_class_scores(
             cosine_distances_large, word_labels
         )
 
@@ -674,7 +674,7 @@ class TestComputeClassScores:
 
         # Compute distances then class scores
         distances = compute_cosine_distances(predictions, word_embeddings)
-        probabilities, logits = compute_class_scores(distances, word_labels)
+        probabilities, logits, unique_classes = compute_class_scores(distances, word_labels)
 
         # Check shapes
         assert probabilities.shape == (2, 2)  # 2 samples, 2 classes
@@ -689,7 +689,7 @@ class TestComputeClassScores:
         """Test basic functionality of compute_class_scores."""
         cosine_distances, _ = sample_distances_and_labels
 
-        probabilities, logits = compute_class_scores(cosine_distances)
+        probabilities, logits, unique_classes = compute_class_scores(cosine_distances)
 
         # Check output shapes
         assert probabilities.shape == (3, 6)  # 3 samples, 3 classes

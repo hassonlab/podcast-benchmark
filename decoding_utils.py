@@ -536,6 +536,7 @@ def compute_class_scores(cosine_distances, word_labels=None):
                 class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
     else:
         class_distances = cosine_distances
+        unique_classes = torch.arange(cosine_distances.shape[0])
 
     # Convert distances to similarities (logits)
     # Since cosine distance = 1 - cosine_similarity, we convert back:
@@ -545,7 +546,7 @@ def compute_class_scores(cosine_distances, word_labels=None):
     # Apply softmax transformation to get probabilities
     class_probabilities = F.softmax(class_logits, dim=1)
 
-    return class_probabilities, class_logits
+    return class_probabilities, class_logits, unique_classes
 
 
 def compute_word_embedding_task_metrics(
@@ -592,7 +593,7 @@ def compute_word_embedding_task_metrics(
     distances = compute_cosine_distances(predictions, Y_test)
 
     # Measure performance based on each individual word occurrence
-    occurence_scores, _ = compute_class_scores(distances)
+    occurence_scores, _, _ = compute_class_scores(distances)
     occurence_scores_np = occurence_scores.cpu().numpy()
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
@@ -606,7 +607,7 @@ def compute_word_embedding_task_metrics(
     _, _, position_to_id = build_vocabulary(selected_words)
     position_to_id = np.array(position_to_id)
 
-    word_scores, _ = compute_class_scores(
+    word_scores, _, test_class_idxs = compute_class_scores(
         distances, torch.from_numpy(position_to_id[test_index])
     )
     word_scores_np = word_scores.cpu().numpy()
@@ -623,6 +624,7 @@ def compute_word_embedding_task_metrics(
         test_frequencies,
         min_train_freq_auc,
         min_test_freq_auc,
+        test_class_idxs.cpu().numpy(),
     )
     results["test_word_avg_auc_roc"] = avg_auc
     results["test_word_train_weighted_auc_roc"] = train_weighted_auc
