@@ -13,14 +13,12 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import mne
-from sklearn.metrics import roc_auc_score
-
-from scipy.spatial.distance import cosine
 
 import data_utils
 from config import TrainingParams, DataParams
 from fold_utils import get_sequential_folds, get_zero_shot_folds
 import metrics
+from plot_utils import plot_cv_results, plot_training_history
 from registry import metric_registry
 
 
@@ -174,14 +172,31 @@ def train_decoding_model(
     cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
     cv_results["num_epochs"] = []
 
-    models, histories = [], []
-    # Clean this up later to get rid of this weird optional return value. Hardcoding for now since generalizing this
-    # would get complicated.
+    # Hardcode embedding task metrics for now since they need to be handled a bit differently.
+    # Clean this up later. Hardcoding for now since generalizing this like other metrics would
+    # get complicated.
     is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
     if is_word_embedding_decoding_task:
-        roc_results = []
-    else:
-        roc_results = None
+        # Test type is split between "word" and "occ" where word is averaged over
+        # each time a word occurs and occ is per-each occurence of the word so is
+        # more difficult and depends on contextual embeddings.
+        embedding_metrics = [
+            "test_word_avg_auc_roc",
+            "test_word_train_weighted_auc_roc",
+            "test_word_test_weighted_auc_roc",
+            "test_word_perplexity",
+            "test_occurence_perplexity",
+        ]
+
+        # Top-K metrics.
+        for k_val in training_params.top_k_thresholds:
+            for test_type in ["word", "occurence"]:
+                embedding_metrics.append(f"test_{test_type}_top_{k_val}")
+
+        for metric in embedding_metrics:
+            cv_results[metric] = []
+
+    models, histories = [], []
 
     def run_epoch(model, loader, optimizer=None):
         """
@@ -329,13 +344,27 @@ def train_decoding_model(
                 writer.add_scalar(f"{name}/test", val, fold)
             writer.close()
 
-        # word‐level ROC. Only useful for word embedding task. Hardcoded for now since this would be a bit complicated
+        # word‐level ROC and top-k. Only useful for word embedding task.
+        # Hardcoded for now since this would be a bit complicated
         # to generalize at the moment.
         if is_word_embedding_decoding_task:
-            roc = calculate_word_embeddings_roc_auc_logits(
-                model, X[te_idx], Y[te_idx], selected_words[te_idx], device
+            # TODO: figure out how we want to generalize evaluation inference vs training inference better.
+            # Key focus on preserve_ensemble argument.
+            results = compute_word_embedding_task_metrics(
+                X[te_idx],
+                Y[te_idx],
+                model,
+                device,
+                selected_words,
+                te_idx,
+                tr_idx,
+                training_params.top_k_thresholds,
+                training_params.min_train_freq_auc,
+                training_params.min_test_freq_auc,
+                preserve_ensemble=True,
             )
-            roc_results.append(roc)
+            for key, val in results.items():
+                cv_results[key].append(val)
 
         models.append(model)
         histories.append(history)
@@ -351,219 +380,168 @@ def train_decoding_model(
         for name in metric_names:
             vals = cv_results[f"{phase}_{name}"]
             print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+    if is_word_embedding_decoding_task:
+        for metric_name in embedding_metrics:
+            vals = cv_results[metric_name]
+            print(f"Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
     if plot_results:
         plot_cv_results(cv_results)
 
-    # 8. Aggregate final word‐AUC if task is for word embedding decoding.
-    # Clean this up later to get rid of this weird optional return value.
-    weighted_roc = None
-    if is_word_embedding_decoding_task:
-        final_word_auc = {}
-        for r in roc_results:
-            final_word_auc.update(r["word_aucs"])
-        weighted_roc = summarize_roc_results(final_word_auc, selected_words)
-
-    return models, histories, cv_results, roc_results, weighted_roc
+    return models, histories, cv_results
 
 
-def plot_training_history(history, fold=None):
-    """
-    Plot the training and validation loss and cosine similarity.
-
-    Args:
-        history: Dictionary containing training history
-        fold: Fold number (optional)
-    """
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-    # Plot loss
-    ax1.plot(history["train_loss"], label="Training Loss")
-    ax1.plot(history["val_loss"], label="Validation Loss")
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Loss (MSE)")
-    title = "Training and Validation Loss"
-    if fold is not None:
-        title = f"Fold {fold}: {title}"
-    ax1.set_title(title)
-    ax1.legend()
-    ax1.grid(True)
-
-    # Plot cosine similarity
-    ax2.plot(history["train_cosine"], label="Training Cosine Similarity")
-    ax2.plot(history["val_cosine"], label="Validation Cosine Similarity")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Cosine Similarity")
-    title = "Training and Validation Cosine Similarity"
-    if fold is not None:
-        title = f"Fold {fold}: {title}"
-    ax2.set_title(title)
-    ax2.legend()
-    ax2.grid(True)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_cv_results(cv_results):
-    """
-    Plot cross-validation results.
-
-    Args:
-        cv_results: Dictionary containing cross-validation results
-    """
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-    # Prepare data
-    folds = range(1, len(cv_results["train_loss"]) + 1)
-
-    # Plot loss
-    ax1.plot(folds, cv_results["train_loss"], "o-", label="Training Loss")
-    ax1.plot(folds, cv_results["val_loss"], "o-", label="Validation Loss")
-    ax1.plot(folds, cv_results["test_loss"], "o-", label="Test Loss")
-    ax1.set_xlabel("Fold")
-    ax1.set_ylabel("Loss (MSE)")
-    ax1.set_title("Cross-Validation Loss")
-    ax1.set_xticks(folds)
-    ax1.legend()
-    ax1.grid(True)
-
-    # Plot cosine similarity
-    ax2.plot(
-        folds, cv_results["train_cosine"], "o-", label="Training Cosine Similarity"
-    )
-    ax2.plot(
-        folds, cv_results["val_cosine"], "o-", label="Validation Cosine Similarity"
-    )
-    ax2.plot(folds, cv_results["test_cosine"], "o-", label="Test Cosine Similarity")
-    ax2.set_xlabel("Fold")
-    ax2.set_ylabel("Cosine Similarity")
-    ax2.set_title("Cross-Validation Cosine Similarity")
-    ax2.set_xticks(folds)
-    ax2.legend()
-    ax2.grid(True)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def calculate_word_embeddings_roc_auc_logits(
-    model, X, Y, selected_words, device, min_repetitions=5
-):
-    """
-    Calculate ROC-AUC for word embedding predictions using logits approach.
-
-    This follows the described method more closely, converting distances to logits
-    via softmax transformation.
-    """
-    # Step 1: Get word frequency counts and filter for words with minimum repetitions
-    word_counts = Counter(selected_words)
-    frequent_words = [
-        word for word, count in word_counts.items() if count >= min_repetitions
-    ]
-    print(
-        f"Found {len(frequent_words)} words with at least {min_repetitions} repetitions ({len(frequent_words)/len(set(selected_words))*100:.1f}% of unique words)"
-    )
-
+def get_predictions(X, model, device, batch_size, **kwargs):
     X = X.to(device)
 
     # Step 2: Get predicted embeddings for all neural data
     model_predictions = []
-    for i in range(len(X)):
+    for i in range(0, len(X), batch_size):
         with torch.no_grad():
-            input_data = X[i : i + 1]
-            pred = model(input_data).cpu().numpy()
+            input_data = X[i : i + batch_size]
+            pred = model(input_data, **kwargs)
 
-        model_predictions.append(pred.squeeze())
+        model_predictions.append(pred)
 
-    predicted_embeddings = np.array(model_predictions)
+    # Stack to ensure we get a 2D tensor [num_samples, embedding_dim]
+    return torch.cat(model_predictions)
 
-    # Step 3: Group all embeddings for each unique word
-    # Y should be on cpu for comparisons.
-    Y = Y.cpu()
-    unique_words = list(set(selected_words))
-    word_to_embeddings = {
-        word: np.array(Y[np.array(selected_words) == word]) for word in unique_words
-    }
 
-    # Step 4: Calculate average embeddings for each unique word
-    avg_word_embeddings = {
-        word: np.mean(embs, axis=0) for word, embs in word_to_embeddings.items()
-    }
+def build_vocabulary(words):
+    """
+    Build vocabulary mappings from a list of words.
 
-    # Step 5: Calculate cosine distances and convert to logits
-    word_aucs = {}
-    word_to_idx = {}
+    Args:
+        words: List of words (may contain repetitions)
 
-    for idx, pred_embedding in enumerate(predicted_embeddings):
-        # Calculate distances to all unique words
-        distances = []
-        for word in unique_words:
-            avg_embedding = avg_word_embeddings[word]
-            distance = cosine(pred_embedding, avg_embedding)
-            # Convert distance to similarity
-            similarity = 1 - distance
-            distances.append(similarity)
+    Returns:
+        word_to_id: Dictionary mapping word -> unique_id
+        id_to_word: Dictionary mapping unique_id -> word
+        postion_to_id: Numpy array specifying what the ith word maps to which unique id.
+    """
+    word_to_id = {}
+    position_to_id = []
+    next_id = 0
 
-        # Convert similarities to logits using softmax
-        logits = torch.tensor(distances)
-        logits = F.softmax(logits, dim=0).numpy()
+    for word in words:
+        if word not in word_to_id:
+            # First time seeing this word - assign new ID
+            word_to_id[word] = next_id
+            next_id += 1
 
-        # For each instance, collect logits for the correct label and all other labels
-        true_word = selected_words[idx]
-        true_word_idx = unique_words.index(true_word)
+        # Add current position to the word's position list
+        word_id = word_to_id[word]
+        position_to_id.append(word_id)
 
-        # Update the logits for each word
-        if true_word not in word_to_idx:
-            word_to_idx[true_word] = {"logits": [], "is_true": []}
+    # Build reverse mapping
+    id_to_word = {word_id: word for word, word_id in word_to_id.items()}
 
-        for word_idx, word in enumerate(unique_words):
-            if word not in word_to_idx:
-                word_to_idx[word] = {"logits": [], "is_true": []}
+    return word_to_id, id_to_word, position_to_id
 
-            word_to_idx[word]["logits"].append(logits[word_idx])
-            word_to_idx[word]["is_true"].append(1 if word == true_word else 0)
 
-    # Step 6: Calculate ROC-AUC for each frequent word
-    for word in frequent_words:
-        try:
-            roc_auc = roc_auc_score(
-                np.array(word_to_idx[word]["is_true"]),
-                np.array(word_to_idx[word]["logits"]),
-            )
-            word_aucs[word] = roc_auc
-        except ValueError:
-            print(
-                f"Skipping ROC-AUC calculation for '{word}' - insufficient class variety"
-            )
+def compute_word_embedding_task_metrics(
+    X_test,
+    Y_test,
+    model,
+    device,
+    selected_words,
+    test_index,
+    train_index,
+    top_k_thresholds,
+    min_train_freq_auc,
+    min_test_freq_auc,
+    batch_size=16,
+    **kwargs,
+):
+    """
+    Calculate top-k metrics and AUC-ROC for decoding from brain data.
 
-    # Step 7: Calculate weighted ROC-AUC based on word frequency
-    total_count = sum(word_counts[word] for word in frequent_words if word in word_aucs)
-    weighted_auc = (
-        sum(word_aucs[word] * word_counts[word] for word in word_aucs) / total_count
+    Args:
+        X_test: Test brain data
+        Y: All word embeddings across all folds.
+        model: Trained model
+        device: PyTorch device
+        selected_words: List of selected words for vocabulary.
+        test_index: Test indices for indexing into position_to_id
+        train_index: Train indices for indexing into position_to_id
+        top_k_thresholds: List of k values for top-k accuracy
+        min_train_freq_auc: Minimum training frequency for AUC calculation
+        min_test_freq_auc: Minimum test frequency for AUC calculation
+
+    Returns:
+        dict: Dictionary containing computed metrics
+    """
+    results = {}
+
+    # Put model in evaluation mode
+    model.eval()
+
+    X_test, Y_test = X_test.to(device), Y_test.to(device)
+
+    # Get predictions
+    predictions = get_predictions(X_test, model, device, batch_size, **kwargs)
+
+    # Compute cosine distances
+    distances = metrics.compute_cosine_distances(predictions, Y_test)
+
+    # Measure performance based on each individual word occurrence
+    occurence_scores, _, _ = metrics.compute_class_scores(distances)
+    occurence_scores_np = occurence_scores.cpu().numpy()
+    for k_val in top_k_thresholds:
+        # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
+        results[f"test_occurence_top_{k_val}"] = metrics.top_k_accuracy(
+            occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
+        )
+    results["test_occurence_perplexity"] = metrics.perplexity(
+        occurence_scores_np, np.arange(occurence_scores_np.shape[0])
     )
 
-    return {
-        "word_aucs": word_aucs,
-        "weighted_auc": weighted_auc,
-        "frequent_words": frequent_words,
-    }
+    # Group by words for an easier task.
+    # Build vocabulary. While in most cases we would not want to include
+    # the test set in the vocabulary building process, we remove any
+    _, _, position_to_id = build_vocabulary(selected_words)
+    position_to_id = np.array(position_to_id)
 
-
-def summarize_roc_results(word_aucs, selected_words, min_repetitions=5):
-    word_counts = Counter(selected_words)
-    frequent_words = [
-        word for word, count in word_counts.items() if count >= min_repetitions
-    ]
-
-    total_count = sum(word_counts[word] for word in frequent_words if word in word_aucs)
-    weighted_auc = (
-        sum(word_aucs[word] * word_counts[word] for word in word_aucs) / total_count
+    word_scores, _, test_class_idxs = metrics.compute_class_scores(
+        distances, torch.from_numpy(position_to_id[test_index])
     )
+    # Get a mapping from over-all class index -> test class index.
+    class_to_test_idxs = np.empty(np.max(position_to_id) + 1, dtype=int)
+    class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
 
-    return weighted_auc
+    word_scores_np = word_scores.cpu().numpy()
+    train_frequencies = np.bincount(
+        position_to_id[train_index], minlength=np.max(position_to_id) + 1
+    )
+    # Limit train frequencies to only those in the test set.
+    train_frequencies = train_frequencies[test_class_idxs]
+
+    test_frequencies = np.bincount(
+        position_to_id[test_index], minlength=np.max(position_to_id) + 1
+    )
+    test_frequencies = test_frequencies[test_class_idxs]
+
+    # Translate to vocab of word ID's.
+    test_word_ids = class_to_test_idxs[position_to_id[test_index]]
+    avg_auc, train_weighted_auc, test_weighted_auc = metrics.calculate_auc_roc(
+        word_scores_np,
+        test_word_ids,
+        train_frequencies,
+        test_frequencies,
+        min_train_freq_auc,
+        min_test_freq_auc,
+    )
+    results["test_word_avg_auc_roc"] = avg_auc
+    results["test_word_train_weighted_auc_roc"] = train_weighted_auc
+    results["test_word_test_weighted_auc_roc"] = test_weighted_auc
+
+    for k_val in top_k_thresholds:
+        results[f"test_word_top_{k_val}"] = metrics.top_k_accuracy(
+            word_scores_np, test_word_ids, k_val
+        )
+    results["test_word_perplexity"] = metrics.perplexity(word_scores_np, test_word_ids)
+
+    return results
 
 
 def run_training_over_lags(
@@ -613,6 +591,7 @@ def run_training_over_lags(
             data_params.window_width,
             preprocessing_fn,
             data_params.preprocessor_params,
+            word_column=data_params.word_column,
         )
 
         X_tensor = torch.FloatTensor(X)
@@ -620,20 +599,18 @@ def run_training_over_lags(
 
         print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
 
-        models, histories, cv_results, roc_results, weighted_roc_mean = (
-            train_decoding_model(
-                X_tensor,
-                Y_tensor,
-                selected_words,
-                model_constructor_fn,
-                task_name,
-                lag,
-                model_params=model_params,
-                training_params=training_params,
-                model_dir=os.path.join(model_dir, f"lag_{lag}"),
-                write_to_tensorboard=write_to_tensorboard,
-                tensorboard_dir=tensorboard_dir,
-            )
+        models, histories, cv_results = train_decoding_model(
+            X_tensor,
+            Y_tensor,
+            selected_words,
+            model_constructor_fn,
+            task_name,
+            lag,
+            model_params=model_params,
+            training_params=training_params,
+            model_dir=os.path.join(model_dir, f"lag_{lag}"),
+            write_to_tensorboard=write_to_tensorboard,
+            tensorboard_dir=tensorboard_dir,
         )
 
         # Aggregate metrics
@@ -648,13 +625,9 @@ def run_training_over_lags(
             }
         )
         lag_metrics["lags"] = lag
-        if weighted_roc_mean:
-            lag_metrics["rocs"] = weighted_roc_mean
 
         # Append new row to existing DataFrame and write to file
         existing_df = pd.concat(
             [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
         )
         existing_df.to_csv(filename, index=False)
-
-    return [row["rocs"] for row in all_new_results]

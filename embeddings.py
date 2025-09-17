@@ -122,7 +122,7 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
       `embedding_pca_dim`.
     - Useful as a placeholder or for testing models where real word embeddings are not required.
     """
-    words = df_word.word.tolist()
+    words = df_word[data_params.word_column].tolist()
     unique_words = list(set(words))
     word_to_idx = {}
     for i, word in enumerate(words):
