@@ -35,6 +35,8 @@ class DataParams:
     preprocessor_params: Optional[dict] = None
     # Name of word column in dataframe to use. Optional.
     word_column: Optional[str] = None
+    # Dictionary of parameters to pass to your specific task_data_getter if needed.
+    task_params: dict = field(default_factory=lambda: {})
 
 
 @dataclass
