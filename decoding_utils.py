@@ -739,5 +739,3 @@ def run_training_over_lags(
             [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
         )
         existing_df.to_csv(filename, index=False)
-
-    return [row["rocs"] for row in all_new_results]

@@ -12,7 +12,7 @@ import mne
 import tempfile
 import os
 from unittest.mock import patch, MagicMock
-from data_utils import get_data, read_electrode_file, load_raws
+from data_utils import get_data, read_electrode_file, load_raws, read_subject_mapping
 from config import DataParams
 
 
@@ -636,3 +636,168 @@ class TestLoadRaws:
             assert len(raws[0].ch_names) == 4
             for ch_name in raws[0].ch_names:
                 assert ch_name.startswith("LG")
+
+
+@pytest.fixture
+def temp_participant_mapping_tsv():
+    """Create a temporary TSV file with participant mapping data for testing."""
+    participant_data = """nyu_id	participant_id
+661	sub-05
+717	sub-12
+723	sub-08
+798	sub-09
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
+        f.write(participant_data)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_participant_mapping_csv():
+    """Create a temporary CSV file with participant mapping data for testing."""
+    participant_data = """nyu_id,participant_id
+661,sub-05
+717,sub-12
+723,sub-08
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(participant_data)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_electrode_mapping_csv():
+    """Create a temporary CSV file with electrode mapping data matching the example format."""
+    electrode_data = """subject,elec,matfile
+661,EEGG_14REF,14
+661,EEGG_16REF,16
+661,EEGG_20REF,20
+717,LGA10,10
+717,LGA18,18
+717,LGA27,27
+723,LSF12,12
+723,LST10,34
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(electrode_data)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+class TestReadSubjectMapping:
+    """Test read_subject_mapping function for parsing participant mapping files."""
+
+    def test_read_subject_mapping_tsv_format(self, temp_participant_mapping_tsv):
+        """Test reading TSV file with participant mapping data."""
+        result = read_subject_mapping(temp_participant_mapping_tsv, delimiter="\t")
+
+        expected = {661: 5, 717: 12, 723: 8, 798: 9}
+
+        assert result == expected
+        assert len(result) == 4
+
+    def test_read_subject_mapping_csv_format(self, temp_participant_mapping_csv):
+        """Test reading CSV file with participant mapping data."""
+        result = read_subject_mapping(temp_participant_mapping_csv, delimiter=",")
+
+        expected = {661: 5, 717: 12, 723: 8}
+
+        assert result == expected
+        assert len(result) == 3
+
+    def test_read_subject_mapping_return_types(self, temp_participant_mapping_tsv):
+        """Test that returned mapping has correct types."""
+        result = read_subject_mapping(temp_participant_mapping_tsv)
+
+        # All keys should be integers (nyu_id)
+        for nyu_id in result.keys():
+            assert isinstance(nyu_id, int)
+
+        # All values should be integers (converted participant_id)
+        for participant_id in result.values():
+            assert isinstance(participant_id, int)
+
+    def test_read_subject_mapping_participant_id_extraction(self, temp_participant_mapping_tsv):
+        """Test that participant IDs are correctly extracted from sub-XX format."""
+        result = read_subject_mapping(temp_participant_mapping_tsv)
+
+        # Check specific extractions
+        assert result[661] == 5  # sub-05 -> 5
+        assert result[717] == 12  # sub-12 -> 12
+        assert result[723] == 8  # sub-08 -> 8
+
+    def test_read_subject_mapping_empty_file(self):
+        """Test reading empty participant mapping file."""
+        empty_data = """nyu_id	participant_id
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
+            f.write(empty_data)
+            temp_path = f.name
+
+        try:
+            result = read_subject_mapping(temp_path)
+            assert result == {}
+            assert len(result) == 0
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_read_subject_mapping_nonexistent_file(self):
+        """Test that reading non-existent file raises appropriate error."""
+        with pytest.raises(FileNotFoundError):
+            read_subject_mapping("nonexistent_participants.tsv")
+
+    def test_read_subject_mapping_integration_with_electrode_file(
+        self, temp_participant_mapping_csv, temp_electrode_mapping_csv
+    ):
+        """Test integration between read_subject_mapping and read_electrode_file."""
+        # First, get the subject mapping
+        subject_mapping = read_subject_mapping(temp_participant_mapping_csv, delimiter=",")
+
+        # Expected mapping: {661: 5, 717: 12, 723: 8}
+        assert subject_mapping == {661: 5, 717: 12, 723: 8}
+
+        # Then, use it with read_electrode_file
+        electrode_mapping = read_electrode_file(
+            temp_electrode_mapping_csv, subject_mapping=subject_mapping
+        )
+
+        # Check that subject IDs have been mapped correctly
+        expected_electrode_mapping = {
+            5: ["EEGG_14REF", "EEGG_16REF", "EEGG_20REF"],  # Originally subject 661
+            12: ["LGA10", "LGA18", "LGA27"],  # Originally subject 717
+            8: ["LSF12", "LST10"],  # Originally subject 723
+        }
+
+        assert electrode_mapping == expected_electrode_mapping
+        assert len(electrode_mapping) == 3
+
+        # Verify that the original subject IDs (661, 717, 723) don't exist
+        assert 661 not in electrode_mapping
+        assert 717 not in electrode_mapping
+        assert 723 not in electrode_mapping
+
+        # Verify that the mapped subject IDs (5, 12, 8) do exist
+        assert 5 in electrode_mapping
+        assert 12 in electrode_mapping
+        assert 8 in electrode_mapping

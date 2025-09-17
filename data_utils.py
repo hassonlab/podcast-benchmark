@@ -52,7 +52,55 @@ def load_raws(data_params: DataParams):
     return raws
 
 
-def read_electrode_file(file_path: str):
+def read_subject_mapping(participant_map_file: str, delimiter="\t"):
+    """
+    Read and parse a participant mapping file to create subject ID mappings.
+
+    This function reads a tab-delimited or custom-delimited file containing participant
+    information and creates a mapping from NYU subject IDs to converted participant IDs.
+    The participant IDs are expected to be in the format "sub-XX" where XX is extracted
+    as an integer.
+
+    Args:
+        participant_map_file (str): Path to the participant mapping CSV/TSV file.
+                                   Expected to contain columns 'nyu_id' and 'participant_id'.
+        delimiter (str, optional): Delimiter used in the file. Defaults to "\t" (tab).
+
+    Returns:
+        dict[int, int]: A dictionary mapping NYU subject IDs to converted participant IDs.
+                       Keys are nyu_id values, values are integers extracted from
+                       participant_id (e.g., "sub-05" -> 5).
+
+    Raises:
+        FileNotFoundError: If the specified file does not exist.
+        KeyError: If required columns 'nyu_id' or 'participant_id' are missing.
+        ValueError: If participant_id format is invalid (not "sub-XX" format).
+
+    Example:
+        >>> # File contains:
+        >>> # nyu_id    participant_id
+        >>> # 661       sub-05
+        >>> # 717       sub-12
+        >>> mapping = read_subject_mapping('participants.tsv')
+        >>> print(mapping)
+        {661: 5, 717: 12}
+    """
+    # Read the subject mapping from data.
+    participant_info_df = pd.read_csv(participant_map_file, delimiter=delimiter)
+
+    def participant_id_to_int(participant_id):
+        return int(participant_id.split("-")[1])
+
+    subject_id_map = {
+        x[1]["nyu_id"]: participant_id_to_int(x[1]["participant_id"])
+        for x in participant_info_df.iterrows()
+    }
+    return subject_id_map
+
+
+def read_electrode_file(
+    file_path: str, subject_mapping: Optional[dict[int, int]] = None
+):
     """
     Parse an electrode mapping CSV file to create a subject-to-electrodes mapping.
 
@@ -64,6 +112,8 @@ def read_electrode_file(file_path: str):
     Args:
         file_path (str): Path to the CSV file containing electrode data.
                         The CSV must have columns 'subject' (int) and 'elec' (str).
+        subject_mapping (dict[int, int]): Optional mapping to go from the subject ID in the
+                        file to the subject ID of our dataset (i.e. 798 -> 9)
 
     Returns:
         dict: A dictionary where keys are subject IDs (int) and values are lists
@@ -90,6 +140,9 @@ def read_electrode_file(file_path: str):
     sub_elec_mapping = {}
     for subject, electrode in zip(subjects, electrodes):
         subject = int(subject)
+        if subject_mapping is not None:
+            subject = subject_mapping[subject]
+
         if subject not in sub_elec_mapping.keys():
             sub_elec_mapping[subject] = []
 
