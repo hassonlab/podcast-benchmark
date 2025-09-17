@@ -359,6 +359,7 @@ def train_decoding_model(
                 training_params.top_k_thresholds,
                 training_params.min_train_freq_auc,
                 training_params.min_test_freq_auc,
+                preserve_ensemble=True,
             )
             for key, val in results.items():
                 cv_results[key].append(val)
