@@ -24,22 +24,12 @@ def cosine_distance(pred: torch.Tensor, true: torch.Tensor) -> float:
     return (1 - sim).mean()
 
 
-def get_logits(predicted_embeddings, actual_embeddings):
-    """Shared function to compute similarity logits over embeddings."""
-    # Normalize embeddings
-    pred_norm = F.normalize(predicted_embeddings, dim=1)
-    actual_norm = F.normalize(actual_embeddings, dim=1)
-
-    # Similarity matrix: [n_samples, n_samples]
-    return torch.matmul(pred_norm, actual_norm.T)
-
-
 @register_metric("nll_embedding")
 def compute_nll_contextual(predicted_embeddings, actual_embeddings):
     """
     Computes a contrastive NLL where each predicted embedding is scored against all actual embeddings.
     """
-    logits = get_logits(predicted_embeddings, actual_embeddings)
+    logits = 1 - compute_cosine_distances(predicted_embeddings, actual_embeddings)
 
     # Labels: diagonal = correct match
     targets = torch.arange(
@@ -67,7 +57,7 @@ def entropy(p: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
 
 @register_metric("similarity_entropy")
 def similarity_entropy(predicted_embeddings, actual_embeddings):
-    logits = get_logits(predicted_embeddings, actual_embeddings)
+    logits = 1 - compute_cosine_distances(predicted_embeddings, actual_embeddings)
     probs = F.softmax(logits, dim=1)
     return entropy(probs).mean()
 
@@ -203,3 +193,113 @@ def top_k_accuracy(predictions: np.ndarray, ground_truth: np.ndarray, k: int) ->
     )
 
     return np.mean(correct)
+
+
+def compute_cosine_distances(predictions, word_embeddings):
+    """
+    Compute cosine distances between predicted embeddings and word embeddings.
+    Supports ensemble predictions.
+
+    Args:
+        predictions: torch tensor of shape [num_samples, embedding_dim] or
+                    [num_samples, n_ensemble, embedding_dim] for ensemble predictions
+        word_embeddings: torch tensor of shape [num_words, embedding_dim]
+
+    Returns:
+        scores: torch tensor of shape [num_samples, num_words] containing
+                cosine distances for each word given each prediction
+    """
+    # Normalize word embeddings once
+    word_embeddings_norm = F.normalize(word_embeddings, p=2, dim=1)
+
+    # Handle both 2D and 3D cases by reshaping 2D to 3D with singleton dimension
+    if predictions.dim() == 2:
+        # Single prediction case: [num_samples, embedding_dim] -> [num_samples, 1, embedding_dim]
+        predictions = predictions.unsqueeze(1)
+    elif predictions.dim() != 3:
+        raise ValueError(
+            f"Predictions must be 2D or 3D tensor, got {predictions.dim()}D"
+        )
+
+    # Now we have: [num_samples, n_ensemble, embedding_dim]
+    num_samples, n_ensemble, embedding_dim = predictions.shape
+
+    # Reshape to treat each ensemble prediction separately
+    predictions_reshaped = predictions.view(num_samples * n_ensemble, embedding_dim)
+
+    # Normalize ensemble predictions
+    predictions_norm = F.normalize(predictions_reshaped, p=2, dim=1)
+
+    # Compute cosine similarity for all ensemble predictions
+    cosine_similarities = torch.mm(predictions_norm, word_embeddings_norm.t())
+    # Shape: [num_samples * n_ensemble, num_words]
+
+    # Convert to cosine distance
+    cosine_distances = 1 - cosine_similarities
+
+    # Reshape back to separate ensemble dimension
+    cosine_distances = cosine_distances.view(
+        num_samples, n_ensemble, word_embeddings.shape[0]
+    )
+
+    # Average across ensemble dimension (for single predictions, n_ensemble=1, so this is a no-op)
+    return cosine_distances.mean(dim=1)  # [num_samples, num_words]
+
+
+def compute_class_scores(cosine_distances, word_labels=None):
+    """
+    Compute class scores from cosine distances by averaging over word embeddings
+    belonging to the same class and applying softmax transformation.
+
+    This implements the logic: "we computed the cosine distance between each of
+    the predicted embeddings and the embeddings of all instances of each unique
+    word label. The distances were averaged across unique word labels, yielding
+    one score for each word label (that is, logit). We used a Softmax
+    transformation on these scores (logits)."
+
+    Args:
+        cosine_distances: torch tensor of shape [num_samples, num_words] containing
+                         cosine distances between predictions and word embeddings
+        word_labels: Optional torch tensor of shape [num_words] containing integer class IDs
+                    for each word embedding
+
+    Returns:
+        class_probabilities: torch tensor of shape [num_samples, num_classes] containing
+                           softmax probabilities for each class
+        class_logits: torch tensor of shape [num_samples, num_classes] containing
+                     the logits (negative averaged distances) before softmax
+    """
+    if word_labels is not None:
+        device = cosine_distances.device
+        num_samples = cosine_distances.shape[0]
+
+        # Get unique class labels and sort them for consistent ordering
+        unique_classes = torch.unique(word_labels).sort()[0]
+        num_classes = len(unique_classes)
+
+        # Initialize tensors for class-averaged distances
+        class_distances = torch.zeros(num_samples, num_classes, device=device)
+
+        # For each unique class, average the distances across all word embeddings
+        # belonging to that class
+        for i, class_id in enumerate(unique_classes):
+            # Find indices of word embeddings belonging to this class
+            class_mask = word_labels == class_id
+            class_indices = torch.where(class_mask)[0]
+
+            if len(class_indices) > 0:
+                # Average distances for this class across all its word embeddings
+                class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
+    else:
+        class_distances = cosine_distances
+        unique_classes = torch.arange(cosine_distances.shape[0])
+
+    # Convert distances to similarities (logits)
+    # Since cosine distance = 1 - cosine_similarity, we convert back:
+    # logits = 1 - distance = cosine_similarity
+    class_logits = 1 - class_distances
+
+    # Apply softmax transformation to get probabilities
+    class_probabilities = F.softmax(class_logits, dim=1)
+
+    return class_probabilities, class_logits, unique_classes

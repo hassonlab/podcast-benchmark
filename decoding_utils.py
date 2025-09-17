@@ -185,7 +185,7 @@ def train_decoding_model(
             "test_word_train_weighted_auc_roc",
             "test_word_test_weighted_auc_roc",
             "test_word_perplexity",
-            "test_occ_perplexity",
+            "test_occurence_perplexity",
         ]
 
         # Top-K metrics.
@@ -388,23 +388,20 @@ def train_decoding_model(
     return models, histories, cv_results
 
 
-def get_predictions(X, model, device):
+def get_predictions(X, model, device, batch_size, **kwargs):
     X = X.to(device)
 
     # Step 2: Get predicted embeddings for all neural data
     model_predictions = []
-    for i in range(len(X)):
+    for i in range(0, len(X), batch_size):
         with torch.no_grad():
-            input_data = X[i : i + 1]
-            pred = model(input_data)
+            input_data = X[i : i + batch_size]
+            pred = model(input_data, **kwargs)
 
-        # Only squeeze the batch dimension (first dimension), keep the embedding dimension
-        if pred.dim() > 1:
-            pred = pred.squeeze(0)  # Remove only the first dimension
         model_predictions.append(pred)
 
     # Stack to ensure we get a 2D tensor [num_samples, embedding_dim]
-    return torch.stack(model_predictions)
+    return torch.cat(model_predictions)
 
 
 def build_vocabulary(words):
@@ -439,116 +436,6 @@ def build_vocabulary(words):
     return word_to_id, id_to_word, position_to_id
 
 
-def compute_cosine_distances(predictions, word_embeddings):
-    """
-    Compute cosine distances between predicted embeddings and word embeddings.
-    Supports ensemble predictions.
-
-    Args:
-        predictions: torch tensor of shape [num_samples, embedding_dim] or
-                    [num_samples, n_ensemble, embedding_dim] for ensemble predictions
-        word_embeddings: torch tensor of shape [num_words, embedding_dim]
-
-    Returns:
-        scores: torch tensor of shape [num_samples, num_words] containing
-                cosine distances for each word given each prediction
-    """
-    # Normalize word embeddings once
-    word_embeddings_norm = F.normalize(word_embeddings, p=2, dim=1)
-
-    # Handle both 2D and 3D cases by reshaping 2D to 3D with singleton dimension
-    if predictions.dim() == 2:
-        # Single prediction case: [num_samples, embedding_dim] -> [num_samples, 1, embedding_dim]
-        predictions = predictions.unsqueeze(1)
-    elif predictions.dim() != 3:
-        raise ValueError(
-            f"Predictions must be 2D or 3D tensor, got {predictions.dim()}D"
-        )
-
-    # Now we have: [num_samples, n_ensemble, embedding_dim]
-    num_samples, n_ensemble, embedding_dim = predictions.shape
-
-    # Reshape to treat each ensemble prediction separately
-    predictions_reshaped = predictions.view(num_samples * n_ensemble, embedding_dim)
-
-    # Normalize ensemble predictions
-    predictions_norm = F.normalize(predictions_reshaped, p=2, dim=1)
-
-    # Compute cosine similarity for all ensemble predictions
-    cosine_similarities = torch.mm(predictions_norm, word_embeddings_norm.t())
-    # Shape: [num_samples * n_ensemble, num_words]
-
-    # Convert to cosine distance
-    cosine_distances = 1 - cosine_similarities
-
-    # Reshape back to separate ensemble dimension
-    cosine_distances = cosine_distances.view(
-        num_samples, n_ensemble, word_embeddings.shape[0]
-    )
-
-    # Average across ensemble dimension (for single predictions, n_ensemble=1, so this is a no-op)
-    return cosine_distances.mean(dim=1)  # [num_samples, num_words]
-
-
-def compute_class_scores(cosine_distances, word_labels=None):
-    """
-    Compute class scores from cosine distances by averaging over word embeddings
-    belonging to the same class and applying softmax transformation.
-
-    This implements the logic: "we computed the cosine distance between each of
-    the predicted embeddings and the embeddings of all instances of each unique
-    word label. The distances were averaged across unique word labels, yielding
-    one score for each word label (that is, logit). We used a Softmax
-    transformation on these scores (logits)."
-
-    Args:
-        cosine_distances: torch tensor of shape [num_samples, num_words] containing
-                         cosine distances between predictions and word embeddings
-        word_labels: Optional torch tensor of shape [num_words] containing integer class IDs
-                    for each word embedding
-
-    Returns:
-        class_probabilities: torch tensor of shape [num_samples, num_classes] containing
-                           softmax probabilities for each class
-        class_logits: torch tensor of shape [num_samples, num_classes] containing
-                     the logits (negative averaged distances) before softmax
-    """
-    if word_labels is not None:
-        device = cosine_distances.device
-        num_samples = cosine_distances.shape[0]
-
-        # Get unique class labels and sort them for consistent ordering
-        unique_classes = torch.unique(word_labels).sort()[0]
-        num_classes = len(unique_classes)
-
-        # Initialize tensors for class-averaged distances
-        class_distances = torch.zeros(num_samples, num_classes, device=device)
-
-        # For each unique class, average the distances across all word embeddings
-        # belonging to that class
-        for i, class_id in enumerate(unique_classes):
-            # Find indices of word embeddings belonging to this class
-            class_mask = word_labels == class_id
-            class_indices = torch.where(class_mask)[0]
-
-            if len(class_indices) > 0:
-                # Average distances for this class across all its word embeddings
-                class_distances[:, i] = cosine_distances[:, class_indices].mean(dim=1)
-    else:
-        class_distances = cosine_distances
-        unique_classes = torch.arange(cosine_distances.shape[0])
-
-    # Convert distances to similarities (logits)
-    # Since cosine distance = 1 - cosine_similarity, we convert back:
-    # logits = 1 - distance = cosine_similarity
-    class_logits = 1 - class_distances
-
-    # Apply softmax transformation to get probabilities
-    class_probabilities = F.softmax(class_logits, dim=1)
-
-    return class_probabilities, class_logits, unique_classes
-
-
 def compute_word_embedding_task_metrics(
     X_test,
     Y_test,
@@ -560,6 +447,8 @@ def compute_word_embedding_task_metrics(
     top_k_thresholds,
     min_train_freq_auc,
     min_test_freq_auc,
+    batch_size=16,
+    **kwargs,
 ):
     """
     Calculate top-k metrics and AUC-ROC for decoding from brain data.
@@ -587,20 +476,20 @@ def compute_word_embedding_task_metrics(
     X_test, Y_test = X_test.to(device), Y_test.to(device)
 
     # Get predictions
-    predictions = get_predictions(X_test, model, device)
+    predictions = get_predictions(X_test, model, device, batch_size, **kwargs)
 
     # Compute cosine distances
-    distances = compute_cosine_distances(predictions, Y_test)
+    distances = metrics.compute_cosine_distances(predictions, Y_test)
 
     # Measure performance based on each individual word occurrence
-    occurence_scores, _, _ = compute_class_scores(distances)
+    occurence_scores, _, _ = metrics.compute_class_scores(distances)
     occurence_scores_np = occurence_scores.cpu().numpy()
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
-        results[f"test_occ_top_{k_val}"] = metrics.top_k_accuracy(
+        results[f"test_occurence_top_{k_val}"] = metrics.top_k_accuracy(
             occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
         )
-    results["test_occ_perplexity"] = metrics.perplexity(
+    results["test_occurence_perplexity"] = metrics.perplexity(
         occurence_scores_np, np.arange(occurence_scores_np.shape[0])
     )
 
@@ -610,7 +499,7 @@ def compute_word_embedding_task_metrics(
     _, _, position_to_id = build_vocabulary(selected_words)
     position_to_id = np.array(position_to_id)
 
-    word_scores, _, test_class_idxs = compute_class_scores(
+    word_scores, _, test_class_idxs = metrics.compute_class_scores(
         distances, torch.from_numpy(position_to_id[test_index])
     )
     # Get a mapping from over-all class index -> test class index.
