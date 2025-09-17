@@ -190,7 +190,7 @@ def train_decoding_model(
 
         # Top-K metrics.
         for k_val in training_params.top_k_thresholds:
-            for test_type in ["word", "occ"]:
+            for test_type in ["word", "occurence"]:
                 embedding_metrics.append(f"test_{test_type}_top_{k_val}")
 
         for metric in embedding_metrics:
