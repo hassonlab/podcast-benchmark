@@ -348,6 +348,8 @@ def train_decoding_model(
         # Hardcoded for now since this would be a bit complicated
         # to generalize at the moment.
         if is_word_embedding_decoding_task:
+            # TODO: figure out how we want to generalize evaluation inference vs training inference better.
+            # Key focus on preserve_ensemble argument.
             results = compute_word_embedding_task_metrics(
                 X[te_idx],
                 Y[te_idx],
