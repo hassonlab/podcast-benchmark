@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import math
-import re
 
 
 def extract_metric_names(history_dict):
@@ -16,15 +15,15 @@ def extract_metric_names(history_dict):
     metric_names = set()
 
     for key in history_dict.keys():
-        if key in ['num_epochs']:  # Skip non-metric keys
+        if key in ["num_epochs"]:  # Skip non-metric keys
             continue
 
         # Split on first underscore to separate phase from metric name
-        parts = key.split('_', 1)
-        if len(parts) == 2 and parts[0] in ['train', 'val', 'test']:
+        parts = key.split("_", 1)
+        if len(parts) == 2 and parts[0] in ["train", "val", "test"]:
             metric_names.add(parts[1])
-        elif key in ['train_loss', 'val_loss']:  # Handle legacy loss keys
-            metric_names.add('loss')
+        elif key in ["train_loss", "val_loss"]:  # Handle legacy loss keys
+            metric_names.add("loss")
 
     return sorted(list(metric_names))
 
@@ -41,21 +40,21 @@ def format_metric_name(metric_name):
     """
     # Special cases for common metrics
     formatting_map = {
-        'mse': 'MSE',
-        'loss': 'Loss',
-        'cosine': 'Cosine Similarity',
-        'cosine_sim': 'Cosine Similarity',
-        'cosine_dist': 'Cosine Distance',
-        'nll_embedding': 'NLL Embedding',
-        'auc_roc': 'AUC-ROC',
-        'perplexity': 'Perplexity'
+        "mse": "MSE",
+        "loss": "Loss",
+        "cosine": "Cosine Similarity",
+        "cosine_sim": "Cosine Similarity",
+        "cosine_dist": "Cosine Distance",
+        "nll_embedding": "NLL Embedding",
+        "auc_roc": "AUC-ROC",
+        "perplexity": "Perplexity",
     }
 
     if metric_name in formatting_map:
         return formatting_map[metric_name]
 
     # General formatting: replace underscores and capitalize
-    formatted = metric_name.replace('_', ' ').title()
+    formatted = metric_name.replace("_", " ").title()
     return formatted
 
 
@@ -115,7 +114,7 @@ def plot_training_history(history, fold=None):
     if len(metric_names) == 1:
         axes = [axes]
     elif rows == 1 or cols == 1:
-        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+        axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
     else:
         axes = axes.flatten()
 
@@ -128,15 +127,19 @@ def plot_training_history(history, fold=None):
         val_key = f"val_{metric_name}"
 
         # Handle legacy loss keys
-        if metric_name == 'loss':
+        if metric_name == "loss":
             train_key = "train_loss"
             val_key = "val_loss"
 
         # Plot data if available
         if train_key in history:
-            ax.plot(history[train_key], label=f"Training {format_metric_name(metric_name)}")
+            ax.plot(
+                history[train_key], label=f"Training {format_metric_name(metric_name)}"
+            )
         if val_key in history:
-            ax.plot(history[val_key], label=f"Validation {format_metric_name(metric_name)}")
+            ax.plot(
+                history[val_key], label=f"Validation {format_metric_name(metric_name)}"
+            )
 
         # Set labels and title
         ax.set_xlabel("Epoch")
@@ -183,7 +186,7 @@ def plot_cv_results(cv_results):
     if len(metric_names) == 1:
         axes = [axes]
     elif rows == 1 or cols == 1:
-        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+        axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
     else:
         axes = axes.flatten()
 
@@ -193,10 +196,10 @@ def plot_cv_results(cv_results):
 
         # Get metric data for all phases
         phases_data = {}
-        for phase in ['train', 'val', 'test']:
+        for phase in ["train", "val", "test"]:
             key = f"{phase}_{metric_name}"
             # Handle legacy loss keys
-            if metric_name == 'loss' and key not in cv_results:
+            if metric_name == "loss" and key not in cv_results:
                 if f"{phase}_loss" in cv_results:
                     key = f"{phase}_loss"
 
@@ -213,11 +216,7 @@ def plot_cv_results(cv_results):
         folds = range(1, len(first_phase_data) + 1)
 
         # Plot each phase
-        phase_labels = {
-            'train': 'Training',
-            'val': 'Validation',
-            'test': 'Test'
-        }
+        phase_labels = {"train": "Training", "val": "Validation", "test": "Test"}
 
         for phase, data in phases_data.items():
             if len(data) == len(folds):  # Ensure data length matches
