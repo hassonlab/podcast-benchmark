@@ -151,7 +151,7 @@ class EnsemblePitomModel(nn.Module):
         # Run all models and average together all embeddings.
         embeddings = torch.stack([model(x) for model in self.models], dim=1)
         if not preserve_ensemble:
-            embeddings.mean(1)
+            embeddings = embeddings.mean(1)
         return embeddings
 
 
