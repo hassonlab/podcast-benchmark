@@ -24,9 +24,12 @@ def sentence_onset_task(data_params: DataParams):
         `negative_margin_s` seconds after onset and at least one window width
         before the sentence end.
     """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
     # Resolve CSV path
     default_csv = os.path.join(data_params.data_root, "all_sentences_podcast.csv")
-    csv_path = getattr(data_params, "sentence_csv_path", None) or default_csv
+    csv_path = tp.get("sentence_csv_path", default_csv)
 
     df = pd.read_csv(csv_path, index_col=0)
 
@@ -52,8 +55,8 @@ def sentence_onset_task(data_params: DataParams):
     import numpy as np
 
     window = getattr(data_params, "window_width", 0.625) or 0.625
-    negatives_per_positive = getattr(data_params, "negatives_per_positive", 1)
-    negative_margin_s = getattr(data_params, "negative_margin_s", 2.0)
+    negatives_per_positive = int(tp.get("negatives_per_positive", 1))
+    negative_margin_s = float(tp.get("negative_margin_s", 2.0))
 
     rng = np.random.default_rng(0)
     neg_starts = []

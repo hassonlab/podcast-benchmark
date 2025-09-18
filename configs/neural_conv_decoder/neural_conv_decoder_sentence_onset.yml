@@ -34,9 +34,10 @@ data_params:
   preprocessor_params:
     num_average_samples: 32
   # Task-specific knobs (optional)
-  negatives_per_positive: 5
-  negative_margin_s: 0.75
-  sentence_csv_path: data/stimuli/all_sentences_podcast.csv
+  task_params:
+    negatives_per_positive: 5
+    negative_margin_s: 0.75
+    sentence_csv_path: data/stimuli/all_sentences_podcast.csv
 
 trial_name: sentence_onset_lr
 
