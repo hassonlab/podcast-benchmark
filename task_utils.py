@@ -105,6 +105,17 @@ def word_embedding_decoding_task(data_params: DataParams):
         Tuple[pd.DataFrame, np.ndarray]: A DataFrame containing word-level information (word, start time, end time),
         and a NumPy array of corresponding word-level embeddings under the header target.
     """
+    import nltk
+    from nltk.stem import WordNetLemmatizer as wl
+
+    try:
+        nltk.data.find("corpora/wordnet")
+        print("WordNet already downloaded")
+    except LookupError:
+        print("Downloading WordNet...")
+        nltk.download("wordnet")
+        nltk.download("wordnet")
+
     transcript_path = os.path.join(
         data_params.data_root, "stimuli/gpt2-xl/transcript.tsv"
     )
@@ -121,6 +132,10 @@ def word_embedding_decoding_task(data_params: DataParams):
     df_word = df_contextual.groupby("word_idx").agg(
         dict(word="first", start="first", end="last")
     )
+    df_word["norm_word"] = df_word.word.str.lower().str.replace(
+        r"^[^\w\s]+|[^\w\s]+$", "", regex=True
+    )
+    df_word["lemmatized_word"] = df_word.norm_word.apply(lambda x: wl().lemmatize(x))
 
     if data_params.embedding_type == "gpt-2xl":
         df_word["target"] = list(aligned_embeddings)

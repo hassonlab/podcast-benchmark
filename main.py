@@ -48,8 +48,12 @@ def main():
 
     # Overwrite subject id's and set per-subject electrodes based on file if provided.
     if experiment_config.data_params.electrode_file_path:
+        subject_id_map = data_utils.read_subject_mapping(
+            "data/participants.tsv", delimiter="\t"
+        )
         subject_electrode_map = data_utils.read_electrode_file(
-            experiment_config.data_params.electrode_file_path
+            experiment_config.data_params.electrode_file_path,
+            subject_mapping=subject_id_map,
         )
         experiment_config.data_params.subject_ids = subject_electrode_map.keys()
         experiment_config.data_params.per_subject_electrodes = subject_electrode_map
@@ -92,7 +96,7 @@ def main():
             experiment_config.training_params.max_lag,
             experiment_config.training_params.lag_step_size,
         )
-    weighted_roc_means = decoding_utils.run_training_over_lags(
+    decoding_utils.run_training_over_lags(
         lags,
         raws,
         df_word,

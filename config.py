@@ -38,6 +38,10 @@ class DataParams:
     # Task-specific controls (used by sentence_onset_task)
     negatives_per_positive: int = 1
     negative_margin_s: float = 2.0
+    # Name of word column in dataframe to use. Optional.
+    word_column: Optional[str] = None
+    # Dictionary of parameters to pass to your specific task_data_getter if needed.
+    task_params: dict = field(default_factory=lambda: {})
 
 
 @dataclass
@@ -78,6 +82,13 @@ class TrainingParams:
     smaller_is_better: bool = False
     # Number of gradient accumulation steps.
     grad_accumulation_steps: int = 1
+    # TODO: Generalize parameters to metrics based on config. So we don't need to have these last few.
+    # Minimum number of occurences of a word in training set to be used for ROC-AUC calculation.
+    min_train_freq_auc: int = 5
+    # Minimum number of occurences of a word in test set to be used for ROC-AUC calculation.
+    min_test_freq_auc: int = -1
+    # Sets the k we use in top-k metrics.
+    top_k_thresholds: list[int] = field(default_factory=lambda: [1, 5, 10])
 
 
 @dataclass
