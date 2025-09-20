@@ -104,13 +104,14 @@ class PitomModel(nn.Module):
 
         # Apply output layer if needed
         x = self.dense(x)
-        x = self.layer_norm(x)
+        # LayerNorm collapses to zero when normalized_shape=1; skip for scalar output
+        if self.output_dim > 1:
+            x = self.layer_norm(x)
         # Apply configurable output activation.
         if self.output_activation == "tanh":
             x = self.tanh(x)
         elif self.output_activation == "sigmoid":
             x = torch.sigmoid(x)
-        # else: identity / raw logits
 
         # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
         if x.shape[1] == 1:
