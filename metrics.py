@@ -13,12 +13,17 @@ from registry import register_metric
 def mse_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     return F.mse_loss(predicted, groundtruth)
 
+@register_metric("bce")
+def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+    """BCE loss for binary classification, expects probabilities in [0, 1].
 
-@register_metric("bce_with_logits")
-def bce_with_logits_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
-    """BCE loss for binary classification, expects raw logits."""
-    return F.binary_cross_entropy_with_logits(predicted, groundtruth)
-
+    If inputs do not look like probabilities, applies a sigmoid to convert logits to probs.
+    """
+    probs = predicted
+    # Heuristic: if values are outside [0,1], treat as logits and apply sigmoid
+    if probs.detach().min() < 0 or probs.detach().max() > 1:
+        probs = torch.sigmoid(probs)
+    return F.binary_cross_entropy(probs, groundtruth)
 
 @register_metric("cosine_sim")
 def cosine_similarity(pred: torch.Tensor, true: torch.Tensor) -> float:
@@ -105,8 +110,11 @@ def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Sigmoid to probability, threshold at 0.5
-    probs = torch.sigmoid(pred)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
     y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
     try:
         return float(f1_score(y_true, y_pred, zero_division=0))
