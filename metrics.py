@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from sklearn.metrics import roc_curve, auc
 
+from sklearn.metrics import roc_auc_score, f1_score
 
 from registry import register_metric
 
@@ -12,6 +13,17 @@ from registry import register_metric
 def mse_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     return F.mse_loss(predicted, groundtruth)
 
+@register_metric("bce")
+def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+    """BCE loss for binary classification, expects probabilities in [0, 1].
+
+    If inputs do not look like probabilities, applies a sigmoid to convert logits to probs.
+    """
+    probs = predicted
+    # Heuristic: if values are outside [0,1], treat as logits and apply sigmoid
+    if probs.detach().min() < 0 or probs.detach().max() > 1:
+        probs = torch.sigmoid(probs)
+    return F.binary_cross_entropy(probs, groundtruth)
 
 @register_metric("cosine_sim")
 def cosine_similarity(pred: torch.Tensor, true: torch.Tensor) -> float:
@@ -60,6 +72,54 @@ def similarity_entropy(predicted_embeddings, actual_embeddings):
     logits = 1 - compute_cosine_distances(predicted_embeddings, actual_embeddings)
     probs = F.softmax(logits, dim=1)
     return entropy(probs).mean()
+
+
+@register_metric("roc_auc")
+def roc_auc_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    ROC-AUC for binary classification. Accepts raw scores; any monotonic
+    transform (e.g., tanh, sigmoid) is fine for AUC.
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy()
+    y_score = pred.detach().cpu().numpy()
+
+    # Handle batches with a single class gracefully
+    if len(set(y_true.tolist())) < 2:
+        return 0.5
+    try:
+        return float(roc_auc_score(y_true, y_score))
+    except Exception:
+        return 0.5
+
+
+@register_metric("f1")
+def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    F1 score at a 0.5 threshold after sigmoid.
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
+    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+    try:
+        return float(f1_score(y_true, y_pred, zero_division=0))
+    except Exception:
+        return 0.0
 
 
 def calculate_auc_roc(
