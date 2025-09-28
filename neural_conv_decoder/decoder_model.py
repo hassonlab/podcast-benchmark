@@ -14,6 +14,7 @@ class PitomModel(nn.Module):
         reg=0.35,
         reg_head=0,
         dropout=0.2,
+        output_activation: str = "tanh",
     ):
         """
         PyTorch implementation of the PITOM decoding model.
@@ -33,7 +34,7 @@ class PitomModel(nn.Module):
         self.reg_head = reg_head
         self.dropout = dropout
         self.output_dim = output_dim
-
+        self.output_activation = output_activation
         # Define the CNN architecture
         self.desc = [(conv_filters, 3), ("max", 2), (conv_filters, 2)]
 
@@ -103,9 +104,18 @@ class PitomModel(nn.Module):
 
         # Apply output layer if needed
         x = self.dense(x)
-        x = self.layer_norm(x)
-        x = self.tanh(x)
+        # LayerNorm collapses to zero when normalized_shape=1; skip for scalar output
+        if self.output_dim > 1:
+            x = self.layer_norm(x)
+        # Apply configurable output activation.
+        if self.output_activation == "tanh":
+            x = self.tanh(x)
+        elif self.output_activation == "sigmoid":
+            x = torch.sigmoid(x)
 
+        # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
+        if x.shape[1] == 1:
+            x = x.squeeze(1)
         return x
 
 
@@ -119,6 +129,7 @@ class EnsemblePitomModel(nn.Module):
         reg=0.35,
         reg_head=0,
         dropout=0.2,
+        output_activation: str = "tanh",
     ):
         """
         PyTorch implementation of the PITOM decoding model.
@@ -144,6 +155,7 @@ class EnsemblePitomModel(nn.Module):
                     reg=reg,
                     reg_head=reg_head,
                     dropout=dropout,
+                    output_activation=output_activation,
                 )
             )
 
@@ -165,6 +177,7 @@ def pitom_model(model_params):
         reg=model_params["reg"],
         reg_head=model_params["reg_head"],
         dropout=model_params["dropout"],
+        output_activation=model_params.get("output_activation", "tanh"),
     )
 
 
@@ -178,4 +191,5 @@ def ensemble_pitom_model(model_params):
         reg=model_params["reg"],
         reg_head=model_params["reg_head"],
         dropout=model_params["dropout"],
+        output_activation=model_params.get("output_activation", "tanh"),
     )
