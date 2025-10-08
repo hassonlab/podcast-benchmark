@@ -321,3 +321,47 @@ make my-model
 ```
 
 and you should see results populate in your results/ folder. If you are running over slurm you can debug your script using the logs in logs/ or run locally or on an interactive node by changing $(CMD). Let me know if you have any questions!
+
+## Volume-level ridge analysis
+
+The ridge-regression workflow that previously lived in the volume-level encoding notebook can now be executed from the command line without modifying `main.py` or any YAML configs. The refactored helpers live in `ridge_utils.py`, `volume_lvl_utils.py`, and `plot_utils.py`, and a convenience script wires them together end-to-end:
+
+```
+python scripts/run_ridge_analysis.py \
+    --audio-path path/to/audio.wav \
+    --audio-kind waveform \
+    --neural-path path/to/neural_high_gamma.npy \
+    --sampling-rate 1000 \
+    --lags "-200,-100,0,100,200" \
+    --window-ms 50 --hop-ms 25 \
+    --output-dir outputs/ridge_example \
+    --save-plot
+```
+
+Key points:
+
+- `--audio-path` accepts either the raw waveform (`audio-kind waveform`) or a pre-computed amplitude envelope (`audio-kind envelope`). Waveforms are transformed into Hilbert envelopes and low-pass filtered using `volume_lvl_utils`.
+- `--neural-path` should point to a NumPy array shaped `(channels, time)` that matches the notebook features (for example, log high-gamma envelopes exported from your preprocessing pipeline).
+- `--sampling-rate` sets the target rate shared across modalities after preprocessing. Audio is automatically resampled if the source WAV uses a different rate (e.g., 44.1 kHz).
+- `--window-ms` / `--hop-ms` enable the RMS sliding-window down-sampling identical to the notebook implementation. Omit both flags to skip windowing.
+- Results are written to the specified output directory as `ridge_results.npz`, `ridge_results_summary.json`, and (optionally) `ridge_diagnostics.png`. The plot reproduces the lag sweep diagnostics from the notebook via `plot_utils.plot_ridge_results`.
+
+Because this analysis bypasses the neural decoding training loop, there is no need to edit `main.py` or training configs. You can still call the underlying functions (`apply_sliding_window_rms`, `ridge_r2_by_lag`, `plot_ridge_results`) directly inside notebooks or custom scripts if you prefer a programmatic workflow.
+
+### Multi-subject ridge sweeps with curated electrode sets
+
+To reproduce the notebook's subject-by-subject, averaged, and pooled analyses (using the curated "good" electrodes) run:
+
+```
+python scripts/run_ridge_batch_analysis.py \
+    --audio-path data/stimuli/podcast.wav \
+    --data-root data \
+    --subjects 1 2 3 4 5 6 7 8 9 \
+    --target-sr 512 \
+    --lags "-1000:1000:10" \
+    --window-ms 200 --hop-ms 25 \
+    --output-dir outputs/ridge_batch \
+    --save-plots
+```
+
+Outputs include per-subject CSV/NPZ diagnostics, a subject-average curve, pooled-electrode results, a JSON summary of best lags, and optional diagnostic plots mirroring the notebook figures. Use `--disable-window` to skip the RMS aggregation or `--alphas` to provide a custom ridge grid.
