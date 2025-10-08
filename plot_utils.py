@@ -1,5 +1,7 @@
-import matplotlib.pyplot as plt
 import math
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def extract_metric_names(history_dict):
@@ -237,3 +239,148 @@ def plot_cv_results(cv_results):
 
     plt.tight_layout()
     plt.show()
+
+
+def _prepare_ridge_plot_data(results):
+    """Validate and prepare ridge results for plotting."""
+
+    if results is None or not isinstance(results, dict):
+        raise ValueError("results must be a dictionary produced by ridge_r2_by_lag")
+
+    if "lag_ms" not in results or "r2" not in results:
+        raise ValueError("results must contain 'lag_ms' and 'r2' entries")
+
+    lags = np.asarray(results["lag_ms"], dtype=float)
+    r2 = np.asarray(results["r2"], dtype=float)
+
+    mask = np.isfinite(lags) & np.isfinite(r2)
+    if not np.any(mask):
+        raise ValueError("No finite lag/R^2 pairs available for plotting")
+
+    lags = lags[mask]
+    r2 = r2[mask]
+    order = np.argsort(lags)
+    lags = lags[order]
+    r2 = r2[order]
+
+    train_r2 = None
+    if "train_r2" in results:
+        train_vals = np.asarray(results["train_r2"], dtype=float)
+        train_r2 = train_vals[mask][order]
+
+    alphas = None
+    if "alpha" in results:
+        alphas = np.asarray(results["alpha"], dtype=float)[mask][order]
+
+    coef_norm = None
+    if "coef_norm" in results:
+        coef_norm = np.asarray(results["coef_norm"], dtype=float)[mask][order]
+
+    n_samples = None
+    if "n_samples" in results:
+        n_samples = np.asarray(results["n_samples"], dtype=float)[mask][order]
+
+    n_features = None
+    if "n_features" in results:
+        n_features = np.asarray(results["n_features"], dtype=float)[mask][order]
+
+    best_idx = int(np.argmax(r2))
+
+    return {
+        "lags": lags,
+        "r2": r2,
+        "train_r2": train_r2,
+        "alphas": alphas,
+        "coef_norm": coef_norm,
+        "n_samples": n_samples,
+        "n_features": n_features,
+        "best_idx": best_idx,
+    }
+
+
+def plot_ridge_results(results, *, show: bool = True):
+    """Visualise ridge lag search outputs from :func:`ridge_utils.ridge_r2_by_lag`.
+
+    Args:
+        results: Dictionary returned by ``ridge_r2_by_lag``.
+        show: If True (default), call ``plt.show()`` after plotting.
+
+    Returns:
+        (fig, axes): Matplotlib figure and axes array for further tweaking.
+    """
+
+    data = _prepare_ridge_plot_data(results)
+    lags = data["lags"]
+    r2 = data["r2"]
+    best_idx = data["best_idx"]
+    best_lag = lags[best_idx]
+    best_r2 = r2[best_idx]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    axes = axes.flatten()
+
+    # R^2 across lags
+    ax = axes[0]
+    ax.plot(lags, r2, marker="o", label="CV R$^2$", color="#1f77b4")
+    ax.axvline(best_lag, linestyle="--", color="#ff7f0e", alpha=0.7)
+    ax.scatter([best_lag], [best_r2], color="#ff7f0e", zorder=5, label="Best lag")
+    if data["train_r2"] is not None:
+        ax.plot(lags, data["train_r2"], marker="o", linestyle="--", color="#2ca02c", label="Train R$^2$")
+    ax.set_xlabel("Lag (ms)")
+    ax.set_ylabel("R$^2$")
+    ax.set_title("Lag sweep performance")
+    ax.grid(True)
+    ax.legend()
+
+    # Regularisation strength
+    ax = axes[1]
+    if data["alphas"] is not None:
+        ax.plot(lags, data["alphas"], marker="o", color="#9467bd")
+        ax.set_yscale("log")
+        ax.set_ylabel("Alpha (log scale)")
+    else:
+        ax.text(0.5, 0.5, "No alpha data", ha="center", va="center")
+        ax.set_ylabel("Alpha")
+    ax.axvline(best_lag, linestyle="--", color="#ff7f0e", alpha=0.7)
+    ax.set_xlabel("Lag (ms)")
+    ax.set_title("Selected regularisation")
+    ax.grid(True)
+
+    # Coefficient norm
+    ax = axes[2]
+    if data["coef_norm"] is not None:
+        ax.plot(lags, data["coef_norm"], marker="o", color="#8c564b")
+        ax.set_ylabel("||w||$_2$")
+    else:
+        ax.text(0.5, 0.5, "No coefficient data", ha="center", va="center")
+        ax.set_ylabel("Coefficient norm")
+    ax.axvline(best_lag, linestyle="--", color="#ff7f0e", alpha=0.7)
+    ax.set_xlabel("Lag (ms)")
+    ax.set_title("Coefficient magnitude")
+    ax.grid(True)
+
+    # Sample/feature counts
+    ax = axes[3]
+    plotted_any = False
+    if data["n_samples"] is not None:
+        ax.plot(lags, data["n_samples"], marker="o", color="#17becf", label="Samples")
+        plotted_any = True
+    if data["n_features"] is not None:
+        ax.plot(lags, data["n_features"], marker="s", color="#7f7f7f", label="Features")
+        plotted_any = True
+    if not plotted_any:
+        ax.text(0.5, 0.5, "No size data", ha="center", va="center")
+    ax.axvline(best_lag, linestyle="--", color="#ff7f0e", alpha=0.7)
+    ax.set_xlabel("Lag (ms)")
+    ax.set_title("Design matrix dimensions")
+    ax.grid(True)
+    if plotted_any:
+        ax.legend()
+
+    fig.suptitle("Ridge regression diagnostics", fontsize=16)
+    plt.tight_layout(rect=(0, 0, 1, 0.97))
+
+    if show:
+        plt.show()
+
+    return fig, axes
