@@ -1,4 +1,6 @@
 import os
+import warnings
+from math import gcd
 from typing import Optional
 
 import numpy as np
@@ -6,50 +8,14 @@ import mne
 from mne_bids import BIDSPath
 import pandas as pd
 
-try:  
+try:
     import soundfile as sf
-except ImportError: 
+except ImportError:
     sf = None
 
+from scipy.signal import butter, hilbert, resample_poly, sosfilt, sosfiltfilt
+
 from config import DataParams
-
-
-def load_audio_waveform(
-    path: str,
-    target_sr: int = 44100,
-) -> tuple[np.ndarray, int]:
-    """Load mono audio data with the assumptions used in volume-level notebooks.
-
-    Args:
-        path: Absolute path to the audio file on disk.
-        target_sr: Expected sampling rate in Hz. Defaults to 44,100 Hz.
-
-    Returns:
-        Tuple of waveform (1-D NumPy array) and sampling rate.
-
-    Raises:
-        FileNotFoundError: Raised if the audio path does not exist.
-        ImportError: Raised if ``soundfile`` is not available.
-        ValueError: Raised when the sampling rate on disk differs from ``target_sr``.
-    """
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Audio file not found: {path}")
-
-    if sf is None:
-        raise ImportError(
-            "soundfile is required to load audio waveforms for volume-level encoding."
-        )
-
-    waveform, sr = sf.read(path, dtype="float32", always_2d=False)
-
-    if waveform.ndim > 1:
-        waveform = np.mean(waveform, axis=1)
-
-    if sr != target_sr:
-        raise ValueError(f"Expected {target_sr}Hz audio, got {sr}Hz.")
-
-    return waveform, int(sr)
 
 
 def load_raws(data_params: DataParams):
@@ -275,3 +241,134 @@ def get_data(
         datas = preprocessing_fn(datas, preprocessor_params)
 
     return datas, selected_targets, selected_words
+
+# Audio preprocessing helpers for volume-level encoding ---------------------------------
+def load_audio_waveform(
+    path: str,
+    target_sr: int = 44100,
+) -> tuple[np.ndarray, int]:
+    """Load mono audio data with the assumptions used in volume-level notebooks.
+
+    Args:
+        path: Absolute path to the audio file on disk.
+        target_sr: Expected sampling rate in Hz. Defaults to 44,100 Hz.
+
+    Returns:
+        Tuple of waveform (1-D NumPy array) and sampling rate.
+
+    Raises:
+        FileNotFoundError: Raised if the audio path does not exist.
+        ImportError: Raised if ``soundfile`` is not available.
+        ValueError: Raised when the sampling rate on disk differs from ``target_sr``.
+    """
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    if sf is None:
+        raise ImportError(
+            "soundfile is required to load audio waveforms for volume-level encoding."
+        )
+
+    waveform, sr = sf.read(path, dtype="float32", always_2d=False)
+
+    if waveform.ndim > 1:
+        waveform = np.mean(waveform, axis=1)  # Convert to mono by averaging channels
+
+    if sr != target_sr:
+        raise ValueError(f"Expected {target_sr}Hz audio, got {sr}Hz.")
+
+    return waveform, int(sr)
+
+
+def hilbert_envelope(waveform: np.ndarray) -> np.ndarray:
+    """Compute the amplitude envelope of a 1D waveform via the Hilbert transform."""
+
+    data = np.asarray(waveform, dtype=np.float32)
+    if data.ndim != 1:
+        raise ValueError("Expected a 1D waveform for Hilbert envelope computation.")
+
+    envelope = np.abs(hilbert(data))
+    return envelope.astype(np.float32, copy=False)
+
+
+def butterworth_lowpass_envelope(
+    envelope: np.ndarray,
+    sr: int,
+    cutoff_hz: float = 8.0,
+    order: int = 4,
+    zero_phase: bool = True,
+) -> np.ndarray:
+    """Apply a Butterworth low-pass filter to a 1D envelope."""
+
+    if cutoff_hz <= 0:
+        raise ValueError("cutoff_hz must be positive.")
+    if sr <= 0:
+        raise ValueError("Sampling rate must be positive.")
+
+    nyquist = 0.5 * sr
+    if cutoff_hz >= nyquist:
+        raise ValueError("cutoff_hz must be below the Nyquist frequency.")
+
+    data = np.asarray(envelope, dtype=np.float32)
+    if data.ndim != 1:
+        raise ValueError("Expected a 1D envelope for low-pass filtering.")
+
+    sos = butter(order, cutoff_hz / nyquist, btype="low", output="sos")
+
+    if zero_phase:
+        try:
+            filtered = sosfiltfilt(sos, data)
+        except ValueError as exc:
+            warnings.warn(
+                f"Zero-phase filtering failed ({exc}); falling back to causal filtering.",
+                RuntimeWarning,
+            )
+            filtered = sosfilt(sos, data)
+    else:
+        filtered = sosfilt(sos, data)
+
+    return np.asarray(filtered, dtype=np.float32)
+
+
+def resample_envelope(
+    envelope: np.ndarray,
+    sr_in: int,
+    sr_out: int,
+) -> np.ndarray:
+    """Resample an audio envelope to match the target sampling rate."""
+
+    if sr_in <= 0 or sr_out <= 0:
+        raise ValueError("Sampling rates must be positive integers.")
+
+    data = np.asarray(envelope, dtype=np.float32)
+    if data.ndim != 1:
+        raise ValueError("Expected a 1D envelope for resampling.")
+
+    factor = gcd(int(sr_out), int(sr_in))
+    up = int(sr_out // factor)
+    down = int(sr_in // factor)
+
+    resampled = resample_poly(data, up, down)
+    return np.asarray(resampled, dtype=np.float32)
+
+
+def compress_envelope_db(
+    envelope: np.ndarray,
+    eps: Optional[float] = None,
+) -> np.ndarray:
+    """Compress an envelope to a decibel scale with a configurable epsilon."""
+
+    data = np.asarray(envelope, dtype=float)
+    if data.ndim != 1:
+        raise ValueError("Expected a 1D envelope for log compression.")
+
+    data = np.clip(data, 0.0, None)
+
+    if eps is None:
+        eps = max(1e-12, float(data.max()) * 1e-6)
+    elif eps <= 0:
+        raise ValueError("eps must be positive when provided.")
+
+    compressed = 20.0 * np.log10(data + eps)
+    return compressed.astype(np.float32, copy=False)

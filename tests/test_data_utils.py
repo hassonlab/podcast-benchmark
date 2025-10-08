@@ -12,7 +12,17 @@ import mne
 import tempfile
 import os
 from unittest.mock import patch, MagicMock
-from data_utils import get_data, read_electrode_file, load_raws, read_subject_mapping
+from data_utils import (
+    get_data,
+    read_electrode_file,
+    load_raws,
+    read_subject_mapping,
+    load_audio_waveform,
+    hilbert_envelope,
+    butterworth_lowpass_envelope,
+    resample_envelope,
+    compress_envelope_db,
+)
 from config import DataParams
 
 
@@ -801,3 +811,64 @@ class TestReadSubjectMapping:
         assert 5 in electrode_mapping
         assert 12 in electrode_mapping
         assert 8 in electrode_mapping
+
+
+class TestAudioPreprocessingHelpers:
+    """Tests for audio utilities ported from the volume-level notebook."""
+
+    def test_load_audio_waveform_reads_mono_audio(self, tmp_path):
+        soundfile = pytest.importorskip("soundfile")
+
+        sr = 44100
+        duration = 0.1
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        left = np.sin(2 * np.pi * 220 * t)
+        right = np.cos(2 * np.pi * 110 * t)
+        stereo = np.stack([left, right], axis=1).astype(np.float32)
+
+        audio_path = tmp_path / "test_audio.wav"
+        soundfile.write(audio_path, stereo, sr)
+
+        waveform, returned_sr = load_audio_waveform(str(audio_path))
+
+        assert waveform.ndim == 1
+        assert returned_sr == sr
+        np.testing.assert_allclose(waveform, stereo.mean(axis=1), atol=1e-4, rtol=0)
+
+    def test_hilbert_envelope_matches_constant_signal(self):
+        waveform = np.ones(1024, dtype=np.float32)
+        envelope = hilbert_envelope(waveform)
+
+        assert envelope.shape == waveform.shape
+        np.testing.assert_allclose(envelope, np.ones_like(envelope), atol=1e-6)
+
+    def test_butterworth_lowpass_reduces_high_frequency_components(self):
+        sr = 44100
+        t = np.linspace(0, 1, sr, endpoint=False)
+        low_freq = np.sin(2 * np.pi * 2 * t)
+        high_freq = 0.5 * np.sin(2 * np.pi * 200 * t)
+        envelope = low_freq + high_freq
+
+        filtered = butterworth_lowpass_envelope(envelope, sr=sr, cutoff_hz=8.0)
+
+        assert filtered.shape == envelope.shape
+        assert np.std(filtered - low_freq) < np.std(envelope - low_freq)
+
+    def test_resample_envelope_matches_expected_length(self):
+        sr_in = 44100
+        sr_out = 512
+        envelope = np.linspace(0, 1, sr_in, dtype=np.float32)
+
+        resampled = resample_envelope(envelope, sr_in=sr_in, sr_out=sr_out)
+
+        expected_length = int(np.round(len(envelope) * sr_out / sr_in))
+        assert resampled.shape[0] == expected_length
+
+    def test_compress_envelope_db_is_monotonic(self):
+        envelope = np.array([0.01, 0.1, 1.0, 2.0], dtype=np.float32)
+
+        compressed = compress_envelope_db(envelope)
+
+        assert compressed.shape == envelope.shape
+        assert np.all(np.diff(compressed) > 0)
+        assert np.isfinite(compressed).all()
