@@ -27,6 +27,15 @@ def hilbert_envelope(waveform: np.ndarray) -> np.ndarray:
     return envelope.astype(np.float32, copy=False)
 
 
+def _ensure_float32(array: Any) -> np.ndarray:
+    """Return a float32 NumPy array, staying zero-copy when supported."""
+
+    try:
+        return np.asarray(array, dtype=np.float32, copy=False)
+    except TypeError:  # NumPy < 1.20 lacks the ``copy`` keyword for asarray
+        return np.asarray(array, dtype=np.float32)
+
+
 def load_audio_waveform(
     path: str,
     target_sr: int = 44100,
@@ -264,7 +273,7 @@ def bandpass_high_gamma(
         )
         filtered = sosfilt(sos, arr, axis=1)
 
-    filtered = np.asarray(filtered, dtype=np.float32, copy=False)
+    filtered = _ensure_float32(filtered)
     return _restore_shape(filtered, squeeze)
 
 
@@ -368,9 +377,9 @@ def extract_high_gamma_features(
             envelope, eps=None, eps_scale=eps_scale
         )
 
-        filtered_arr = np.atleast_2d(np.asarray(filtered, dtype=np.float32, copy=False))
-        envelope_arr = np.atleast_2d(np.asarray(envelope, dtype=np.float32, copy=False))
-        log_arr = np.atleast_2d(np.asarray(log_envelope, dtype=np.float32, copy=False))
+        filtered_arr = np.atleast_2d(_ensure_float32(filtered))
+        envelope_arr = np.atleast_2d(_ensure_float32(envelope))
+        log_arr = np.atleast_2d(_ensure_float32(log_envelope))
 
         filtered_list.append(filtered_arr)
         envelope_list.append(envelope_arr)
