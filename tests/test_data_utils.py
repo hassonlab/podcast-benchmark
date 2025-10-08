@@ -26,6 +26,7 @@ from data_utils import (
     butterworth_lowpass_envelope,
     resample_envelope,
     compress_envelope_db,
+    zscore_subjects,
 )
 from config import DataParams
 
@@ -898,6 +899,46 @@ class TestLoadIeeGEdfFiles:
         ).astype(np.float32)
         np.testing.assert_allclose(data_list[1], expected, atol=1e-5)
         assert channel_names[1] == ["CH00", "CH01"]
+
+class TestZScoreSubjects:
+    """Validate per-subject z-scoring behaviour."""
+
+    def test_zscore_subjects_normalizes_each_channel(self):
+        rng = np.random.default_rng(123)
+        data_a = rng.normal(loc=2.0, scale=5.0, size=(3, 1024)).astype(np.float32)
+        data_b = rng.normal(loc=-1.0, scale=2.0, size=(2, 512)).astype(np.float32)
+
+        normalized, stats = zscore_subjects([data_a, data_b])
+
+        assert len(normalized) == 2
+        for arr in normalized:
+            means = np.mean(arr, axis=1)
+            stds = np.std(arr, axis=1, ddof=0)
+            np.testing.assert_allclose(means, np.zeros_like(means), atol=1e-6)
+            np.testing.assert_allclose(stds, np.ones_like(stds), atol=1e-6)
+
+        assert stats[0]["n_channels"] == 3
+        assert stats[1]["n_timepoints"] == 512
+
+    def test_zscore_subjects_respects_electrode_subset(self):
+        data = np.array(
+            [
+                np.linspace(0, 1, 8),  # channel 0
+                np.full(8, 10.0),      # channel 1 constant
+            ],
+            dtype=np.float32,
+        )
+
+        normalized, stats = zscore_subjects([data], electrode_groups=[[0]])
+
+        arr = normalized[0]
+        # Channel 0 should be standardised to mean 0, std 1 using itself.
+        np.testing.assert_allclose(arr[0].mean(), 0.0, atol=1e-6)
+        np.testing.assert_allclose(arr[0].std(ddof=0), 1.0, atol=1e-6)
+
+        # Channel 1 falls back to its own stats; constant -> zero after centering.
+        np.testing.assert_allclose(arr[1], np.zeros_like(arr[1]), atol=1e-6)
+        assert stats[0]["global_std"] > 0
 
 class TestAudioPreprocessingHelpers:
     """Tests for audio utilities ported from the volume-level notebook."""
