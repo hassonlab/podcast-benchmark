@@ -242,6 +242,58 @@ def get_data(
 
     return datas, selected_targets, selected_words
 
+# ECoG loading helpers -----------------------------------------------------------------
+
+
+def load_ieeg_edf_files(
+    edf_paths: list[str],
+    target_sampling_rate: Optional[float] = None,
+    preload: bool = True,
+    dtype: np.dtype = np.float32,
+) -> tuple[list[np.ndarray], list[list[str]], list[float]]:
+    """Load iEEG EDF files and optionally resample them to a common sampling rate."""
+
+    data_list: list[np.ndarray] = []
+    channel_names: list[list[str]] = []
+    sampling_rates: list[float] = []
+
+    effective_target_sr = target_sampling_rate
+
+    for path in edf_paths:
+        raw = mne.io.read_raw_edf(path, preload=preload, verbose=False)
+        data = raw.get_data().astype(dtype, copy=False)
+        channels = list(raw.ch_names)
+        sr = float(raw.info["sfreq"])
+
+        if sr <= 0:
+            raise ValueError(
+                f"EDF file '{path}' reported a non-positive sampling rate: {sr}Hz"
+            )
+
+        if effective_target_sr is None:
+            effective_target_sr = sr
+
+        sr_int = int(round(sr))
+        target_sr_int = int(round(effective_target_sr))
+
+        if sr_int != target_sr_int:
+            if target_sr_int <= 0:
+                raise ValueError("target_sampling_rate must be positive when provided.")
+
+            factor = gcd(target_sr_int, sr_int) or 1
+            up = target_sr_int // factor
+            down = sr_int // factor
+
+            data = resample_poly(data, up, down, axis=1).astype(dtype, copy=False)
+            sr = float(target_sr_int)
+
+        data_list.append(data)
+        channel_names.append(channels)
+        sampling_rates.append(sr)
+
+    return data_list, channel_names, sampling_rates
+
+
 # Audio preprocessing helpers for volume-level encoding ---------------------------------
 def load_audio_waveform(
     path: str,

@@ -11,11 +11,15 @@ import pandas as pd
 import mne
 import tempfile
 import os
+from math import gcd
 from unittest.mock import patch, MagicMock
+
+from scipy.signal import resample_poly
 from data_utils import (
     get_data,
     read_electrode_file,
     load_raws,
+    load_ieeg_edf_files,
     read_subject_mapping,
     load_audio_waveform,
     hilbert_envelope,
@@ -812,6 +816,88 @@ class TestReadSubjectMapping:
         assert 12 in electrode_mapping
         assert 8 in electrode_mapping
 
+
+class TestLoadIeeGEdfFiles:
+    """Tests for loading raw EDF iEEG data with consistent sampling rates."""
+
+    @staticmethod
+    def _make_raw(data: np.ndarray, sr: float) -> mne.io.Raw:
+        ch_names = [f"CH{i:02d}" for i in range(data.shape[0])]
+        info = mne.create_info(ch_names=ch_names, sfreq=sr, ch_types="seeg")
+        return mne.io.RawArray(data, info, verbose=False)
+
+    def test_load_ieeg_edf_files_preserves_data_and_metadata(self, monkeypatch):
+        path_a = "sub-01.edf"
+        path_b = "sub-02.edf"
+
+        data_a = np.random.randn(2, 512)
+        data_b = np.random.randn(3, 512)
+
+        raw_map = {
+            path_a: self._make_raw(data_a.copy(), 512),
+            path_b: self._make_raw(data_b.copy(), 512),
+        }
+
+        def fake_read_raw_edf(path, preload=True, verbose=False):
+            return raw_map[path]
+
+        monkeypatch.setattr("data_utils.mne.io.read_raw_edf", fake_read_raw_edf)
+
+        data_list, channel_names, sampling_rates = load_ieeg_edf_files(
+            [path_a, path_b]
+        )
+
+        assert len(data_list) == 2
+        assert len(channel_names) == 2
+        assert sampling_rates == [512.0, 512.0]
+
+        np.testing.assert_allclose(data_list[0], data_a.astype(np.float32), atol=1e-6)
+        np.testing.assert_allclose(data_list[1], data_b.astype(np.float32), atol=1e-6)
+        assert channel_names[0] == ["CH00", "CH01"]
+        assert channel_names[1] == ["CH00", "CH01", "CH02"]
+
+    def test_load_ieeg_edf_files_resamples_mismatched_rate(self, monkeypatch):
+        path_a = "sub-01.edf"
+        path_b = "sub-07.edf"
+
+        sr_target = 512
+        sr_high = 1024
+
+        duration_seconds = 1.0
+        samples_target = int(sr_target * duration_seconds)
+        samples_high = int(sr_high * duration_seconds)
+
+        data_a = np.random.randn(2, samples_target)
+        data_b = np.random.randn(2, samples_high)
+
+        raw_map = {
+            path_a: self._make_raw(data_a.copy(), sr_target),
+            path_b: self._make_raw(data_b.copy(), sr_high),
+        }
+
+        def fake_read_raw_edf(path, preload=True, verbose=False):
+            return raw_map[path]
+
+        monkeypatch.setattr("data_utils.mne.io.read_raw_edf", fake_read_raw_edf)
+
+        data_list, channel_names, sampling_rates = load_ieeg_edf_files(
+            [path_a, path_b], target_sampling_rate=sr_target
+        )
+
+        assert sampling_rates == [float(sr_target), float(sr_target)]
+        assert data_list[0].shape[1] == samples_target
+        assert data_list[1].shape[1] == samples_target
+        assert data_list[1].dtype == np.float32
+
+        # Resampled data should match polyphase resampling applied channel-wise.
+        expected = resample_poly(
+            data_b.astype(np.float32),
+            sr_target // gcd(sr_target, sr_high),
+            sr_high // gcd(sr_target, sr_high),
+            axis=1,
+        ).astype(np.float32)
+        np.testing.assert_allclose(data_list[1], expected, atol=1e-5)
+        assert channel_names[1] == ["CH00", "CH01"]
 
 class TestAudioPreprocessingHelpers:
     """Tests for audio utilities ported from the volume-level notebook."""
