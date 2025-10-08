@@ -1,20 +1,14 @@
 import os
-import warnings
 from math import gcd
 
-from typing import Optional, Sequence
+from typing import Optional
 
 import numpy as np
 import mne
 from mne_bids import BIDSPath
 import pandas as pd
 
-try:
-    import soundfile as sf
-except ImportError:
-    sf = None
-
-from scipy.signal import butter, hilbert, resample_poly, sosfilt, sosfiltfilt
+from scipy.signal import resample_poly
 
 from config import DataParams
 
@@ -292,88 +286,6 @@ def load_ieeg_edf_files(
 
     return data_list, channel_names, sampling_rates
 
-
-# Normalization helpers -----------------------------------------------------------------
-
-
-def _validate_channel_indices(
-    n_channels: int, picks: Optional[Sequence[int]] = None
-) -> np.ndarray:
-    """Return valid channel indices limited to the available range."""
-
-    if picks is None:
-        return np.arange(n_channels, dtype=int)
-    cleaned = sorted(
-        {
-            int(idx)
-            for idx in picks
-            if idx is not None and 0 <= int(idx) < n_channels
-        }
-    )
-    return np.asarray(cleaned if cleaned else range(n_channels), dtype=int)
-
-
-def _channelwise_mean_std(
-    data: np.ndarray, picks: Optional[Sequence[int]] = None, eps: float = 1e-8
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute per-channel mean and std, optionally restricted to a subset."""
-
-    if data.ndim != 2:
-        raise ValueError(
-            f"Expected (channels, time) input; received shape {data.shape}."
-        )
-
-    data64 = np.asarray(data, dtype=np.float64)
-    means = np.nanmean(data64, axis=1, keepdims=True)
-    stds = np.nanstd(data64, axis=1, keepdims=True)
-    stds = np.where(~np.isfinite(stds) | (stds < eps), eps, stds)
-
-    if picks is not None:
-        idx = _validate_channel_indices(data.shape[0], picks)
-        means[idx] = np.nanmean(data64[idx], axis=1, keepdims=True)
-        stds[idx] = np.nanstd(data64[idx], axis=1, keepdims=True)
-        stds[idx] = np.where(~np.isfinite(stds[idx]) | (stds[idx] < eps), eps, stds[idx])
-
-    return means.astype(np.float64), stds.astype(np.float64)
-
-
-def zscore_subjects(
-    data_list: Sequence[np.ndarray],
-    electrode_groups: Optional[Sequence[Optional[Sequence[int]]]] = None,
-    eps: float = 1e-8,
-) -> tuple[list[np.ndarray], dict[int, dict[str, float]]]:
-    """Per-subject, per-channel z-score normalization for broadband ECoG."""
-
-    normalized: list[np.ndarray] = []
-    stats: dict[int, dict[str, float]] = {}
-
-    for sid, data in enumerate(data_list):
-        arr = np.asarray(data, dtype=np.float32)
-        picks = None
-        if electrode_groups is not None and sid < len(electrode_groups):
-            picks = electrode_groups[sid]
-
-        means, stds = _channelwise_mean_std(arr, picks=picks, eps=eps)
-        arr_norm = ((arr.astype(np.float64, copy=False) - means) / stds).astype(
-            np.float32,
-            copy=False,
-        )
-        normalized.append(arr_norm)
-
-        post_mean = float(np.nanmean(arr_norm))
-        post_std = float(np.nanstd(arr_norm))
-        stats[sid] = {
-            "global_mean": float(np.nanmean(means)),
-            "global_std": float(np.nanmean(stds)),
-            "post_mean": post_mean,
-            "post_std": post_std,
-            "n_channels": int(arr.shape[0]),
-            "n_timepoints": int(arr.shape[1]),
-        }
-
-    return normalized, stats
-
-
 # Audio preprocessing helpers for volume-level encoding ---------------------------------
 def load_audio_waveform(
     path: str,
@@ -411,19 +323,6 @@ def load_audio_waveform(
         raise ValueError(f"Expected {target_sr}Hz audio, got {sr}Hz.")
 
     return waveform, int(sr)
-
-
-def hilbert_envelope(waveform: np.ndarray) -> np.ndarray:
-    """Compute the amplitude envelope of a 1D waveform via the Hilbert transform."""
-
-    data = np.asarray(waveform, dtype=np.float32)
-    if data.ndim != 1:
-        raise ValueError("Expected a 1D waveform for Hilbert envelope computation.")
-
-    envelope = np.abs(hilbert(data))
-    return envelope.astype(np.float32, copy=False)
-
-
 def butterworth_lowpass_envelope(
     envelope: np.ndarray,
     sr: int,
@@ -480,27 +379,3 @@ def resample_envelope(
     factor = gcd(int(sr_out), int(sr_in))
     up = int(sr_out // factor)
     down = int(sr_in // factor)
-
-    resampled = resample_poly(data, up, down)
-    return np.asarray(resampled, dtype=np.float32)
-
-
-def compress_envelope_db(
-    envelope: np.ndarray,
-    eps: Optional[float] = None,
-) -> np.ndarray:
-    """Compress an envelope to a decibel scale with a configurable epsilon."""
-
-    data = np.asarray(envelope, dtype=float)
-    if data.ndim != 1:
-        raise ValueError("Expected a 1D envelope for log compression.")
-
-    data = np.clip(data, 0.0, None)
-
-    if eps is None:
-        eps = max(1e-12, float(data.max()) * 1e-6)
-    elif eps <= 0:
-        raise ValueError("eps must be positive when provided.")
-
-    compressed = 20.0 * np.log10(data + eps)
-    return compressed.astype(np.float32, copy=False)
