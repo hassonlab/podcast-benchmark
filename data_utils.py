@@ -6,7 +6,50 @@ import mne
 from mne_bids import BIDSPath
 import pandas as pd
 
+try:  
+    import soundfile as sf
+except ImportError: 
+    sf = None
+
 from config import DataParams
+
+
+def load_audio_waveform(
+    path: str,
+    target_sr: int = 44100,
+) -> tuple[np.ndarray, int]:
+    """Load mono audio data with the assumptions used in volume-level notebooks.
+
+    Args:
+        path: Absolute path to the audio file on disk.
+        target_sr: Expected sampling rate in Hz. Defaults to 44,100 Hz.
+
+    Returns:
+        Tuple of waveform (1-D NumPy array) and sampling rate.
+
+    Raises:
+        FileNotFoundError: Raised if the audio path does not exist.
+        ImportError: Raised if ``soundfile`` is not available.
+        ValueError: Raised when the sampling rate on disk differs from ``target_sr``.
+    """
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    if sf is None:
+        raise ImportError(
+            "soundfile is required to load audio waveforms for volume-level encoding."
+        )
+
+    waveform, sr = sf.read(path, dtype="float32", always_2d=False)
+
+    if waveform.ndim > 1:
+        waveform = np.mean(waveform, axis=1)
+
+    if sr != target_sr:
+        raise ValueError(f"Expected {target_sr}Hz audio, got {sr}Hz.")
+
+    return waveform, int(sr)
 
 
 def load_raws(data_params: DataParams):
