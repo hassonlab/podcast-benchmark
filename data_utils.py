@@ -14,6 +14,25 @@ from config import DataParams
 import registry
 
 
+def _as_float_array(data: np.ndarray) -> np.ndarray:
+    """Validate neural data array and ensure float32 dtype."""
+
+    arr = np.asarray(data, dtype=np.float32)
+    if arr.ndim < 2:
+        raise ValueError(
+            "Neural preprocessors expect data with at least two dimensions (examples, channels, ...)."
+        )
+    return arr
+
+
+def _get_channel_axis(data: np.ndarray) -> int:
+    """Return the axis index corresponding to channels for neural arrays."""
+
+    if data.ndim == 2:
+        return 1
+    return 1  # shape presumed (examples, channels, samples, ...)
+
+
 def load_raws(data_params: DataParams):
     """
     Loads raw iEEG data for multiple subjects based on specified parameters.
@@ -268,6 +287,113 @@ def window_rms_preprocessor(
     mean_sq = squared.mean(axis=-1)
     rms = np.sqrt(np.maximum(mean_sq, 0.0))
     return rms.astype(np.float32, copy=False)
+
+
+@registry.register_data_preprocessor("log_transform")
+def log_transform_preprocessor(
+    data: np.ndarray, preprocessor_params: Optional[dict] = None
+) -> np.ndarray:
+    """Apply a logarithmic compression to neural amplitudes.
+
+    Args:
+        data (np.ndarray): Neural data with shape ``(n_examples, n_channels, ...)``.
+        preprocessor_params (dict, optional): Supported keys:
+            - ``epsilon`` (float): Minimum offset added before the log. Defaults to 1e-6.
+            - ``clip_min`` (float): Lower bound applied before the log. Defaults to 0.0.
+            - ``log_base`` (float or str): ``10`` (default), ``"e"`` or a custom base > 0 and != 1.
+            - ``scale`` (float): Optional scaling multiplier applied after the log. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: Log-compressed amplitudes with the same shape as the input.
+    """
+
+    arr = _as_float_array(data)
+    params = preprocessor_params or {}
+
+    epsilon = float(params.get("epsilon", 1e-6))
+    clip_min = float(params.get("clip_min", 0.0))
+    scale = float(params.get("scale", 1.0))
+    base = params.get("log_base", 10.0)
+
+    if epsilon <= 0:
+        raise ValueError("epsilon must be positive for log_transform_preprocessor.")
+
+    arr64 = arr.astype(np.float64, copy=False)
+    clipped = np.clip(arr64, clip_min, None)
+    shifted = clipped + epsilon
+
+    if isinstance(base, str):
+        if base.lower() == "e":
+            log_values = np.log(shifted)
+        elif base.lower() == "10":
+            log_values = np.log10(shifted)
+        else:
+            raise ValueError("log_base string must be 'e' or '10'.")
+    else:
+        base = float(base)
+        if base <= 0 or np.isclose(base, 1.0):
+            raise ValueError("log_base must be > 0 and != 1.")
+        log_values = np.log(shifted) / np.log(base)
+
+    if scale != 1.0:
+        log_values *= scale
+
+    return log_values.astype(np.float32, copy=False)
+
+
+@registry.register_data_preprocessor("zscore")
+def zscore_preprocessor(
+    data: np.ndarray, preprocessor_params: Optional[dict] = None
+) -> np.ndarray:
+    """Standardize each channel independently across all observations.
+
+    Args:
+        data (np.ndarray): Neural data shaped ``(n_examples, n_channels, ...)``.
+        preprocessor_params (dict, optional): Supported keys:
+            - ``epsilon`` (float): Minimum standard deviation. Defaults to 1e-6.
+            If ``channel_means`` and ``channel_stds`` are not provided they are computed and,
+            when ``preprocessor_params`` is a mutable dict, stored back into it as float32 arrays.
+
+    Returns:
+        np.ndarray: Z-scored data with the same shape as the input.
+
+    Raises:
+        ValueError: If provided statistics have mismatched shapes.
+    """
+
+    arr = _as_float_array(data)
+    params = preprocessor_params if preprocessor_params is not None else {}
+
+    epsilon = float(params.get("epsilon", 1e-6))
+    channel_axis = _get_channel_axis(arr)
+
+    channel_first = np.moveaxis(arr, channel_axis, 0)
+    flat = channel_first.reshape(channel_first.shape[0], -1)
+    flat64 = flat.astype(np.float64, copy=False)
+
+    means = params.get("channel_means")
+    stds = params.get("channel_stds")
+
+    if means is not None and stds is not None:
+        means = np.asarray(means, dtype=np.float64).reshape(-1, 1)
+        stds = np.asarray(stds, dtype=np.float64).reshape(-1, 1)
+        if means.shape[0] != flat64.shape[0] or stds.shape[0] != flat64.shape[0]:
+            raise ValueError(
+                "channel_means and channel_stds must match the number of channels in data."
+            )
+    else:
+        means = np.nanmean(flat64, axis=1, keepdims=True)
+        stds = np.nanstd(flat64, axis=1, keepdims=True)
+        if preprocessor_params is not None:
+            preprocessor_params["channel_means"] = means.squeeze(-1).astype(np.float32)
+            preprocessor_params["channel_stds"] = stds.squeeze(-1).astype(np.float32)
+
+    stds = np.where(~np.isfinite(stds) | (stds < epsilon), epsilon, stds)
+    normalized = (flat64 - means) / stds
+    normalized = normalized.reshape(channel_first.shape)
+
+    normalized = np.moveaxis(normalized, 0, channel_axis)
+    return normalized.astype(np.float32, copy=False)
 
 
 def load_ieeg_edf_files(

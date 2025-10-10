@@ -299,7 +299,7 @@ def _prepare_ridge_plot_data(results):
 
 
 def plot_ridge_results(results, *, show: bool = True):
-    """Visualise ridge lag search outputs from :func:`ridge_utils.ridge_r2_by_lag`.
+    """Visualise ridge lag search outputs from :func:`volume_level_ridge.ridge_r2_by_lag`.
 
     Args:
         results: Dictionary returned by ``ridge_r2_by_lag``.
