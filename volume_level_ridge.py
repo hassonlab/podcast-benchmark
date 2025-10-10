@@ -7,12 +7,21 @@ lag sweeps for the volume-level encoding task.
 
 from __future__ import annotations
 
+import ast
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
+import pandas as pd
 import torch
 from sklearn.model_selection import KFold
+
+import plot_utils
+from config import ExperimentConfig, TrainingParams
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -328,3 +337,305 @@ def ridge_r2_by_lag(
     results["cv_splits"] = np.asarray(results["cv_splits"], dtype=int)
 
     return results
+
+
+def _materialize_sequence(value):
+    if isinstance(value, range):
+        return list(value)
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return list(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("range(") and text.endswith(")"):
+            inner = text[6:-1]
+            if inner:
+                parts = [int(part.strip()) for part in inner.split(",")]
+                return list(range(*parts))
+            return []
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            return value
+        if isinstance(parsed, range):
+            return list(parsed)
+        if isinstance(parsed, (list, tuple, np.ndarray)):
+            return list(parsed)
+        return parsed
+    return value
+
+
+def _ensure_directory(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _infer_target_sr(df: pd.DataFrame, data_params) -> float:
+    tp = getattr(data_params, "task_params", {}) or {}
+    sr = tp.get("target_sr")
+    if sr is not None:
+        return float(sr)
+
+    if "start" not in df.columns:
+        raise ValueError("volume_level_encoding_task must return a 'start' column")
+
+    starts = df["start"].to_numpy(dtype=float)
+    if starts.size < 2:
+        raise ValueError(
+            "Unable to infer sampling rate from targets; provide task_params.target_sr."
+        )
+
+    deltas = np.diff(starts)
+    positive = deltas[deltas > 0]
+    if positive.size == 0:
+        raise ValueError("Unable to infer sampling rate (no positive start deltas)")
+
+    mean_step = float(np.mean(positive))
+    if mean_step <= 0:
+        raise ValueError("Mean start increment must be positive to infer sampling rate")
+
+    return 1.0 / mean_step
+
+
+def _load_neural_matrix_from_raws(
+    raws: Sequence,
+    target_sr: float,
+    allow_resample: bool,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    neural_arrays: list[np.ndarray] = []
+    for raw in raws:
+        if raw is None:
+            continue
+        data = raw.get_data().astype(np.float32, copy=False)
+        neural_arrays.append(data)
+
+    if not neural_arrays:
+        raise ValueError("No neural recordings provided; check subject_ids and data paths")
+
+    min_len = min(arr.shape[1] for arr in neural_arrays)
+    trimmed = [np.ascontiguousarray(arr[:, :min_len], dtype=np.float32) for arr in neural_arrays]
+    neural_stacked = np.concatenate(trimmed, axis=0)
+    return neural_stacked, trimmed
+
+
+def _prepare_audio_neural_alignment(
+    audio: np.ndarray, neural: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    min_len = min(audio.shape[0], neural.shape[1])
+    if min_len <= 0:
+        raise ValueError("Audio and neural data do not share any overlapping samples")
+
+    if audio.shape[0] != min_len or neural.shape[1] != min_len:
+        logger.info(
+            "Trimming audio/neural length to %d samples for alignment (audio=%d, neural=%d)",
+            min_len,
+            audio.shape[0],
+            neural.shape[1],
+        )
+    return audio[:min_len], neural[:, :min_len]
+
+
+def _lag_grid_from_training(training_params: TrainingParams) -> np.ndarray:
+    if training_params.lag is not None:
+        return np.asarray([float(training_params.lag)], dtype=float)
+    return np.arange(
+        training_params.min_lag,
+        training_params.max_lag,
+        training_params.lag_step_size,
+        dtype=float,
+    )
+
+
+def _resolve_output_path(base_dir: str, candidate: Optional[str], default_name: str) -> Path:
+    if not candidate:
+        return Path(base_dir) / default_name
+    path = Path(candidate)
+    if not path.is_absolute():
+        path = Path(base_dir) / path
+    return path
+
+
+def run_volume_level_ridge_from_config(
+    experiment_config: ExperimentConfig,
+    raws: Sequence,
+    df_targets: pd.DataFrame,
+    output_dir: str,
+    model_dir: Optional[str] = None,
+) -> dict[str, np.ndarray]:
+    model_params = experiment_config.model_params or {}
+
+    requested_subject_ids = _materialize_sequence(experiment_config.data_params.subject_ids)
+    if requested_subject_ids is None:
+        subject_ids = list(range(len(raws)))
+    else:
+        subject_ids = [int(s) for s in requested_subject_ids]
+        if len(subject_ids) < len(raws):
+            subject_ids.extend(range(len(subject_ids), len(raws)))
+        subject_ids = subject_ids[: len(raws)]
+    experiment_config.data_params.subject_ids = subject_ids
+
+    audio = df_targets["target"].to_numpy(dtype=np.float32)
+    sampling_rate_hz = _infer_target_sr(df_targets, experiment_config.data_params)
+
+    neural_stacked, per_subject_neural = _load_neural_matrix_from_raws(
+        raws,
+        sampling_rate_hz,
+        bool(model_params.get("allow_neural_resample", False)),
+    )
+
+    requested_modes = model_params.get("analysis_modes")
+    if requested_modes is None:
+        analysis_modes = {"pooled_electrodes"}
+    else:
+        analysis_modes = {str(mode) for mode in requested_modes if mode}
+        if not analysis_modes:
+            analysis_modes = {"pooled_electrodes"}
+
+    lags = _lag_grid_from_training(experiment_config.training_params)
+
+    alphas = model_params.get("alphas")
+    alphas = _materialize_sequence(alphas) if alphas is not None else None
+    if alphas is not None and len(alphas) == 0:
+        alphas = None
+    if alphas is not None:
+        alphas = [float(alpha) for alpha in alphas]
+
+    ridge_kwargs = {
+        "alphas": alphas,
+        "cv_splits": int(model_params.get("cv_splits", 10)),
+        "device": model_params.get("device"),
+        "random_state": model_params.get("random_state", 0),
+        "verbose": bool(model_params.get("verbose", False)),
+    }
+
+    results_catalog: dict[str, object] = {}
+
+    output_path = _resolve_output_path(
+        output_dir,
+        model_params.get("output_csv"),
+        "ridge_summary.csv",
+    )
+
+    if "pooled_electrodes" in analysis_modes:
+        audio_pooled, neural_pooled = _prepare_audio_neural_alignment(audio, neural_stacked)
+        pooled_results = ridge_r2_by_lag(
+            audio_pooled,
+            neural_pooled,
+            sampling_rate_hz,
+            lags,
+            **ridge_kwargs,
+        )
+
+        if not pooled_results or len(pooled_results.get("lag_ms", [])) == 0:
+            raise RuntimeError("Ridge sweep produced no results; check configuration")
+
+        results_catalog["pooled_electrodes"] = pooled_results
+
+        _ensure_directory(output_path)
+        pd.DataFrame(pooled_results).to_csv(output_path, index=False)
+        logger.info("Wrote ridge sweep summary to %s", output_path)
+
+        plot_requested = bool(model_params.get("plot", False))
+        save_plot_path = model_params.get("save_plot_path")
+        if plot_requested or save_plot_path:
+            fig, _axes = plot_utils.plot_ridge_results(pooled_results, show=plot_requested)
+            if save_plot_path:
+                fig_path = _resolve_output_path(output_dir, save_plot_path, "ridge_plot.png")
+                fig_path.parent.mkdir(parents=True, exist_ok=True)
+                fig.savefig(fig_path, bbox_inches="tight")
+                logger.info("Saved ridge diagnostic plot to %s", fig_path)
+
+        best_idx = int(np.argmax(pooled_results["r2"]))
+        best_alpha = None
+        if "alpha" in pooled_results and len(pooled_results["alpha"]) > best_idx:
+            best_alpha = pooled_results["alpha"][best_idx]
+        logger.info(
+            "Best (pooled) lag %.1f ms with R^2=%.4f and alpha=%s",
+            pooled_results["lag_ms"][best_idx],
+            pooled_results["r2"][best_idx],
+            best_alpha,
+        )
+
+    per_subject_results: dict[int, dict[str, np.ndarray]] = {}
+    if "per_subject" in analysis_modes:
+        per_subject_dir = output_path.parent / "per_subject"
+        per_subject_dir.mkdir(parents=True, exist_ok=True)
+
+        for subj_idx, neural_subject in enumerate(per_subject_neural):
+            try:
+                subject_id = subject_ids[subj_idx]
+            except IndexError:
+                subject_id = subj_idx
+
+            audio_sub, neural_sub = _prepare_audio_neural_alignment(audio, neural_subject)
+            subject_results = ridge_r2_by_lag(
+                audio_sub,
+                neural_sub,
+                sampling_rate_hz,
+                lags,
+                **ridge_kwargs,
+            )
+
+            if not subject_results or len(subject_results.get("lag_ms", [])) == 0:
+                logger.warning("Subject %s produced no usable lags; skipping CSV export.", subject_id)
+                continue
+
+            per_subject_results[subject_id] = subject_results
+            results_catalog.setdefault("per_subject", {})[subject_id] = subject_results
+
+            df_subject = pd.DataFrame(subject_results)
+            df_subject.insert(0, "subject_id", subject_id)
+            df_subject["n_input_channels"] = int(neural_subject.shape[0])
+            subject_path = per_subject_dir / f"subject_{subject_id}_ridge.csv"
+            df_subject.to_csv(subject_path, index=False)
+            logger.info("Wrote per-subject ridge curve for %s to %s", subject_id, subject_path)
+
+            subj_best_idx = int(np.argmax(subject_results["r2"]))
+            subj_best_alpha = None
+            if "alpha" in subject_results and len(subject_results["alpha"]) > subj_best_idx:
+                subj_best_alpha = subject_results["alpha"][subj_best_idx]
+            logger.info(
+                "Subject %s best lag %.1f ms with R^2=%.4f and alpha=%s",
+                subject_id,
+                subject_results["lag_ms"][subj_best_idx],
+                subject_results["r2"][subj_best_idx],
+                subj_best_alpha,
+            )
+
+    if "average" in analysis_modes:
+        if not per_subject_results:
+            logger.warning(
+                "Average analysis requested but no per-subject results were generated; skipping average curve."
+            )
+        else:
+            combined_frames: list[pd.DataFrame] = []
+            for subject_id, subject_results in per_subject_results.items():
+                df = pd.DataFrame(subject_results)
+                df["subject_id"] = subject_id
+                combined_frames.append(df)
+
+            combined_df = pd.concat(combined_frames, ignore_index=True)
+            averaged_df = combined_df.groupby("lag_ms", as_index=False).agg(
+                r2_mean=("r2", "mean"),
+                r2_std=("r2", "std"),
+                train_r2=("train_r2", "mean"),
+                alpha=("alpha", "mean"),
+                coef_norm=("coef_norm", "mean"),
+                n_features=("n_features", "mean"),
+                n_subjects=("subject_id", "nunique"),
+            )
+            averaged_df["r2"] = averaged_df["r2_mean"]
+            results_catalog["average"] = {
+                "curve": averaged_df,
+                "per_subject": combined_df,
+            }
+
+            average_path = output_path.parent / "average_ridge.csv"
+            averaged_df.to_csv(average_path, index=False)
+            logger.info("Wrote average ridge curve to %s", average_path)
+
+    if "pooled_electrodes" in results_catalog and len(results_catalog) == 1:
+        return results_catalog["pooled_electrodes"]  # Backwards compatibility
+
+    if results_catalog:
+        results_catalog["analysis_modes"] = sorted(analysis_modes)
+
+    return results_catalog

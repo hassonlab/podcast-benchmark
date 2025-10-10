@@ -1,0 +1,50 @@
+model_constructor_name: volume_level_ridge
+task_name: volume_level_encoding_task
+trial_name: volume_level_ridge
+output_dir: results
+model_dir: models
+tensorboard_dir: event_logs
+
+data_params:
+  data_root: data
+  subject_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  channel_reg_ex: null
+  window_width: -1
+  task_params:
+    audio_path: stimuli/podcast.wav
+    target_sr: 512
+    cutoff_hz: 8.0
+    butter_order: 4
+    zero_phase: true
+    allow_resample_audio: true
+    window_size: 200.0
+    hop_size: 25.0
+
+training_params:
+  min_lag: -1000
+  max_lag: 1010
+  lag_step_size: 10
+  lag: null
+  batch_size: 1
+  epochs: 1
+  n_folds: 1
+
+model_params:
+  alphas: null
+  cv_splits: 10
+  device: null
+  verbose: true
+  output_csv: ridge_summary.csv
+  plot: false
+  save_plot_path: ridge_plot.png
+  allow_neural_resample: false
+  analysis_modes:
+    - pooled_electrodes
+    - per_subject
+    - average
+
+notes: |
+  This configuration assumes preprocessed high-gamma data sampled at 512 Hz
+  and a mono podcast waveform stored under data/stimuli/podcast.wav.
+  Enable `allow_neural_resample` if your neural recordings use a different
+  sampling rate and you are comfortable with on-the-fly resampling.
