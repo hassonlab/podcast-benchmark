@@ -1,6 +1,12 @@
+import math
 import os
+import warnings
 
+import numpy as np
 import pandas as pd
+
+from scipy.io import wavfile
+from scipy.signal import butter, hilbert, resample_poly, sosfilt, sosfiltfilt
 from sklearn.decomposition import PCA
 
 from config import DataParams
@@ -9,6 +15,191 @@ import registry
 
 
 @registry.register_task_data_getter()
+def volume_level_encoding_task(data_params: DataParams):
+    """Prepare continuous audio-intensity targets for decoding.
+
+      1. Load the podcast waveform from disk.
+      2. Compute the Hilbert envelope and apply a Butterworth low-pass filter.
+      3. Resample the envelope to match neural sampling rate expectations.
+      4. Log-compress the envelope to produce perceptual loudness values.
+
+    Optional sliding-window aggregation can be enabled via ``task_params`` by
+    specifying window and hop sizes (ms). Targets are timestamped at the
+    window centers, and each window is reduced to a single RMS value.
+
+    Args:
+        data_params (DataParams): Configuration object containing data paths,
+            neural sampling rate, and task-specific parameters.
+
+    Returns:
+        pd.DataFrame: Continuous targets with columns ``start`` (seconds) and
+        ``target`` (log-amplitude or windowed representation) ready for the
+        decoding pipeline.
+    """
+
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    audio_rel_path = tp.get("audio_path", os.path.join("stimuli", "podcast.wav"))
+    target_sr = int(tp.get("target_sr", 512))
+    expected_audio_sr = int(tp.get("audio_sr", 44100))
+    cutoff_hz = float(tp.get("cutoff_hz", 8.0))
+    butter_order = int(tp.get("butter_order", 4))
+    zero_phase = bool(tp.get("zero_phase", True))
+    log_eps = tp.get("log_eps")
+    allow_audio_resample = bool(tp.get("allow_resample_audio", False))
+    window_size_ms = tp.get("window_size")
+    hop_size_ms = tp.get("hop_size")
+
+    audio_path = audio_rel_path if os.path.isabs(audio_rel_path) else os.path.join(
+        data_params.data_root, audio_rel_path
+    )
+
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found at '{audio_path}'.")
+
+    sr, waveform = wavfile.read(audio_path)
+
+    if waveform.size == 0:
+        raise ValueError(f"Loaded empty audio file from '{audio_path}'.")
+
+    if sr != expected_audio_sr:
+        if allow_audio_resample:
+            warnings.warn(
+                f"Audio sample rate {sr} Hz does not match expected {expected_audio_sr} Hz. "
+                "Continuing with the actual sample rate.",
+                RuntimeWarning,
+            )
+        else:
+            raise ValueError(
+                f"Expected audio sampled at {expected_audio_sr} Hz, got {sr} Hz. "
+                "Provide a file with the expected rate or enable 'allow_resample_audio'."
+            )
+
+    if waveform.ndim > 1:
+        waveform = waveform.mean(axis=1)
+
+    if np.issubdtype(waveform.dtype, np.integer):
+        info = np.iinfo(waveform.dtype)
+        max_abs = max(abs(info.min), abs(info.max)) or 1
+        waveform = waveform.astype(np.float32) / float(max_abs)
+    else:
+        waveform = waveform.astype(np.float32)
+
+    analytic_signal = hilbert(waveform)
+    envelope = np.abs(analytic_signal)
+
+    if cutoff_hz <= 0:
+        raise ValueError("'cutoff_hz' must be positive.")
+
+    nyquist = 0.5 * sr
+    if cutoff_hz >= nyquist:
+        raise ValueError(f"'cutoff_hz' ({cutoff_hz}) must be below Nyquist ({nyquist}).")
+
+    sos = butter(butter_order, cutoff_hz / nyquist, btype="low", output="sos")
+
+    if zero_phase:
+        try:
+            smoothed = sosfiltfilt(sos, envelope)
+        except ValueError as exc:
+            warnings.warn(
+                f"Zero-phase filtering failed ({exc}); falling back to causal filtering.",
+                RuntimeWarning,
+            )
+            smoothed = sosfilt(sos, envelope)
+    else:
+        smoothed = sosfilt(sos, envelope)
+
+    if target_sr <= 0:
+        raise ValueError("'target_sr' must be positive.")
+
+    g = math.gcd(target_sr, sr)
+    up = target_sr // g
+    down = sr // g
+    envelope_ds = resample_poly(smoothed, up, down)
+
+    envelope_ds = np.clip(envelope_ds, 0.0, None)
+    if log_eps is None:
+        peak = float(envelope_ds.max()) if envelope_ds.size else 0.0
+        log_eps = max(1e-12, peak * 1e-6)
+    env_db = 20.0 * np.log10(envelope_ds + float(log_eps))
+
+    n_samples = env_db.shape[0]
+
+    if window_size_ms is None:
+        times = np.arange(n_samples, dtype=np.float32) / float(target_sr)
+        df = pd.DataFrame(
+            {
+                "start": times.astype(np.float32),
+                "target": env_db.astype(np.float32),
+            }
+        )
+        df.attrs["window_params"] = None
+        return df
+
+    try:
+        width_ms = float(window_size_ms)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("'window_size' must be convertible to milliseconds.") from exc
+    if width_ms <= 0:
+        raise ValueError("'window_size' must be > 0 milliseconds.")
+
+    stride_ms = float(hop_size_ms) if hop_size_ms is not None else width_ms
+    if stride_ms <= 0:
+        raise ValueError("'hop_size' must be > 0 milliseconds.")
+
+    width = width_ms / 1000.0
+    stride = stride_ms / 1000.0
+
+    window_samples = max(1, int(round(width * target_sr)))
+    hop_samples = max(1, int(round(stride * target_sr)))
+
+    if window_samples > n_samples:
+        raise ValueError(
+            f"Requested window of {window_samples} samples exceeds envelope length {n_samples}."
+        )
+
+    starts = np.arange(0, n_samples - window_samples + 1, hop_samples, dtype=int)
+    if starts.size == 0:
+        raise ValueError(
+            "hop_size/window_size combination produced zero windows; adjust parameters."
+        )
+
+    env64 = env_db.astype(np.float64, copy=False)
+    series = env64 * env64
+    cumsum = np.cumsum(series, dtype=np.float64)
+    cumsum = np.concatenate(([0.0], cumsum))
+    start_vals = cumsum[starts]
+    end_vals = cumsum[starts + window_samples]
+    window_means = (end_vals - start_vals) / float(window_samples)
+    targets = np.sqrt(window_means, dtype=np.float64).astype(np.float32)
+
+    centers = (starts + (window_samples - 1) / 2.0) / float(target_sr)
+
+    if targets.ndim == 1:
+        target_column = targets
+    else:
+        target_column = [window for window in targets]
+
+    df = pd.DataFrame(
+        {
+            "start": centers.astype(np.float32),
+            "target": target_column,
+        }
+    )
+
+    df.attrs["window_params"] = {
+        "window_size_ms": width_ms,
+        "hop_size_ms": stride_ms,
+        "window_size_s": width,
+        "hop_size_s": stride,
+        "window_samples": window_samples,
+        "hop_samples": hop_samples,
+    "window_reduction": "rms",
+    }
+
+    return df
+
+
 def sentence_onset_task(data_params: DataParams):
     """
     Binary classification dataset for sentence onset detection.
