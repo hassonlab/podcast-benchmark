@@ -11,6 +11,7 @@ import pandas as pd
 from scipy.signal import resample_poly
 
 from config import DataParams
+import registry
 
 
 def load_raws(data_params: DataParams):
@@ -236,6 +237,37 @@ def get_data(
         datas = preprocessing_fn(datas, preprocessor_params)
 
     return datas, selected_targets, selected_words
+
+
+@registry.register_data_preprocessor("window_rms")
+def window_rms_preprocessor(
+    data: np.ndarray, preprocessor_params: Optional[dict] = None
+) -> np.ndarray:
+    """Reduce each neural window to root-mean-square (RMS) amplitudes.
+
+    Args:
+        data (np.ndarray): Neural windows shaped ``(n_examples, n_channels, n_samples)``.
+        preprocessor_params (dict, optional): Currently unused but kept for
+            parity with other preprocessors.
+
+    Returns:
+        np.ndarray: RMS features shaped ``(n_examples, n_channels)`` where each
+        value is ``sqrt(mean(window**2))`` for the corresponding channel.
+
+    Raises:
+        ValueError: If ``data`` does not have three dimensions.
+    """
+
+    if data.ndim != 3:
+        raise ValueError(
+            "window_rms_preprocessor expects data with shape (examples, channels, samples)."
+        )
+
+    # Use float64 during accumulation for numerical stability, then cast back.
+    squared = np.square(data, dtype=np.float64)
+    mean_sq = squared.mean(axis=-1)
+    rms = np.sqrt(np.maximum(mean_sq, 0.0))
+    return rms.astype(np.float32, copy=False)
 
 
 def load_ieeg_edf_files(

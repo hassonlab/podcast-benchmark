@@ -21,6 +21,7 @@ from data_utils import (
     load_raws,
     load_ieeg_edf_files,
     read_subject_mapping,
+    window_rms_preprocessor,
 )
 from config import DataParams
 
@@ -230,6 +231,38 @@ class TestGetDataOutOfBounds:
         assert data.shape[0] == expected_valid_events
         assert len(targets) == expected_valid_events
         assert len(words) == expected_valid_events
+
+
+class TestWindowRMSPreprocessor:
+    """Validate the RMS neural window preprocessor."""
+
+    def test_window_rms_outputs_expected_values(self):
+        data = np.array(
+            [
+                [[0.0, 3.0, 4.0, 0.0], [1.0, -1.0, 1.0, -1.0]],
+                [[2.0, 2.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]],
+            ],
+            dtype=np.float32,
+        )
+
+        rms = window_rms_preprocessor(data)
+
+        expected = np.array(
+            [
+                [2.5, 1.0],
+                [np.sqrt(2.5), 0.0],
+            ],
+            dtype=np.float32,
+        )
+
+        assert rms.shape == (2, 2)
+        assert rms.dtype == np.float32
+        np.testing.assert_allclose(rms, expected, rtol=1e-6)
+
+    def test_window_rms_rejects_invalid_shape(self):
+        bad_input = np.zeros((3, 4), dtype=np.float32)
+        with pytest.raises(ValueError, match="expects data with shape"):
+            window_rms_preprocessor(bad_input)
 
 
 @pytest.fixture
