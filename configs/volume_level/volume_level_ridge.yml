@@ -37,14 +37,17 @@ model_params:
   output_csv: ridge_summary.csv
   plot: false
   save_plot_path: ridge_plot.png
-  allow_neural_resample: false
   analysis_modes:
     - pooled_electrodes
     - per_subject
     - average
+  neural_log_compress: true
+  neural_log_eps_scale: 0.000001
 
 notes: |
   This configuration assumes preprocessed high-gamma data sampled at 512 Hz
   and a mono podcast waveform stored under data/stimuli/podcast.wav.
-  Enable `allow_neural_resample` if your neural recordings use a different
-  sampling rate and you are comfortable with on-the-fly resampling.
+  The ecogprep derivatives already include Hilbert-transformed high-gamma
+  amplitudes at a uniform sampling rate, so neural resampling is disabled by
+  default. Enable `allow_neural_resample` only if you intentionally depart
+  from the ecogprep preprocessing pipeline.

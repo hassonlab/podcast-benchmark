@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
@@ -16,6 +17,7 @@ from typing import Iterable, Optional, Sequence
 import numpy as np
 import pandas as pd
 import torch
+from scipy.signal import resample_poly
 from sklearn.model_selection import KFold
 
 import plot_utils
@@ -59,63 +61,35 @@ def align_for_lag(
     neural: np.ndarray,
     lag_ms: float,
     sampling_rate_hz: float,
-    *,
-    allow_partial_overlap: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Align neural predictors and audio targets for a specific latency.
+    """Return neural design matrix and audio target aligned for a specific lag.
 
-    Args:
-        audio: One-dimensional audio envelope array (``shape == (n_samples,)``).
-        neural: Neural data with ``shape == (n_electrodes, n_samples)``.
-        lag_ms: Lag in milliseconds. Positive values shift neural activity forward
-            relative to the audio target (i.e., audio leads neural).
-        sampling_rate_hz: Sampling rate shared by ``audio`` and ``neural``.
-        allow_partial_overlap: If ``True`` (default), truncate to the overlapping
-            region when lagging would otherwise reduce the shared extent. If
-            ``False`` and the lag prevents full overlap, a ``ValueError`` is raised.
-
-    Returns:
-        Tuple ``(X, y)`` where ``X`` is an ``(n_observations, n_features)`` design
-        matrix and ``y`` is a length ``n_observations`` target vector.
-
-    Raises:
-        ValueError: If inputs have incompatible shapes or empty overlap.
+    Mirrors the helper used in the original notebook: neural activity (channels × samples)
+    is optionally shifted forward/backward relative to the audio target, and the
+    overlapping span is returned as ``(X, y)`` with shapes ``(n_obs, n_features)``
+    and ``(n_obs,)`` respectively.
     """
 
-    audio_arr = np.asarray(audio, dtype=np.float64)
-    neural_arr = np.asarray(neural, dtype=np.float64)
+    audio_arr = np.asarray(audio, dtype=np.float32)
+    neural_arr = np.asarray(neural, dtype=np.float32)
 
-    if audio_arr.ndim != 1:
-        raise ValueError("audio must be a 1D array")
     if neural_arr.ndim != 2:
-        raise ValueError("neural must be a 2D array of shape (n_features, n_samples)")
-    if sampling_rate_hz <= 0:
-        raise ValueError("sampling_rate_hz must be positive")
+        raise ValueError("neural array must have shape (n_electrodes, n_samples)")
 
-    samples = audio_arr.size
-    if neural_arr.shape[1] != samples:
-        if not allow_partial_overlap:
-            raise ValueError(
-                "neural and audio must have the same length when allow_partial_overlap=False"
-            )
-        samples = min(samples, neural_arr.shape[1])
-        audio_arr = audio_arr[:samples]
-        neural_arr = neural_arr[:, :samples]
-
-    shift_samples = int(np.round(lag_ms * sampling_rate_hz / 1000.0))
+    shift_samples = int(np.round(lag_ms / 1000.0 * sampling_rate_hz))
 
     if shift_samples > 0:
-        if shift_samples >= samples:
+        if shift_samples >= neural_arr.shape[1] or shift_samples >= audio_arr.size:
             raise ValueError(
-                f"Positive lag of {shift_samples} samples exceeds available length {samples}"
+                f"Shift {shift_samples} exceeds series length {audio_arr.size}"
             )
         X = neural_arr[:, shift_samples:].T
         y = audio_arr[:-shift_samples]
     elif shift_samples < 0:
         shift = abs(shift_samples)
-        if shift >= samples:
+        if shift >= neural_arr.shape[1] or shift >= audio_arr.size:
             raise ValueError(
-                f"Negative lag of {shift} samples exceeds available length {samples}"
+                f"Shift {shift} exceeds series length {audio_arr.size}"
             )
         X = neural_arr[:, :-shift].T
         y = audio_arr[shift:]
@@ -123,14 +97,8 @@ def align_for_lag(
         X = neural_arr.T
         y = audio_arr
 
-    if not allow_partial_overlap and X.shape[0] != y.size:
-        raise ValueError("Lag setting produced mismatched lengths without truncation allowed")
-
-    n_observations = min(X.shape[0], y.size)
-    if n_observations <= 0:
-        raise ValueError("Lag alignment resulted in zero overlapping samples")
-
-    return X[:n_observations], y[:n_observations]
+    length = min(X.shape[0], y.size)
+    return X[:length], y[:length]
 
 
 def _ridge_closed_form(
@@ -395,25 +363,158 @@ def _infer_target_sr(df: pd.DataFrame, data_params) -> float:
     return 1.0 / mean_step
 
 
+def _sliding_window_rms(arr: np.ndarray, window_samples: int, hop_samples: int) -> np.ndarray:
+    arr64 = np.asarray(arr, dtype=np.float64, order="C")
+    n_samples = arr64.shape[-1]
+    if n_samples < window_samples:
+        raise ValueError(
+            f"Window of {window_samples} samples exceeds series length {n_samples}."
+        )
+
+    starts = np.arange(0, n_samples - window_samples + 1, hop_samples, dtype=int)
+    if starts.size == 0:
+        raise ValueError(
+            f"Hop of {hop_samples} samples yields zero windows; adjust window/hop settings."
+        )
+
+    ends = starts + window_samples
+    squared = np.square(arr64, dtype=np.float64)
+    cumsum = np.cumsum(squared, axis=-1, dtype=np.float64)
+    pad = np.zeros((*cumsum.shape[:-1], 1), dtype=np.float64)
+    cumsum = np.concatenate([pad, cumsum], axis=-1)
+
+    start_vals = np.take(cumsum, starts, axis=-1)
+    end_vals = np.take(cumsum, ends, axis=-1)
+    window_means = (end_vals - start_vals) / float(window_samples)
+    return np.sqrt(window_means, dtype=np.float64).astype(np.float32)
+
+
 def _load_neural_matrix_from_raws(
     raws: Sequence,
     target_sr: float,
     allow_resample: bool,
+    *,
+    window_params: Optional[dict] = None,
+    expected_windows: Optional[int] = None,
+    zscore: bool = True,
+    log_compress: bool = False,
+    log_eps_scale: float = 1e-6,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
-    neural_arrays: list[np.ndarray] = []
+    """Return a stacked neural design matrix from ecogprep high-gamma recordings.
+
+    The ecogprep derivatives already provide Hilbert-transformed high-gamma amplitudes
+    at a common sampling rate. We therefore simply align on time, optionally log-compress
+    and z-score each channel, and (when requested) apply the same sliding window RMS aggregation
+    used in the notebook implementation. Resampling is only permitted when
+    ``allow_resample`` is explicitly enabled in the configuration.
+    """
+    neural_payload: list[np.ndarray] = []
+    sampling_rates: list[float] = []
+
+    target_sr_float = float(target_sr)
+
     for raw in raws:
         if raw is None:
             continue
-        data = raw.get_data().astype(np.float32, copy=False)
-        neural_arrays.append(data)
 
-    if not neural_arrays:
+        sfreq = float(raw.info.get("sfreq", 0.0))
+        if sfreq <= 0:
+            raise ValueError("Neural recording reported non-positive sampling rate")
+
+        data = raw.get_data().astype(np.float32, copy=False)
+
+        if allow_resample and not np.isclose(sfreq, target_sr_float):
+            source = int(round(sfreq))
+            target = int(round(target_sr_float))
+            if source <= 0 or target <= 0:
+                raise ValueError("Sampling rates must be positive for resampling")
+            factor = math.gcd(target, source) or 1
+            up = target // factor
+            down = source // factor
+            data = resample_poly(data, up, down, axis=1).astype(np.float32, copy=False)
+            sfreq = target_sr_float
+
+        neural_payload.append(np.ascontiguousarray(data, dtype=np.float32))
+        sampling_rates.append(float(sfreq))
+
+    if not neural_payload:
         raise ValueError("No neural recordings provided; check subject_ids and data paths")
 
-    min_len = min(arr.shape[1] for arr in neural_arrays)
-    trimmed = [np.ascontiguousarray(arr[:, :min_len], dtype=np.float32) for arr in neural_arrays]
-    neural_stacked = np.concatenate(trimmed, axis=0)
-    return neural_stacked, trimmed
+    target_sr_float = float(target_sr)
+
+    if not allow_resample:
+        mismatched = [sfreq for sfreq in sampling_rates if not np.isclose(sfreq, target_sr_float, rtol=1e-6, atol=1e-3)]
+        if mismatched:
+            raise ValueError(
+                "Neural sampling rates differ from target_sr. ecogprep derivatives should "
+                "share a common sampling rate; enable 'allow_neural_resample' in the config "
+                "if you intentionally want automatic resampling."
+            )
+
+    min_len = min(arr.shape[1] for arr in neural_payload)
+    aligned = [arr[:, :min_len] for arr in neural_payload]
+
+    if log_compress:
+        compressed: list[np.ndarray] = []
+        for arr in aligned:
+            max_val = float(np.max(arr)) if arr.size else 0.0
+            eps = max(1e-12, max_val * float(log_eps_scale))
+            logged = np.log10(np.clip(arr, 0.0, None) + eps)
+            compressed.append(logged.astype(np.float32, copy=False))
+        aligned = compressed
+
+    if zscore:
+        normalized = []
+        for arr in aligned:
+            mean = arr.mean(axis=1, keepdims=True)
+            std = arr.std(axis=1, keepdims=True)
+            std = np.where(std < 1e-6, 1.0, std)
+            normalized.append(((arr - mean) / std).astype(np.float32, copy=False))
+        aligned = normalized
+    else:
+        aligned = [np.ascontiguousarray(arr, dtype=np.float32) for arr in aligned]
+
+    processed = aligned
+
+    if window_params is not None:
+        window_ms = window_params.get("window_ms")
+        if window_ms is None:
+            window_ms = window_params.get("window_size_ms", 0.0)
+        hop_ms = window_params.get("hop_ms")
+        if hop_ms is None:
+            hop_ms = window_params.get("hop_size_ms", window_ms)
+
+        window_ms = float(window_ms or 0.0)
+        hop_ms = float(hop_ms or window_ms)
+
+        if window_ms <= 0.0:
+            raise ValueError("window_params.window_ms must be positive when windowing is enabled")
+
+        windowed: list[np.ndarray] = []
+        for arr, sfreq in zip(processed, sampling_rates):
+            window_samples = max(1, int(round(window_ms * sfreq / 1000.0)))
+            hop_samples = max(1, int(round(hop_ms * sfreq / 1000.0)))
+            rms = _sliding_window_rms(arr, window_samples, hop_samples)
+            windowed.append(rms)
+
+        min_windows = min(rms.shape[1] for rms in windowed)
+        if expected_windows is not None:
+            min_windows = min(min_windows, int(expected_windows))
+
+        processed = [np.ascontiguousarray(rms[:, :min_windows], dtype=np.float32) for rms in windowed]
+
+        if expected_windows is not None and min_windows != int(expected_windows):
+            logger.info(
+                "Neural window count adjusted to %d to align with audio windows (%d).",
+                min_windows,
+                int(expected_windows),
+            )
+    elif expected_windows is not None:
+        desired = int(expected_windows)
+        processed = [np.ascontiguousarray(arr[:, :desired], dtype=np.float32) for arr in processed]
+
+    neural_stacked = np.concatenate(processed, axis=0)
+    return neural_stacked, processed
 
 
 def _prepare_audio_neural_alignment(
@@ -475,10 +576,18 @@ def run_volume_level_ridge_from_config(
     audio = df_targets["target"].to_numpy(dtype=np.float32)
     sampling_rate_hz = _infer_target_sr(df_targets, experiment_config.data_params)
 
+    window_params = getattr(df_targets, "attrs", {}).get("window_params")
+    expected_windows = len(df_targets)
+
     neural_stacked, per_subject_neural = _load_neural_matrix_from_raws(
         raws,
         sampling_rate_hz,
         bool(model_params.get("allow_neural_resample", False)),
+        window_params=window_params,
+        expected_windows=expected_windows,
+        zscore=bool(model_params.get("zscore_neural", True)),
+        log_compress=bool(model_params.get("neural_log_compress", True)),
+        log_eps_scale=float(model_params.get("neural_log_eps_scale", 1e-6)),
     )
 
     requested_modes = model_params.get("analysis_modes")

@@ -187,14 +187,21 @@ def volume_level_encoding_task(data_params: DataParams):
         }
     )
 
+    effective_sr = float(target_sr) / float(hop_samples)
     df.attrs["window_params"] = {
+        # Notebook-compatible keys
+        "mode": "rms",
+        "window_ms": width_ms,
+        "hop_ms": stride_ms,
+        "window_samples": window_samples,
+        "hop_samples": hop_samples,
+        "effective_sr": effective_sr,
+        # Backwards-compatibility aliases used in earlier iterations of the codebase
         "window_size_ms": width_ms,
         "hop_size_ms": stride_ms,
         "window_size_s": width,
         "hop_size_s": stride,
-        "window_samples": window_samples,
-        "hop_samples": hop_samples,
-    "window_reduction": "rms",
+        "window_reduction": "rms",
     }
 
     return df

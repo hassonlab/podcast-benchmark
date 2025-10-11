@@ -3,7 +3,12 @@ import pandas as pd
 import pytest
 
 from config import DataParams, ExperimentConfig, TrainingParams
-from volume_level_ridge import align_for_lag, ridge_r2_by_lag, run_volume_level_ridge_from_config
+from volume_level_ridge import (
+    align_for_lag,
+    ridge_r2_by_lag,
+    run_volume_level_ridge_from_config,
+    _load_neural_matrix_from_raws,
+)
 
 
 def test_align_for_lag_positive_lag():
@@ -17,8 +22,8 @@ def test_align_for_lag_positive_lag():
     expected_X = neural[:, 2:].T
     expected_y = audio[:-2]
 
-    np.testing.assert_array_equal(X, expected_X)
-    np.testing.assert_array_equal(y, expected_y)
+    np.testing.assert_allclose(X, expected_X, atol=1e-6)
+    np.testing.assert_allclose(y, expected_y, atol=1e-6)
 
 
 def test_align_for_lag_negative_lag():
@@ -32,8 +37,8 @@ def test_align_for_lag_negative_lag():
     expected_X = neural[:, :-1].T
     expected_y = audio[1:]
 
-    np.testing.assert_array_equal(X, expected_X)
-    np.testing.assert_array_equal(y, expected_y)
+    np.testing.assert_allclose(X, expected_X, atol=1e-6)
+    np.testing.assert_allclose(y, expected_y, atol=1e-6)
 
 
 def test_align_for_lag_raises_on_large_shift():
@@ -163,3 +168,70 @@ def test_run_volume_level_ridge_all_modes(tmp_path):
     assert "curve" in average_block and "per_subject" in average_block
     assert not average_block["curve"].empty
     assert {"lag_ms", "r2_mean"}.issubset(set(average_block["curve"].columns))
+
+
+def test_load_neural_matrix_requires_resample_toggle():
+    raw = _DummyRaw(np.ones((1, 50), dtype=np.float32), 200.0)
+
+    with pytest.raises(ValueError):
+        _load_neural_matrix_from_raws(
+            [raw],
+            target_sr=100.0,
+            allow_resample=False,
+            window_params=None,
+            expected_windows=None,
+            zscore=False,
+        )
+
+
+def test_load_neural_matrix_resample_and_window():
+    samples = 100
+    sfreq = 200.0
+    target_sr = 100.0
+    channel_1 = np.linspace(0.0, 1.0, samples, dtype=np.float32)
+    channel_2 = np.linspace(1.0, 0.0, samples, dtype=np.float32)
+    raw = _DummyRaw(np.vstack([channel_1, channel_2]), sfreq)
+
+    window_params = {"window_ms": 100.0, "hop_ms": 100.0}
+
+    stacked, per_subject = _load_neural_matrix_from_raws(
+        [raw],
+        target_sr=target_sr,
+        allow_resample=True,
+        window_params=window_params,
+        expected_windows=None,
+        zscore=True,
+        log_compress=False,
+    )
+
+    # After resampling to 100 Hz, 0.1 s windows with 0.1 s hop yield 5 windows
+    assert stacked.shape == (2, 5)
+    assert len(per_subject) == 1
+    assert per_subject[0].shape == (2, 5)
+
+
+def test_load_neural_matrix_log_compress_matches_manual():
+    sr = 128.0
+    time = np.linspace(0.0, 1.0, int(sr), endpoint=False, dtype=np.float32)
+    signal = np.abs(np.sin(2 * np.pi * 5 * time)).astype(np.float32)
+    arr = np.vstack([signal, signal * 0.5 + 0.01])
+    raw = _DummyRaw(arr, sr)
+
+    stacked_log, per_subject = _load_neural_matrix_from_raws(
+        [raw],
+        target_sr=sr,
+        allow_resample=False,
+        window_params=None,
+        expected_windows=None,
+        zscore=False,
+        log_compress=True,
+        log_eps_scale=1e-6,
+    )
+
+    original = arr
+    max_val = float(np.max(original))
+    eps = max(1e-12, max_val * 1e-6)
+    manual_log = np.log10(np.clip(original[:, :original.shape[1]], 0.0, None) + eps)
+
+    np.testing.assert_allclose(stacked_log, manual_log.astype(np.float32), rtol=1e-6, atol=1e-6)
+    assert len(per_subject) == 1
