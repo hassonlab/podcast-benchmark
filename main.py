@@ -10,7 +10,6 @@ import task_utils
 from loader import import_all_from_package
 import registry
 from config_utils import parse_known_args, load_config_with_overrides, get_nested_value
-import volume_level_ridge
 
 # Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package("neural_conv_decoder")
@@ -41,6 +40,11 @@ def main():
         preprocessing_fn = registry.data_preprocessor_registry[
             experiment_config.data_params.preprocessing_fn_name
         ]
+
+    # User defined model constructor function.
+    model_constructor_fn = registry.model_constructor_registry[
+        experiment_config.model_constructor_name
+    ]
 
     # Overwrite subject id's and set per-subject electrodes based on file if provided.
     if experiment_config.data_params.electrode_file_path:
@@ -82,21 +86,6 @@ def main():
 
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
         yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
-
-    if experiment_config.model_constructor_name == "volume_level_ridge":
-        volume_level_ridge.run_volume_level_ridge_from_config(
-            experiment_config,
-            raws,
-            df_word,
-            output_dir,
-            model_dir=model_dir,
-        )
-        return
-
-    # User defined model constructor function.
-    model_constructor_fn = registry.model_constructor_registry[
-        experiment_config.model_constructor_name
-    ]
 
     # Decide what lags we need to train over.
     if experiment_config.training_params.lag:

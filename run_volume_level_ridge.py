@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+
+import numpy as np
+import pandas as pd
+import yaml
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
+
+from config import ExperimentConfig
+from config_utils import load_config_with_overrides, parse_override_args
+from vol_lvl_ridge_utils import (
+    compute_window_hop,
+    load_log_transformed_high_gamma,
+    sliding_window_rms,
+)
+
+# Import registries so decorators run.
+import registry  # noqa: F401
+import task_utils  # noqa: F401
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Run the volume-level ridge pipeline.")
+    parser.add_argument("--config", required=True, help="Path to a YAML config file.")
+    args, unknown = parser.parse_known_args()
+    overrides = parse_override_args(unknown)
+    return args.config, overrides
+
+
+def _format_trial_name(cfg: ExperimentConfig) -> str:
+    base = cfg.trial_name or cfg.model_constructor_name or "volume_level_ridge"
+    if cfg.format_fields:
+        values = []
+        for path in cfg.format_fields:
+            values.append(_traverse_config(cfg, path))
+        base = base.format(*values)
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    return f"{base}_{timestamp}"
+
+
+def _traverse_config(cfg: ExperimentConfig, path: str):
+    current = cfg
+    for part in path.split("."):
+        current = getattr(current, part)
+    return current
+
+
+def _prepare_output_dirs(cfg: ExperimentConfig, trial_name: str) -> Dict[str, Path]:
+    output_dir = Path(cfg.output_dir) / trial_name
+    model_dir = Path(cfg.model_dir) / trial_name
+    tensorboard_dir = Path(cfg.tensorboard_dir) / trial_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    tensorboard_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "config.yml", "w", encoding="utf-8") as fh:
+        yaml.dump(asdict(cfg), fh, default_flow_style=False)
+    return {
+        "output_dir": output_dir,
+        "model_dir": model_dir,
+        "tensorboard_dir": tensorboard_dir,
+    }
+
+
+def _resolve_lags(training_params) -> np.ndarray:
+    if training_params.lag is not None:
+        return np.asarray([training_params.lag], dtype=float)
+    return np.arange(
+        training_params.min_lag,
+        training_params.max_lag,
+        training_params.lag_step_size,
+        dtype=float,
+    )
+
+
+def _align_for_shift(neural: np.ndarray, audio: np.ndarray, shift: int) -> tuple[np.ndarray, np.ndarray]:
+    if shift > 0:
+        X = neural[:, shift:].T
+        y = audio[:-shift]
+    elif shift < 0:
+        step = abs(shift)
+        X = neural[:, :-step].T
+        y = audio[step:]
+    else:
+        X = neural.T
+        y = audio
+    cutoff = min(X.shape[0], y.shape[0])
+    return X[:cutoff], y[:cutoff]
+
+
+def _ridge_lag_sweep(
+    neural: np.ndarray,
+    audio: np.ndarray,
+    effective_sr: float,
+    lags_ms: np.ndarray,
+    cv_splits: int,
+    alphas: Optional[Iterable[float]],
+) -> pd.DataFrame:
+    if cv_splits < 2:
+        raise ValueError("cv_splits must be at least 2 for cross-validation.")
+    lag_values = np.asarray(lags_ms, dtype=float)
+    if lag_values.size == 0:
+        return pd.DataFrame()
+    alpha_values = (
+        np.logspace(-4, 4, 17, dtype=float)
+        if alphas is None
+        else np.asarray(list(alphas), dtype=float)
+    )
+    results: List[dict] = []
+    kfold = KFold(n_splits=cv_splits, shuffle=True, random_state=0)
+    for lag in lag_values:
+        shift = int(round(lag / 1000.0 * effective_sr))
+        X, y = _align_for_shift(neural, audio, shift)
+        if X.shape[0] <= cv_splits or y.size <= cv_splits:
+            continue
+        best_alpha = None
+        best_score = -np.inf
+        for alpha in alpha_values:
+            fold_scores = []
+            for train_idx, val_idx in kfold.split(X):
+                scaler = StandardScaler()
+                X_train = scaler.fit_transform(X[train_idx])
+                X_val = scaler.transform(X[val_idx])
+                y_train = y[train_idx]
+                y_val = y[val_idx]
+                model = Ridge(alpha=float(alpha))
+                model.fit(X_train, y_train)
+                y_pred = model.predict(X_val)
+                fold_scores.append(r2_score(y_val, y_pred))
+            score = float(np.mean(fold_scores))
+            if score > best_score:
+                best_score = score
+                best_alpha = float(alpha)
+        if best_alpha is None:
+            continue
+        scaler = StandardScaler()
+        X_full = scaler.fit_transform(X)
+        final_model = Ridge(alpha=best_alpha)
+        final_model.fit(X_full, y)
+        y_pred = final_model.predict(X_full)
+        records = {
+            "lag_ms": float(lag),
+            "r2": best_score,
+            "alpha": best_alpha,
+            "coef_norm": float(np.linalg.norm(final_model.coef_)),
+            "n_samples": int(y.shape[0]),
+            "n_features": int(X.shape[1]),
+            "train_r2": float(r2_score(y, y_pred)),
+        }
+        results.append(records)
+    return pd.DataFrame(results)
+
+
+def _merge_lengths(datasets: List[dict]) -> None:
+    if not datasets:
+        return
+    min_len = min(entry["audio"].shape[0] for entry in datasets)
+    for entry in datasets:
+        entry["audio"] = entry["audio"][:min_len]
+        entry["neural"] = entry["neural"][:, :min_len]
+
+
+def _prepare_subject_datasets(
+    cfg: ExperimentConfig,
+    audio_targets: np.ndarray,
+    window_ms: float,
+    hop_ms: float,
+    log_params: Optional[dict],
+    apply_log: bool,
+) -> List[dict]:
+    model_params = cfg.model_params
+    if model_params.get("allow_neural_resample"):
+        raise NotImplementedError("Neural resampling is not implemented in this pipeline.")
+    payloads = load_log_transformed_high_gamma(
+        cfg.data_params,
+        log_params=log_params,
+        apply_log=apply_log,
+    )
+    drop_last = bool(model_params.get("drop_last_neural_channel"))
+    datasets: List[dict] = []
+    for subject_id in cfg.data_params.subject_ids:
+        payload = payloads[subject_id]
+        neural = np.asarray(payload["log_highgamma"], dtype=np.float32)
+        if drop_last and neural.shape[0] > 1:
+            neural = neural[:-1]
+        window_samples, hop_samples, effective_sr = compute_window_hop(
+            payload["sampling_rate"],
+            window_ms,
+            hop_ms,
+        )
+        neural_windows = sliding_window_rms(neural, window_samples, hop_samples)
+        min_len = min(neural_windows.shape[1], audio_targets.shape[0])
+        datasets.append(
+            {
+                "subject_id": int(subject_id),
+                "neural": neural_windows[:, :min_len],
+                "audio": audio_targets[:min_len],
+                "effective_sr": effective_sr,
+            }
+        )
+    _merge_lengths(datasets)
+    return datasets
+
+
+def _compute_modes(
+    datasets: List[dict],
+    lags_ms: np.ndarray,
+    model_params: dict,
+) -> Dict[str, object]:
+    cv_splits = int(model_params.get("cv_splits", 10))
+    alphas = model_params.get("alphas")
+    modes = model_params.get(
+        "analysis_modes",
+        ["per_subject", "average", "pooled_electrodes"],
+    )
+    results: Dict[str, object] = {}
+    per_subject: Dict[int, pd.DataFrame] = {}
+    if "per_subject" in modes:
+        for entry in datasets:
+            df = _ridge_lag_sweep(
+                entry["neural"],
+                entry["audio"],
+                entry["effective_sr"],
+                lags_ms,
+                cv_splits,
+                alphas,
+            )
+            if not df.empty:
+                df["subject_id"] = entry["subject_id"]
+                per_subject[entry["subject_id"]] = df
+        results["per_subject"] = per_subject
+    if "average" in modes:
+        if not per_subject:
+            raise RuntimeError("Average analysis requested but no subject results were produced.")
+        combined = pd.concat(per_subject.values(), ignore_index=True)
+        grouped = combined.groupby("lag_ms", as_index=False).agg(
+            r2=("r2", "mean"),
+            r2_std=("r2", "std"),
+            alpha_mean=("alpha", "mean"),
+            train_r2=("train_r2", "mean"),
+            n_subjects=("subject_id", "nunique"),
+        )
+        results["average"] = grouped
+    if "pooled_electrodes" in modes:
+        pooled_neural = np.concatenate([entry["neural"] for entry in datasets], axis=0)
+        pooled_audio = datasets[0]["audio"]
+        pooled_sr = datasets[0]["effective_sr"]
+        pooled_df = _ridge_lag_sweep(
+            pooled_neural,
+            pooled_audio,
+            pooled_sr,
+            lags_ms,
+            cv_splits,
+            alphas,
+        )
+        pooled_df["subject_id"] = "pooled"
+        results["pooled_electrodes"] = pooled_df
+    return results
+
+
+def _extract_audio(cfg: ExperimentConfig) -> tuple[np.ndarray, float, float]:
+    getter = registry.task_data_getter_registry[cfg.task_name]
+    df = getter(cfg.data_params)
+    targets = df["target"].to_numpy(dtype=np.float32)
+    window_params = df.attrs.get("window_params")
+    task_params = cfg.data_params.task_params or {}
+    if window_params:
+        window_ms = float(window_params["window_ms"])
+        hop_ms = float(window_params["hop_ms"])
+    else:
+        window_ms = float(task_params.get("window_size", 0.0) or 0.0)
+        hop_ms = float(task_params.get("hop_size", window_ms) or 0.0)
+    if window_ms <= 0 or hop_ms <= 0:
+        raise ValueError("Volume-level pipeline requires positive window and hop settings.")
+    return targets, window_ms, hop_ms
+
+
+def run_volume_level_ridge(cfg: ExperimentConfig, output_context: Dict[str, Path]) -> Dict[str, object]:
+    if cfg.task_name != "volume_level_encoding_task":
+        raise ValueError(
+            "Volume-level ridge pipeline expects task_name='volume_level_encoding_task'."
+        )
+    audio_targets, window_ms, hop_ms = _extract_audio(cfg)
+    model_params = cfg.model_params
+    apply_log = bool(model_params.get("neural_log_compress", True))
+    log_params = None
+    if apply_log:
+        log_params = dict(model_params.get("neural_log_params", {}) or {})
+        if model_params.get("neural_log_eps_scale") is not None:
+            log_params["epsilon_scale"] = float(model_params["neural_log_eps_scale"])
+    datasets = _prepare_subject_datasets(
+        cfg,
+        audio_targets,
+        window_ms,
+        hop_ms,
+        log_params,
+        apply_log,
+    )
+    lags_ms = _resolve_lags(cfg.training_params)
+    results = _compute_modes(datasets, lags_ms, model_params)
+    _write_outputs(results, output_context["output_dir"], model_params)
+    return results
+
+
+def _write_outputs(results: Dict[str, object], output_dir: Path, model_params: dict) -> None:
+    records: List[pd.DataFrame] = []
+    per_subject = results.get("per_subject", {})
+    for subject_id, df in per_subject.items():
+        df.to_csv(output_dir / f"subject_{int(subject_id):02d}_ridge.csv", index=False)
+        temp = df.copy()
+        temp["mode"] = "per_subject"
+        records.append(temp)
+    if "average" in results:
+        avg_df = results["average"].copy()
+        avg_df.insert(0, "subject_id", "mean")
+        avg_df["mode"] = "average"
+        avg_df.to_csv(output_dir / "average_ridge.csv", index=False)
+        records.append(avg_df)
+    if "pooled_electrodes" in results:
+        pooled_df = results["pooled_electrodes"].copy()
+        pooled_df["mode"] = "pooled_electrodes"
+        pooled_df.to_csv(output_dir / "pooled_ridge.csv", index=False)
+        records.append(pooled_df)
+    if records:
+        combined = pd.concat(records, ignore_index=True)
+        summary_name = model_params.get("output_csv", "ridge_summary.csv")
+        combined.to_csv(output_dir / summary_name, index=False)
+
+
+def main():
+    config_path, overrides = _parse_args()
+    cfg = load_config_with_overrides(config_path, overrides)
+    trial_name = _format_trial_name(cfg)
+    context = _prepare_output_dirs(cfg, trial_name)
+    run_volume_level_ridge(cfg, context)
+
+
+if __name__ == "__main__":
+    main()
