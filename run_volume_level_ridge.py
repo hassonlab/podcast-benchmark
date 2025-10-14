@@ -9,10 +9,8 @@ from typing import Dict, Iterable, List, Optional
 import numpy as np
 import pandas as pd
 import yaml
-from sklearn.linear_model import Ridge
-from sklearn.metrics import r2_score
 from sklearn.model_selection import KFold
-from sklearn.preprocessing import StandardScaler
+import torch
 
 from config import ExperimentConfig
 from config_utils import load_config_with_overrides, parse_override_args
@@ -95,6 +93,38 @@ def _align_for_shift(neural: np.ndarray, audio: np.ndarray, shift: int) -> tuple
     return X[:cutoff], y[:cutoff]
 
 
+def _resolve_device(model_params: dict) -> torch.device:
+    device_str = model_params.get("device")
+    if device_str is None:
+        device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device_str)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested for ridge regression but no GPU is available.")
+    return device
+
+
+def _standardize_features(X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mean = X.mean(dim=0, keepdim=True)
+    std = X.std(dim=0, unbiased=False, keepdim=True)
+    std = torch.where(std == 0, torch.ones_like(std), std)
+    X_standardized = (X - mean) / std
+    return X_standardized, mean, std
+
+
+def _solve_ridge_closed_form(X: torch.Tensor, y: torch.Tensor, alpha: float) -> torch.Tensor:
+    n_features = X.shape[1]
+    eye = torch.eye(n_features, device=X.device, dtype=X.dtype)
+    return torch.linalg.solve(X.T @ X + alpha * eye, X.T @ y)
+
+
+def _r2_score_torch(y_true: torch.Tensor, y_pred: torch.Tensor) -> float:
+    ss_res = torch.sum((y_true - y_pred) ** 2)
+    ss_tot = torch.sum((y_true - y_true.mean()) ** 2)
+    if torch.isclose(ss_tot, torch.tensor(0.0, device=y_true.device, dtype=y_true.dtype)):
+        return float("nan")
+    return float(1.0 - (ss_res / ss_tot).item())
+
+
 def _ridge_lag_sweep(
     neural: np.ndarray,
     audio: np.ndarray,
@@ -102,6 +132,7 @@ def _ridge_lag_sweep(
     lags_ms: np.ndarray,
     cv_splits: int,
     alphas: Optional[Iterable[float]],
+    device: torch.device,
 ) -> pd.DataFrame:
     if cv_splits < 2:
         raise ValueError("cv_splits must be at least 2 for cross-validation.")
@@ -122,37 +153,43 @@ def _ridge_lag_sweep(
             continue
         best_alpha = None
         best_score = -np.inf
+        X_tensor = torch.from_numpy(X).to(device=device, dtype=torch.float32)
+        y_tensor = torch.from_numpy(y).to(device=device, dtype=torch.float32).unsqueeze(1)
         for alpha in alpha_values:
             fold_scores = []
             for train_idx, val_idx in kfold.split(X):
-                scaler = StandardScaler()
-                X_train = scaler.fit_transform(X[train_idx])
-                X_val = scaler.transform(X[val_idx])
-                y_train = y[train_idx]
-                y_val = y[val_idx]
-                model = Ridge(alpha=float(alpha))
-                model.fit(X_train, y_train)
-                y_pred = model.predict(X_val)
-                fold_scores.append(r2_score(y_val, y_pred))
-            score = float(np.mean(fold_scores))
+                train_idx_t = torch.as_tensor(train_idx, device=device)
+                val_idx_t = torch.as_tensor(val_idx, device=device)
+                X_train = torch.index_select(X_tensor, 0, train_idx_t)
+                X_val = torch.index_select(X_tensor, 0, val_idx_t)
+                y_train = torch.index_select(y_tensor, 0, train_idx_t)
+                y_val = torch.index_select(y_tensor, 0, val_idx_t)
+                y_train_mean = y_train.mean()
+                y_train_centered = y_train - y_train_mean
+                X_train_std, mean_t, std_t = _standardize_features(X_train)
+                X_val_std = (X_val - mean_t) / std_t
+                beta = _solve_ridge_closed_form(X_train_std, y_train_centered, float(alpha))
+                y_pred = X_val_std @ beta + y_train_mean
+                fold_scores.append(_r2_score_torch(y_val, y_pred))
+            score = float(np.nanmean(fold_scores))
             if score > best_score:
                 best_score = score
                 best_alpha = float(alpha)
         if best_alpha is None:
             continue
-        scaler = StandardScaler()
-        X_full = scaler.fit_transform(X)
-        final_model = Ridge(alpha=best_alpha)
-        final_model.fit(X_full, y)
-        y_pred = final_model.predict(X_full)
+        X_full_std, mean_full, std_full = _standardize_features(X_tensor)
+        y_full_mean = y_tensor.mean()
+        y_full_centered = y_tensor - y_full_mean
+        beta = _solve_ridge_closed_form(X_full_std, y_full_centered, best_alpha)
+        y_pred = X_full_std @ beta + y_full_mean
         records = {
             "lag_ms": float(lag),
             "r2": best_score,
             "alpha": best_alpha,
-            "coef_norm": float(np.linalg.norm(final_model.coef_)),
+            "coef_norm": float(torch.linalg.norm(beta).cpu().item()),
             "n_samples": int(y.shape[0]),
             "n_features": int(X.shape[1]),
-            "train_r2": float(r2_score(y, y_pred)),
+            "train_r2": _r2_score_torch(y_tensor, y_pred),
         }
         results.append(records)
     return pd.DataFrame(results)
@@ -220,6 +257,7 @@ def _compute_modes(
         "analysis_modes",
         ["per_subject", "average", "pooled_electrodes"],
     )
+    device = _resolve_device(model_params)
     results: Dict[str, object] = {}
     per_subject: Dict[int, pd.DataFrame] = {}
     if "per_subject" in modes:
@@ -231,6 +269,7 @@ def _compute_modes(
                 lags_ms,
                 cv_splits,
                 alphas,
+                device,
             )
             if not df.empty:
                 df["subject_id"] = entry["subject_id"]
@@ -259,6 +298,7 @@ def _compute_modes(
             lags_ms,
             cv_splits,
             alphas,
+            device,
         )
         pooled_df["subject_id"] = "pooled"
         results["pooled_electrodes"] = pooled_df

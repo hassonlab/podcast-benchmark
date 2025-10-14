@@ -32,10 +32,10 @@ training_params:
 model_params:
   alphas: null
   cv_splits: 10
-  device: null
+  device: cuda
   verbose: true
   output_csv: ridge_summary.csv
-  plot: false
+  plot: true
   save_plot_path: ridge_plot.png
   analysis_modes:
     - pooled_electrodes

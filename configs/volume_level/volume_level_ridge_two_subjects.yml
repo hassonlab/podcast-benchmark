@@ -1,10 +1,10 @@
 model_constructor_name: volume_level_ridge
 task_name: volume_level_encoding_task
-trial_name: volume_level_ridge_two_subjects
+trial_name: volume_level_ridge_all_subjects
 output_dir: results
 data_params:
   data_root: data
-  subject_ids: [1, 2]
+  subject_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9]
   channel_reg_ex: null
   window_width: -1
   task_params:
@@ -27,10 +27,10 @@ training_params:
 model_params:
   alphas: null
   cv_splits: 10
-  device: null
+  device: cuda
   verbose: true
   output_csv: ridge_summary.csv
-  plot: false
+  plot: true
   save_plot_path: ridge_plot.png
   analysis_modes:
     - pooled_electrodes
