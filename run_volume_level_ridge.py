@@ -19,6 +19,7 @@ from vol_lvl_ridge_utils import (
     load_log_transformed_high_gamma,
     sliding_window_rms,
 )
+from plot_utils import plot_ridge_results
 
 # Import registries so decorators run.
 import registry  # noqa: F401
@@ -26,6 +27,7 @@ import task_utils  # noqa: F401
 
 
 def _parse_args():
+    # Parse CLI config path and optional overrides.
     parser = argparse.ArgumentParser(description="Run the volume-level ridge pipeline.")
     parser.add_argument("--config", required=True, help="Path to a YAML config file.")
     args, unknown = parser.parse_known_args()
@@ -34,6 +36,7 @@ def _parse_args():
 
 
 def _format_trial_name(cfg: ExperimentConfig) -> str:
+    # Build a unique trial identifier from config fields and timestamp.
     base = cfg.trial_name or cfg.model_constructor_name or "volume_level_ridge"
     if cfg.format_fields:
         values = []
@@ -45,6 +48,7 @@ def _format_trial_name(cfg: ExperimentConfig) -> str:
 
 
 def _traverse_config(cfg: ExperimentConfig, path: str):
+    # Walk dot-separated attribute path on the config dataclasses.
     current = cfg
     for part in path.split("."):
         current = getattr(current, part)
@@ -52,6 +56,7 @@ def _traverse_config(cfg: ExperimentConfig, path: str):
 
 
 def _prepare_output_dirs(cfg: ExperimentConfig, trial_name: str) -> Dict[str, Path]:
+    # Create run-specific output folders and persist the resolved config.
     output_dir = Path(cfg.output_dir) / trial_name
     model_dir = Path(cfg.model_dir) / trial_name
     tensorboard_dir = Path(cfg.tensorboard_dir) / trial_name
@@ -68,6 +73,7 @@ def _prepare_output_dirs(cfg: ExperimentConfig, trial_name: str) -> Dict[str, Pa
 
 
 def _resolve_lags(training_params) -> np.ndarray:
+    # Generate the array of lag values to scan during ridge CV.
     if training_params.lag is not None:
         return np.asarray([training_params.lag], dtype=float)
     return np.arange(
@@ -79,6 +85,7 @@ def _resolve_lags(training_params) -> np.ndarray:
 
 
 def _align_for_shift(neural: np.ndarray, audio: np.ndarray, shift: int) -> tuple[np.ndarray, np.ndarray]:
+    # Offset neural and audio sequences to realize a specific lag.
     if shift > 0:
         X = neural[:, shift:].T
         y = audio[:-shift]
@@ -94,6 +101,7 @@ def _align_for_shift(neural: np.ndarray, audio: np.ndarray, shift: int) -> tuple
 
 
 def _resolve_device(model_params: dict) -> torch.device:
+    # Choose CPU or GPU device for the ridge solve based on config.
     device_str = model_params.get("device")
     if device_str is None:
         device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,6 +112,7 @@ def _resolve_device(model_params: dict) -> torch.device:
 
 
 def _standardize_features(X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Z-score features and return transformed data with stats for reuse.
     mean = X.mean(dim=0, keepdim=True)
     std = X.std(dim=0, unbiased=False, keepdim=True)
     std = torch.where(std == 0, torch.ones_like(std), std)
@@ -112,12 +121,14 @@ def _standardize_features(X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, 
 
 
 def _solve_ridge_closed_form(X: torch.Tensor, y: torch.Tensor, alpha: float) -> torch.Tensor:
+    # Solve ridge regression weights using the analytical solution.
     n_features = X.shape[1]
     eye = torch.eye(n_features, device=X.device, dtype=X.dtype)
     return torch.linalg.solve(X.T @ X + alpha * eye, X.T @ y)
 
 
 def _r2_score_torch(y_true: torch.Tensor, y_pred: torch.Tensor) -> float:
+    # Compute coefficient of determination in PyTorch.
     ss_res = torch.sum((y_true - y_pred) ** 2)
     ss_tot = torch.sum((y_true - y_true.mean()) ** 2)
     if torch.isclose(ss_tot, torch.tensor(0.0, device=y_true.device, dtype=y_true.dtype)):
@@ -134,6 +145,7 @@ def _ridge_lag_sweep(
     alphas: Optional[Iterable[float]],
     device: torch.device,
 ) -> pd.DataFrame:
+    # Run cross-validated ridge fits across lag offsets and alphas.
     if cv_splits < 2:
         raise ValueError("cv_splits must be at least 2 for cross-validation.")
     lag_values = np.asarray(lags_ms, dtype=float)
@@ -196,6 +208,7 @@ def _ridge_lag_sweep(
 
 
 def _merge_lengths(datasets: List[dict]) -> None:
+    # Truncate each subject payload so all share the shortest duration.
     if not datasets:
         return
     min_len = min(entry["audio"].shape[0] for entry in datasets)
@@ -212,6 +225,7 @@ def _prepare_subject_datasets(
     log_params: Optional[dict],
     apply_log: bool,
 ) -> List[dict]:
+    # Load, preprocess, and window neural data per subject.
     model_params = cfg.model_params
     if model_params.get("allow_neural_resample"):
         raise NotImplementedError("Neural resampling is not implemented in this pipeline.")
@@ -251,6 +265,7 @@ def _compute_modes(
     lags_ms: np.ndarray,
     model_params: dict,
 ) -> Dict[str, object]:
+    # Aggregate ridge results for per-subject, average, and pooled modes.
     cv_splits = int(model_params.get("cv_splits", 10))
     alphas = model_params.get("alphas")
     modes = model_params.get(
@@ -306,6 +321,7 @@ def _compute_modes(
 
 
 def _extract_audio(cfg: ExperimentConfig) -> tuple[np.ndarray, float, float]:
+    # Retrieve windowed audio targets and RMS parameters from task getter.
     getter = registry.task_data_getter_registry[cfg.task_name]
     df = getter(cfg.data_params)
     targets = df["target"].to_numpy(dtype=np.float32)
@@ -323,6 +339,7 @@ def _extract_audio(cfg: ExperimentConfig) -> tuple[np.ndarray, float, float]:
 
 
 def run_volume_level_ridge(cfg: ExperimentConfig, output_context: Dict[str, Path]) -> Dict[str, object]:
+    # Orchestrate full ridge pipeline from loading to output writes.
     if cfg.task_name != "volume_level_encoding_task":
         raise ValueError(
             "Volume-level ridge pipeline expects task_name='volume_level_encoding_task'."
@@ -350,6 +367,7 @@ def run_volume_level_ridge(cfg: ExperimentConfig, output_context: Dict[str, Path
 
 
 def _write_outputs(results: Dict[str, object], output_dir: Path, model_params: dict) -> None:
+    # Save per-mode ridge summaries and combined CSV artifacts.
     records: List[pd.DataFrame] = []
     per_subject = results.get("per_subject", {})
     for subject_id, df in per_subject.items():
@@ -373,8 +391,41 @@ def _write_outputs(results: Dict[str, object], output_dir: Path, model_params: d
         summary_name = model_params.get("output_csv", "ridge_summary.csv")
         combined.to_csv(output_dir / summary_name, index=False)
 
+    # Optionally create plots for each mode
+    try:
+        do_plot = bool(model_params.get("plot", False))
+    except Exception:
+        do_plot = False
+    if do_plot:
+        save_path = model_params.get("save_plot_path", "ridge_plot.png")
+        # Per-subject plots
+        for subject_id, df in per_subject.items():
+            try:
+                fig, axes = plot_ridge_results(df.to_dict(orient="list"), show=False)
+                fig.savefig(output_dir / f"subject_{int(subject_id):02d}_ridge.png")
+                fig.clf()
+            except Exception as exc:  # keep pipeline robust
+                print(f"Failed to plot subject {subject_id}: {exc}")
+        # Average plot
+        if "average" in results:
+            try:
+                fig, axes = plot_ridge_results(results["average"].to_dict(orient="list"), show=False)
+                fig.savefig(output_dir / f"average_{save_path}")
+                fig.clf()
+            except Exception as exc:
+                print(f"Failed to plot average results: {exc}")
+        # Pooled plot
+        if "pooled_electrodes" in results:
+            try:
+                fig, axes = plot_ridge_results(results["pooled_electrodes"].to_dict(orient="list"), show=False)
+                fig.savefig(output_dir / f"pooled_{save_path}")
+                fig.clf()
+            except Exception as exc:
+                print(f"Failed to plot pooled results: {exc}")
+
 
 def main():
+    # CLI entry point that parses config and executes the pipeline.
     config_path, overrides = _parse_args()
     cfg = load_config_with_overrides(config_path, overrides)
     trial_name = _format_trial_name(cfg)

@@ -2,6 +2,7 @@ import math
 
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 
 
 def extract_metric_names(history_dict):
@@ -384,3 +385,94 @@ def plot_ridge_results(results, *, show: bool = True):
         plt.show()
 
     return fig, axes
+
+
+def plot_combined_ridge(results_list, labels=None, *, save_path=None, show: bool = True):
+    """Plot R^2 curves for multiple ridge-results dictionaries on a single axes.
+
+    Args:
+        results_list: Iterable of result dictionaries or pandas DataFrames (each must have
+            keys 'lag_ms' and 'r2' or be convertible via to_dict(orient='list')).
+        labels: Optional list of labels for the legend. If omitted, subjects will be numbered.
+        save_path: Optional path to save the resulting figure (PNG).
+        show: Whether to call plt.show(). Default True.
+
+    Returns:
+        fig, ax: Matplotlib figure and axis containing the overlay plot.
+    """
+    import matplotlib.pyplot as plt
+
+    prepared = []
+    for res in results_list:
+        if hasattr(res, 'to_dict'):
+            rd = res.to_dict(orient='list')
+        elif isinstance(res, dict):
+            rd = res
+        else:
+            raise ValueError('Each entry must be a dict or DataFrame')
+        data = _prepare_ridge_plot_data(rd)
+        prepared.append(data)
+
+    n = len(prepared)
+    if labels is None:
+        labels = [f"entry_{i+1}" for i in range(n)]
+
+    # Try to map subject-style labels (e.g. 'sub-01' or 'S01') to NYU IDs
+    try:
+        repo_root = Path(__file__).resolve().parents[0]
+        participants_path = repo_root / "data" / "participants.tsv"
+        participants_map = {}
+        if participants_path.exists():
+            try:
+                import pandas as _pd
+
+                p_df = _pd.read_csv(participants_path, sep="\t")
+                participants_map = dict(zip(p_df["participant_id"], p_df["nyu_id"]))
+            except Exception:
+                participants_map = {}
+        import re
+        mapped_labels = []
+        for lab in labels:
+            m = re.match(r"^[sS]ub[-_]?0*(\d+)$", str(lab)) or re.match(r"^[sS](\d+)$", str(lab))
+            if m:
+                idx = int(m.group(1))
+                subj_id = f"sub-{idx:02d}"
+                mapped = participants_map.get(subj_id)
+                mapped_labels.append(str(mapped) if mapped is not None else subj_id)
+            else:
+                mapped_labels.append(lab)
+        labels = mapped_labels
+    except Exception:
+        # If mapping fails for any reason, fall back to original labels
+        pass
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    cmap = plt.get_cmap('tab10')
+    best_overall = {'r2': -float('inf'), 'lag': None, 'label': None}
+    for i, data in enumerate(prepared):
+        color = cmap(i % 10)
+        # draw continuous line (no dots)
+        ax.plot(data['lags'], data['r2'], linestyle='-', label=labels[i], color=color)
+        # track best point globally
+        bi = data['best_idx']
+        r2_val = float(data['r2'][bi])
+        lag_val = float(data['lags'][bi])
+        if r2_val > best_overall['r2']:
+            best_overall.update({'r2': r2_val, 'lag': lag_val, 'label': labels[i]})
+
+    ax.set_xlabel('Lag (ms)')
+    ax.set_ylabel('R$^2$')
+    ax.set_title('Overlay: Ridge CV R$^2$ by lag (subjects / average / pooled)')
+    ax.grid(True)
+    ax.legend(loc='best', fontsize='small')
+    # Annotate highest R^2 across plotted entries
+    if best_overall['lag'] is not None:
+        ann_text = f"Best R^2={best_overall['r2']:.3f} at {best_overall['lag']:.0f} ms ({best_overall['label']})"
+        ax.annotate(ann_text, xy=(0.98, 0.02), xycoords='axes fraction', ha='right', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.3', fc='yellow', alpha=0.7), fontsize='small')
+    plt.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path)
+    if show:
+        plt.show()
+    return fig, ax

@@ -45,11 +45,7 @@ model_params:
   neural_log_eps_scale: 0.000001
   allow_neural_resample: false
   drop_last_neural_channel: true
-  # Uncomment the following lines to load precomputed neural features instead of MNE Raw objects.
-  # precomputed_neural_path: data/precomputed/highgamma_features  # directory or .npz file
-  # precomputed_neural_array_key: neural  # optional hint for array datasets within npz files
-  # precomputed_neural_sr_key: sampling_rate  # optional hint for sampling rate datasets
-  # precomputed_sampling_rate: 512  # fallback when sampling rate is not stored alongside the array
+
 
 notes: |
   This configuration assumes preprocessed high-gamma data sampled at 512 Hz
