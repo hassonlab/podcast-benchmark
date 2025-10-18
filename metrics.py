@@ -15,15 +15,62 @@ def mse_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
 
 @register_metric("bce")
 def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
-    """BCE loss for binary classification, expects probabilities in [0, 1].
+    """Weighted BCE loss for binary classification using PyTorch's built-in functionality.
 
-    If inputs do not look like probabilities, applies a sigmoid to convert logits to probs.
+    Uses sklearn's compute_class_weight for automatic class balancing.
+    Handles both logits and probabilities as input.
     """
-    probs = predicted
-    # Heuristic: if values are outside [0,1], treat as logits and apply sigmoid
-    if probs.detach().min() < 0 or probs.detach().max() > 1:
-        probs = torch.sigmoid(probs)
-    return F.binary_cross_entropy(probs, groundtruth)
+    from sklearn.utils.class_weight import compute_class_weight
+    
+    # Convert to numpy for sklearn
+    y_true = groundtruth.detach().cpu().numpy().astype(int)
+    
+    # Check if we have both classes in the batch
+    unique_classes = np.unique(y_true)
+    
+    # If only one class present, use regular BCE (no weighting needed)
+    if len(unique_classes) == 1:
+        probs = predicted
+        if probs.detach().min() < 0 or probs.detach().max() > 1:
+            probs = torch.sigmoid(probs)
+        return F.binary_cross_entropy(probs, groundtruth)
+    
+    # Compute balanced class weights using sklearn
+    try:
+        class_weights = compute_class_weight(
+            'balanced', 
+            classes=unique_classes, 
+            y=y_true
+        )
+        
+        # Map class weights to [class_0_weight, class_1_weight]
+        weight_dict = dict(zip(unique_classes, class_weights))
+        weight_0 = weight_dict.get(0, 1.0)
+        weight_1 = weight_dict.get(1, 1.0)
+        
+        # Create per-sample weights based on class
+        sample_weights = torch.where(groundtruth == 1, weight_1, weight_0)
+        sample_weights = sample_weights.to(dtype=predicted.dtype, device=predicted.device)
+        
+        # If input looks like probabilities, convert to logits
+        if predicted.detach().min() >= 0 and predicted.detach().max() <= 1:
+            # Convert probabilities to logits
+            probs = torch.clamp(predicted, 1e-7, 1 - 1e-7)  # Avoid log(0)
+            logits = torch.log(probs / (1 - probs))
+        else:
+            logits = predicted
+            
+        # Use weighted BCE with logits
+        return F.binary_cross_entropy_with_logits(logits, groundtruth, weight=sample_weights)
+        
+    except Exception as e:
+        print(f'Error in weighted BCE: {e}')
+        # Fallback to regular BCE if class weight computation fails
+        probs = predicted
+        if probs.detach().min() < 0 or probs.detach().max() > 1:
+            probs = torch.sigmoid(probs)
+        return F.binary_cross_entropy(probs, groundtruth)
+        
 
 @register_metric("cosine_sim")
 def cosine_similarity(pred: torch.Tensor, true: torch.Tensor) -> float:
@@ -86,7 +133,7 @@ def roc_auc_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     if true.ndim > 1:
         true = true.squeeze(-1)
 
-    y_true = true.detach().cpu().numpy()
+    y_true = true.detach().cpu().numpy().astype(int)
     y_score = pred.detach().cpu().numpy()
 
     # Handle batches with a single class gracefully
@@ -118,6 +165,157 @@ def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
     try:
         return float(f1_score(y_true, y_pred, zero_division=0))
+    except Exception:
+        return 0.0
+
+
+@register_metric("sensitivity")
+def sensitivity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Sensitivity (True Positive Rate) for binary classification.
+    Sensitivity = TP / (TP + FN) = Recall
+    
+    Measures the proportion of actual positives that are correctly identified.
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
+    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+    
+    try:
+        # Calculate True Positives and False Negatives
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fn = ((y_pred == 0) & (y_true == 1)).sum()
+        
+        # Avoid division by zero
+        if tp + fn == 0:
+            return 0.0
+        
+        sensitivity = tp / (tp + fn)
+        return float(sensitivity)
+    except Exception:
+        return 0.0
+
+
+@register_metric("precision")
+def precision_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Precision for binary classification.
+    Precision = TP / (TP + FP)
+    
+    Measures the proportion of predicted positives that are actually positive.
+    Used in F1 calculation: F1 = 2 * (Precision * Recall) / (Precision + Recall)
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
+    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+    
+    try:
+        # Calculate True Positives and False Positives
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fp = ((y_pred == 1) & (y_true == 0)).sum()
+        
+        # Avoid division by zero
+        if tp + fp == 0:
+            return 0.0
+        
+        precision = tp / (tp + fp)
+        return float(precision)
+    except Exception:
+        return 0.0
+
+
+@register_metric("recall")
+def recall_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Recall for binary classification.
+    Recall = TP / (TP + FN) = Sensitivity
+    
+    Measures the proportion of actual positives that are correctly identified.
+    Used in F1 calculation: F1 = 2 * (Precision * Recall) / (Precision + Recall)
+    Note: This is identical to sensitivity, but included for completeness.
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
+    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+    
+    try:
+        # Calculate True Positives and False Negatives
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fn = ((y_pred == 0) & (y_true == 1)).sum()
+        
+        # Avoid division by zero
+        if tp + fn == 0:
+            return 0.0
+        
+        recall = tp / (tp + fn)
+        return float(recall)
+    except Exception:
+        return 0.0
+
+
+@register_metric("specificity")
+def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Specificity (True Negative Rate) for binary classification.
+    Specificity = TN / (TN + FP)
+    
+    Measures the proportion of actual negatives that are correctly identified.
+    """
+    # Ensure 1D
+    if pred.ndim > 1:
+        pred = pred.squeeze(-1)
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    # Convert to probabilities if needed; assume in [0,1] otherwise
+    if pred.detach().min() < 0 or pred.detach().max() > 1:
+        probs = torch.sigmoid(pred)
+    else:
+        probs = pred
+    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+    
+    try:
+        # Calculate True Negatives and False Positives
+        tn = ((y_pred == 0) & (y_true == 0)).sum()
+        fp = ((y_pred == 1) & (y_true == 0)).sum()
+        
+        # Avoid division by zero
+        if tn + fp == 0:
+            return 0.0
+        
+        specificity = tn / (tn + fp)
+        return float(specificity)
     except Exception:
         return 0.0
 
