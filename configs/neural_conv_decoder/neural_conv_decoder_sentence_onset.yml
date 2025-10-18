@@ -22,8 +22,8 @@ training_params:
   lag_step_size: 100
   # Use BCE on probabilities with model outputting sigmoid
   losses: [bce]
-  metrics: [roc_auc, f1]
-  early_stopping_metric: roc_auc
+  metrics: [roc_auc,sensitivity, specificity, f1, precision, recall]
+  early_stopping_metric: f1
   smaller_is_better: false
 
 data_params:
@@ -40,7 +40,7 @@ data_params:
     negatives_per_positive: 5 
     #Negative examples are sampled within each sentence, at least `negative_margin_s` seconds after onset
     negative_margin_s: 0.75 #
-    sentence_csv_path: data/stimuli/all_sentences_podcast.csv
+    sentence_csv_path: data/stimuli/all_sentences_podcast_cleaned.csv
 
 trial_name: sentence_onset_lr
 
