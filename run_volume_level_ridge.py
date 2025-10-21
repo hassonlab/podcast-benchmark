@@ -20,6 +20,7 @@ from vol_lvl_ridge_utils import (
     sliding_window_rms,
 )
 from plot_utils import plot_ridge_results
+from analysis_utils import write_outputs, aggregate_average, aggregate_pooled
 
 # Import registries so decorators run.
 import registry  # noqa: F401
@@ -293,30 +294,11 @@ def _compute_modes(
     if "average" in modes:
         if not per_subject:
             raise RuntimeError("Average analysis requested but no subject results were produced.")
-        combined = pd.concat(per_subject.values(), ignore_index=True)
-        grouped = combined.groupby("lag_ms", as_index=False).agg(
-            r2=("r2", "mean"),
-            r2_std=("r2", "std"),
-            alpha_mean=("alpha", "mean"),
-            train_r2=("train_r2", "mean"),
-            n_subjects=("subject_id", "nunique"),
-        )
-        results["average"] = grouped
+        results["average"] = aggregate_average(per_subject)
     if "pooled_electrodes" in modes:
-        pooled_neural = np.concatenate([entry["neural"] for entry in datasets], axis=0)
-        pooled_audio = datasets[0]["audio"]
-        pooled_sr = datasets[0]["effective_sr"]
-        pooled_df = _ridge_lag_sweep(
-            pooled_neural,
-            pooled_audio,
-            pooled_sr,
-            lags_ms,
-            cv_splits,
-            alphas,
-            device,
+        results["pooled_electrodes"] = aggregate_pooled(
+            datasets, lags_ms, cv_splits, alphas, device, _ridge_lag_sweep
         )
-        pooled_df["subject_id"] = "pooled"
-        results["pooled_electrodes"] = pooled_df
     return results
 
 
@@ -362,66 +344,9 @@ def run_volume_level_ridge(cfg: ExperimentConfig, output_context: Dict[str, Path
     )
     lags_ms = _resolve_lags(cfg.training_params)
     results = _compute_modes(datasets, lags_ms, model_params)
-    _write_outputs(results, output_context["output_dir"], model_params)
+    write_outputs(results, output_context["output_dir"], model_params)
     return results
-
-
-def _write_outputs(results: Dict[str, object], output_dir: Path, model_params: dict) -> None:
-    # Save per-mode ridge summaries and combined CSV artifacts.
-    records: List[pd.DataFrame] = []
-    per_subject = results.get("per_subject", {})
-    for subject_id, df in per_subject.items():
-        df.to_csv(output_dir / f"subject_{int(subject_id):02d}_ridge.csv", index=False)
-        temp = df.copy()
-        temp["mode"] = "per_subject"
-        records.append(temp)
-    if "average" in results:
-        avg_df = results["average"].copy()
-        avg_df.insert(0, "subject_id", "mean")
-        avg_df["mode"] = "average"
-        avg_df.to_csv(output_dir / "average_ridge.csv", index=False)
-        records.append(avg_df)
-    if "pooled_electrodes" in results:
-        pooled_df = results["pooled_electrodes"].copy()
-        pooled_df["mode"] = "pooled_electrodes"
-        pooled_df.to_csv(output_dir / "pooled_ridge.csv", index=False)
-        records.append(pooled_df)
-    if records:
-        combined = pd.concat(records, ignore_index=True)
-        summary_name = model_params.get("output_csv", "ridge_summary.csv")
-        combined.to_csv(output_dir / summary_name, index=False)
-
-    # Optionally create plots for each mode
-    try:
-        do_plot = bool(model_params.get("plot", False))
-    except Exception:
-        do_plot = False
-    if do_plot:
-        save_path = model_params.get("save_plot_path", "ridge_plot.png")
-        # Per-subject plots
-        for subject_id, df in per_subject.items():
-            try:
-                fig, axes = plot_ridge_results(df.to_dict(orient="list"), show=False)
-                fig.savefig(output_dir / f"subject_{int(subject_id):02d}_ridge.png")
-                fig.clf()
-            except Exception as exc:  # keep pipeline robust
-                print(f"Failed to plot subject {subject_id}: {exc}")
-        # Average plot
-        if "average" in results:
-            try:
-                fig, axes = plot_ridge_results(results["average"].to_dict(orient="list"), show=False)
-                fig.savefig(output_dir / f"average_{save_path}")
-                fig.clf()
-            except Exception as exc:
-                print(f"Failed to plot average results: {exc}")
-        # Pooled plot
-        if "pooled_electrodes" in results:
-            try:
-                fig, axes = plot_ridge_results(results["pooled_electrodes"].to_dict(orient="list"), show=False)
-                fig.savefig(output_dir / f"pooled_{save_path}")
-                fig.clf()
-            except Exception as exc:
-                print(f"Failed to plot pooled results: {exc}")
+    
 
 
 def main():
