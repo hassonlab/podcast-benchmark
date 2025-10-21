@@ -22,7 +22,7 @@ training_params:
   lag_step_size: 100
   # Use BCE on probabilities with model outputting sigmoid
   losses: [bce]
-  metrics: [roc_auc,sensitivity, specificity, f1, precision, recall]
+  metrics: [roc_auc,sensitivity, specificity, f1, precision]
   early_stopping_metric: f1
   smaller_is_better: false
 

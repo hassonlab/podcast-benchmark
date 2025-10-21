@@ -243,46 +243,6 @@ def precision_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     except Exception:
         return 0.0
 
-
-@register_metric("recall")
-def recall_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
-    """
-    Recall for binary classification.
-    Recall = TP / (TP + FN) = Sensitivity
-    
-    Measures the proportion of actual positives that are correctly identified.
-    Used in F1 calculation: F1 = 2 * (Precision * Recall) / (Precision + Recall)
-    Note: This is identical to sensitivity, but included for completeness.
-    """
-    # Ensure 1D
-    if pred.ndim > 1:
-        pred = pred.squeeze(-1)
-    if true.ndim > 1:
-        true = true.squeeze(-1)
-
-    y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
-    if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
-    else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
-    
-    try:
-        # Calculate True Positives and False Negatives
-        tp = ((y_pred == 1) & (y_true == 1)).sum()
-        fn = ((y_pred == 0) & (y_true == 1)).sum()
-        
-        # Avoid division by zero
-        if tp + fn == 0:
-            return 0.0
-        
-        recall = tp / (tp + fn)
-        return float(recall)
-    except Exception:
-        return 0.0
-
-
 @register_metric("specificity")
 def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
