@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA
 from config import DataParams
 import embeddings
 import registry
+from vol_lvl_ridge_utils import compute_window_hop, sliding_window_rms
 
 
 @registry.register_task_data_getter()
@@ -150,28 +151,22 @@ def volume_level_encoding_task(data_params: DataParams):
     width = width_ms / 1000.0
     stride = stride_ms / 1000.0
 
-    window_samples = max(1, int(round(width * target_sr)))
-    hop_samples = max(1, int(round(stride * target_sr)))
+    window_samples, hop_samples, effective_sr = compute_window_hop(
+        target_sr, width_ms, stride_ms
+    )
 
     if window_samples > n_samples:
         raise ValueError(
             f"Requested window of {window_samples} samples exceeds envelope length {n_samples}."
         )
+    
+    targets = sliding_window_rms(env_db, window_samples, hop_samples)
 
     starts = np.arange(0, n_samples - window_samples + 1, hop_samples, dtype=int)
     if starts.size == 0:
         raise ValueError(
             "hop_size/window_size combination produced zero windows; adjust parameters."
         )
-
-    env64 = env_db.astype(np.float64, copy=False)
-    series = env64 * env64
-    cumsum = np.cumsum(series, dtype=np.float64)
-    cumsum = np.concatenate(([0.0], cumsum))
-    start_vals = cumsum[starts]
-    end_vals = cumsum[starts + window_samples]
-    window_means = (end_vals - start_vals) / float(window_samples)
-    targets = np.sqrt(window_means, dtype=np.float64).astype(np.float32)
 
     centers = (starts + (window_samples - 1) / 2.0) / float(target_sr)
 
@@ -187,7 +182,6 @@ def volume_level_encoding_task(data_params: DataParams):
         }
     )
 
-    effective_sr = float(target_sr) / float(hop_samples)
     df.attrs["window_params"] = {
         # Notebook-compatible keys
         "mode": "rms",
