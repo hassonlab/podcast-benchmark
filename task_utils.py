@@ -30,7 +30,6 @@ def sentence_onset_task(data_params: DataParams):
     # Resolve CSV path
     default_csv = os.path.join(data_params.data_root, "all_sentences_podcast.csv")
     csv_path = tp.get("sentence_csv_path", default_csv)
-    print(csv_path)
 
     df = pd.read_csv(csv_path, index_col=0)
 
