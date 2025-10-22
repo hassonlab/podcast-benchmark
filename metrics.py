@@ -5,6 +5,8 @@ from torch.nn import functional as F
 from sklearn.metrics import roc_curve, auc
 
 from sklearn.metrics import roc_auc_score, f1_score
+from sklearn.utils.class_weight import compute_class_weight
+import warnings
 
 from registry import register_metric
 
@@ -19,8 +21,6 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
 
     Expects probabilities in [0,1] range. Uses sklearn's compute_class_weight for automatic class balancing.
     """
-    from sklearn.utils.class_weight import compute_class_weight
-    import warnings
     
     # Check if input looks like logits and warn user
     if predicted.detach().min() < 0 or predicted.detach().max() > 1:
@@ -143,7 +143,8 @@ def roc_auc_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
 @register_metric("f1")
 def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
-    F1 score at a 0.5 threshold after sigmoid.
+    F1 score for binary classification at 0.5 threshold.
+    Expects probabilities in [0,1] range.
     """
     # Ensure 1D
     if pred.ndim > 1:
@@ -152,12 +153,16 @@ def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
+    
+    # Check if input looks like logits and warn user
     if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
-    else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        warnings.warn(
+            f"F1 metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
+            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
+            UserWarning
+        )
+    
+    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
     try:
         return float(f1_score(y_true, y_pred, zero_division=0))
     except Exception:
@@ -171,7 +176,9 @@ def sensitivity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     Sensitivity = TP / (TP + FN) = Recall
     
     Measures the proportion of actual positives that are correctly identified.
+    Expects probabilities in [0,1] range.
     """
+    
     # Ensure 1D
     if pred.ndim > 1:
         pred = pred.squeeze(-1)
@@ -179,12 +186,16 @@ def sensitivity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
+    
+    # Check if input looks like logits and warn user
     if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
-    else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        warnings.warn(
+            f"Sensitivity metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
+            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
+            UserWarning
+        )
+    
+    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
     
     try:
         # Calculate True Positives and False Negatives
@@ -208,8 +219,9 @@ def precision_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     Precision = TP / (TP + FP)
     
     Measures the proportion of predicted positives that are actually positive.
-    Used in F1 calculation: F1 = 2 * (Precision * Recall) / (Precision + Recall)
+    Expects probabilities in [0,1] range.
     """
+
     # Ensure 1D
     if pred.ndim > 1:
         pred = pred.squeeze(-1)
@@ -217,12 +229,16 @@ def precision_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
+    
+    # Check if input looks like logits and warn user
     if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
-    else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        warnings.warn(
+            f"Precision metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
+            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
+            UserWarning
+        )
+    
+    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
     
     try:
         # Calculate True Positives and False Positives
@@ -245,7 +261,9 @@ def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     Specificity = TN / (TN + FP)
     
     Measures the proportion of actual negatives that are correctly identified.
+    Expects probabilities in [0,1] range.
     """
+
     # Ensure 1D
     if pred.ndim > 1:
         pred = pred.squeeze(-1)
@@ -253,12 +271,16 @@ def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
+    
+    # Check if input looks like logits and warn user
     if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
-    else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        warnings.warn(
+            f"Specificity metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
+            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
+            UserWarning
+        )
+    
+    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
     
     try:
         # Calculate True Negatives and False Positives
