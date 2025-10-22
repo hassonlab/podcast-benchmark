@@ -37,10 +37,10 @@ data_params:
   # Task-specific knobs (optional)
   task_params:
     #this is the number of negative samples (no sentence onset) per positive sample (sentence onset)
-    negatives_per_positive: 5 
+    negatives_per_positive: 5
     #Negative examples are sampled within each sentence, at least `negative_margin_s` seconds after onset
     negative_margin_s: 0.75 #
-    sentence_csv_path: data/stimuli/all_sentences_podcast_cleaned.csv
+    sentence_csv_path: all_sentences_podcast.csv
 
 trial_name: sentence_onset_lr
 
