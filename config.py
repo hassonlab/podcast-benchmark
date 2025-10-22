@@ -21,7 +21,7 @@ class DataParams:
     embedding_pca_dim: Optional[int] = None
     # CSV file with columns subject (subject integer id) and elec (string name of electrode).
     # If not set then defaults to configured subject_ids and channel_reg_ex.
-    electrode_file_path: Optional[str] = None
+    electrode_file_path: Optional[str] = '/scratch/gpfs/arnab/podcast-benchmark/all_subject_sig.csv'  #None
     # TODO: Transition to making this dictionary the only field that needs to be set for specifying electrodes.
     # Per-subject electrode list, should be a dictionary from subject id's to a list of electrode names.
     # Optional and can instead use channel_reg_ex if not set.

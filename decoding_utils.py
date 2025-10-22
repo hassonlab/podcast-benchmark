@@ -20,7 +20,17 @@ from fold_utils import get_sequential_folds, get_zero_shot_folds
 import metrics
 from plot_utils import plot_cv_results, plot_training_history
 from registry import metric_registry
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
 
+
+def logistic_regression(X_train, y_train, X_val, y_val):
+    model = LogisticRegression(max_iter=1000)
+    model.fit(X_train, y_train)
+
+    val_score = f1_score(y_val, model.predict(X_val), average="weighted")
+
+    return val_score
 
 def setup_metrics_and_loss(training_params: TrainingParams):
     """
@@ -197,6 +207,7 @@ def train_decoding_model(
             cv_results[metric] = []
 
     models, histories = [], []
+    logistic_f1 = []
 
     def run_epoch(model, loader, optimizer=None):
         """
@@ -238,17 +249,37 @@ def train_decoding_model(
 
             # accumulate each metric
             for name, fn in all_fns.items():
-                val = fn(out, yb)
-                # get a scalar float
-                if torch.is_tensor(val):
-                    val = val.detach().mean().item()
-                sums[name] += val
+                # val = fn(out, yb)
+                if name == "confusion_matrix":
+                    
+                    if model_params.get("embedding_dim") ==1:
+                        num_classes=2
+                    else:
+                        num_classes=model_params.get("embedding_dim")
+                    
+                    val = fn(out, yb, num_classes)
+                    
+                    # Initialize if first batch
+                    if name not in sums or sums[name] is None:
+                        sums[name] = val.detach().cpu().numpy() if torch.is_tensor(val) else np.array(val)
+                    else:
+                        # Accumulate confusion matrices
+                        sums[name] += val.detach().cpu().numpy() if torch.is_tensor(val) else np.array(val)
+                else:
+                    val = fn(out, yb)
+                    # get a scalar float
+                    if torch.is_tensor(val):
+                        val = val.detach().mean().item()
+                    sums[name] += val 
 
             # add loss to sums
             if torch.is_tensor(loss):
                 loss = loss.detach().mean().item()
             sums["loss"] += loss
-        return {name: sums[name] / len(loader) for name in sums}
+        return {
+            name: (sums[name] if name == "confusion_matrix" else sums[name] / len(loader))
+            for name in sums
+        }
 
     # 6. Cross‐val loop
     for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
@@ -271,6 +302,18 @@ def train_decoding_model(
             )
             for phase, ds in datasets.items()
         }
+
+        if model_params.get("logistic_regression"):
+            # Logistic Regression model training
+            logistic_f1.append( logistic_regression(
+                X[tr_idx].cpu().numpy(),
+                Y[tr_idx].cpu().numpy(),
+                X[te_idx].cpu().numpy(),
+                Y[te_idx].cpu().numpy(),
+                )
+            )
+            
+            
 
         # Model, optimizer, early‐stop setup
         model = model_constructor_fn(model_params).to(device)
@@ -300,11 +343,21 @@ def train_decoding_model(
             for name, val in train_mets.items():
                 history[f"train_{name}"].append(val)
                 if write_to_tensorboard:
-                    writer.add_scalar(f"{name}/train", val, epoch)
+                    # Only log scalars
+                    if np.isscalar(val) or (isinstance(val, np.ndarray) and val.size == 1):
+                        writer.add_scalar(f"{name}/train", val, epoch)
+                    # Optionally, log confusion matrix as image or text
+                    elif name == "confusion_matrix":
+                        writer.add_text(f"{name}/train", str(val), epoch)
             for name, val in val_mets.items():
                 history[f"val_{name}"].append(val)
                 if write_to_tensorboard:
-                    writer.add_scalar(f"{name}/val", val, epoch)
+                    # Only log scalars
+                    if np.isscalar(val) or (isinstance(val, np.ndarray) and val.size == 1):
+                        writer.add_scalar(f"{name}/val", val, epoch)
+                    # Optionally, log confusion matrix as image or text
+                    elif name == "confusion_matrix":
+                        writer.add_text(f"{name}/val", str(val), epoch)
 
             # early stopping on requested metric
             cur = val_mets[training_params.early_stopping_metric]
@@ -334,14 +387,25 @@ def train_decoding_model(
 
         # record into cv_results
         for name in metric_names:
-            cv_results[f"train_{name}"].append(history[f"train_{name}"][best_epoch])
-            cv_results[f"val_{name}"].append(history[f"val_{name}"][best_epoch])
-            cv_results[f"test_{name}"].append(test_mets[name])
+
+            if name!="confusion_matrix":
+                cv_results[f"train_{name}"].append(history[f"train_{name}"][best_epoch])
+                cv_results[f"val_{name}"].append(history[f"val_{name}"][best_epoch])
+                cv_results[f"test_{name}"].append(test_mets[name])
+            elif name=="confusion_matrix":
+                conf_matrix_train = history[f"train_{name}"][best_epoch]
+                conf_matrix_val = history[f"val_{name}"][best_epoch]
+                conf_matrix_test = test_mets[name]
         cv_results["num_epochs"].append(history["num_epochs"])
 
         if write_to_tensorboard:
             for name, val in test_mets.items():
-                writer.add_scalar(f"{name}/test", val, fold)
+                # Only log scalars
+                if np.isscalar(val) or (isinstance(val, np.ndarray) and val.size == 1):
+                    writer.add_scalar(f"{name}/test", val, fold)
+                # Log confusion matrix as text
+                elif name == "confusion_matrix":
+                    writer.add_text(f"{name}/test", str(val), fold)
             writer.close()
 
         # word‐level ROC and top-k. Only useful for word embedding task.
@@ -373,13 +437,39 @@ def train_decoding_model(
             plot_training_history(history, fold=fold)
 
     # 7. Print CV summary
+    if model_params.get("logistic_regression"):
+        print("\nLogistic Regression F1 scores across folds:")
+        
+        print(f"F1: {np.mean(logistic_f1):.4f} ± {np.std(logistic_f1):.4f}")        
+
+
+
     print("\n" + "=" * 60)
     print("CROSS-VALIDATION RESULTS")
     print("=" * 60)
+
+    conf_matrices = {
+    "train": conf_matrix_train,
+    "val": conf_matrix_val,
+    "test": conf_matrix_test,
+    }
+
     for phase in phases:
         for name in metric_names:
-            vals = cv_results[f"{phase}_{name}"]
-            print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+            if name != "confusion_matrix":
+                
+                vals = cv_results[f"{phase}_{name}"]
+                print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+            elif name == "confusion_matrix":
+                print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
+                # if phase == "train":
+                #     print(conf_matrix_train)
+                # elif phase == "val":
+                #     print(conf_matrix_val)
+                # elif phase == "test":
+                #     print(conf_matrix_test)
+                
+                
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]

@@ -35,6 +35,14 @@ def cosine_distance(pred: torch.Tensor, true: torch.Tensor) -> float:
     sim = F.cosine_similarity(pred, true, dim=-1)
     return (1 - sim).mean()
 
+@register_metric("cross_entropy")
+def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+    """
+    Cross-entropy loss for multi-class classification, expects raw logits.
+    Groundtruth should contain class indices (not one-hot).
+    """
+    return F.cross_entropy(predicted, groundtruth.long())
+
 
 @register_metric("nll_embedding")
 def compute_nll_contextual(predicted_embeddings, actual_embeddings):
@@ -96,6 +104,52 @@ def roc_auc_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         return float(roc_auc_score(y_true, y_score))
     except Exception:
         return 0.5
+    
+@register_metric("roc_auc_multiclass")
+def roc_auc_multiclass(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    ROC-AUC for multiclass classification.
+    Accepts raw scores (logits or probabilities).
+    """
+    # Convert to CPU numpy arrays
+    y_true = true.detach().cpu().numpy()
+    y_score = pred.detach().cpu().numpy()
+
+    # Handle edge case: fewer than 2 classes in batch
+    if len(set(y_true.tolist())) < 2:
+        return 0.5
+
+    try:
+        return float(roc_auc_score(
+            y_true,
+            y_score,
+            multi_class='ovr',     # or 'ovo' (one-vs-one)
+            average='macro'        # or 'weighted', depending on your use case
+        ))
+    except Exception:
+        return 0.5
+    
+@register_metric("corr")
+def pearson_correlation(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Pearson correlation coefficient between predictions and ground truth.
+    """
+    pred_mean = pred.mean()
+    true_mean = true.mean()
+
+    cov = ((pred - pred_mean) * (true - true_mean)).mean()
+    pred_std = pred.std()
+    true_std = true.std()
+
+    if pred_std.item() == 0 or true_std.item() == 0:
+        return 0.0
+
+    corr = cov / (pred_std * true_std)
+
+    # corr=torch.corrcoef(true.unsqueeze(0), pred.unsqueeze(0))[0,1]
+
+    return corr.item()
+
 
 
 @register_metric("f1")
@@ -104,20 +158,33 @@ def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     F1 score at a 0.5 threshold after sigmoid.
     """
     # Ensure 1D
-    if pred.ndim > 1:
+    if pred.ndim > 1 and pred.shape[-1] == 1:
         pred = pred.squeeze(-1)
     if true.ndim > 1:
         true = true.squeeze(-1)
 
     y_true = true.detach().cpu().numpy().astype(int)
-    # Convert to probabilities if needed; assume in [0,1] otherwise
-    if pred.detach().min() < 0 or pred.detach().max() > 1:
-        probs = torch.sigmoid(pred)
+    
+    if pred.ndim > 1 and pred.shape[1] > 1:
+        # If logits, apply softmax
+        if pred.detach().min() < 0 or pred.detach().max() > 1:
+            probs = torch.softmax(pred, dim=1)
+        else:
+            probs = pred
+        y_pred = probs.detach().cpu().numpy().argmax(axis=1)
+        average = "weighted"
     else:
-        probs = pred
-    y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        # Binary case
+        if (pred.detach().min() < 0 or pred.detach().max() > 1):
+            probs = torch.sigmoid(pred)
+        else:
+            probs = pred
+        y_pred = (probs.detach().cpu().numpy() >= 0.5).astype(int)
+        # average = "binary" if y_true.max() == 1 else "weighted"
+        average = "weighted"
+
     try:
-        return float(f1_score(y_true, y_pred, zero_division=0))
+        return float(f1_score(y_true, y_pred, zero_division=0, average=average))
     except Exception:
         return 0.0
 
@@ -190,6 +257,39 @@ def calculate_auc_roc(
     test_weighted_auc = (scores * normed_freqs).sum()
 
     return avg_auc, train_weighted_auc, test_weighted_auc
+
+@register_metric("confusion_matrix")
+def conf_matrix(predictions: np.ndarray, ground_truth: np.ndarray, num_classes=None) -> np.ndarray:
+    """
+    Compute the confusion matrix for predictions and ground truth.
+
+    Args:
+        predictions: Array of predicted class indices or probabilities (shape [N] or [N, num_classes])
+        ground_truth: Array of true class indices (shape [N])
+
+    Returns:
+        Confusion matrix as a 2D numpy array.
+    """
+    from sklearn.metrics import confusion_matrix
+
+    # Move to CPU and convert to numpy if tensors
+    if isinstance(predictions, torch.Tensor):
+        predictions = predictions.detach().cpu().numpy()
+    if isinstance(ground_truth, torch.Tensor):
+        ground_truth = ground_truth.detach().cpu().numpy()
+
+    # If predictions are probabilities, convert to class indices
+    if predictions.ndim > 1:
+        pred_labels = np.argmax(predictions, axis=1)
+    else:
+        pred_labels =(predictions>= 0.5).astype(int)
+
+    # if num_classes is None:
+    #     num_classes = max(ground_truth.max(), pred_labels.max()) + 1
+
+    return confusion_matrix(ground_truth, pred_labels,labels=np.arange(num_classes))
+
+
 
 
 @register_metric("perplexity")

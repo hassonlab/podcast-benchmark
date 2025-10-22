@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+
 import registry
 
 
@@ -112,6 +113,11 @@ class PitomModel(nn.Module):
             x = self.tanh(x)
         elif self.output_activation == "sigmoid":
             x = torch.sigmoid(x)
+        elif self.output_activation == "softmax":
+            x = torch.softmax(x, dim=-1)
+        elif self.output_activation == "linear":
+            pass # No activation applied, x remains unchanged
+
 
         # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
         if x.shape[1] == 1:
@@ -165,6 +171,80 @@ class EnsemblePitomModel(nn.Module):
         if not preserve_ensemble:
             embeddings = embeddings.mean(1)
         return embeddings
+    
+class Decoder_Mlp(nn.Module):
+    def __init__(
+        self,
+        input_channels,
+        output_dim,
+        input_timesteps=10,
+        reg=0.35,
+        reg_head=0,
+        dropout=0.2,
+        output_activation: str = "sigmoid",
+    ):
+        
+        """
+        PyTorch implementation of a simple MLP decoding model.
+
+        Args:
+            input_channels: Numbr of electrodes in data (int)
+            output_dim: Dimension of output vector (int)
+            reg: L2 regularization factor for dense head (default: 0)
+            dropout: Dropout rate (default: 0.2)
+        """
+        super(decoder_mlp, self).__init__()
+
+        self.reg = reg
+        self.reg_head = reg_head
+        self.dropout = dropout
+        self.output_dim = output_dim
+        self.output_activation = output_activation
+
+        self.fc1 = nn.Linear(input_channels*input_timesteps, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.dropout1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(128, 64)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.dropout2 = nn.Dropout(dropout)
+        self.fc3 = nn.Linear(64, output_dim)
+        self.layer_norm = nn.LayerNorm(output_dim)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+
+        # Apply layers
+        x = torch.flatten(x, start_dim=1)
+        x = self.fc1(x)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = self.dropout1(x)
+        x = self.fc2(x)
+        x = self.bn2(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
+        x = self.fc3(x)
+        
+        # LayerNorm collapses to zero when normalized_shape=1; skip for scalar output
+        if self.output_dim > 1:
+            x = self.layer_norm(x)
+        # Apply configurable output activation.
+        if self.output_activation == "tanh":
+            x = self.tanh(x)
+        elif self.output_activation == "sigmoid":
+            x = torch.sigmoid(x)
+        elif self.output_activation == "softmax":
+            x = torch.softmax(x, dim=-1)
+        elif self.output_activation == "linear":
+            pass # No activation applied, x remains unchanged
+
+        # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
+        if x.shape[1] == 1:
+            x = x.squeeze(1)
+
+        return x
+        
+
 
 
 # Constructors
@@ -193,3 +273,20 @@ def ensemble_pitom_model(model_params):
         dropout=model_params["dropout"],
         output_activation=model_params.get("output_activation", "tanh"),
     )
+
+@registry.register_model_constructor()
+def decoder_mlp(model_params):
+    return Decoder_Mlp(
+        input_channels=model_params["input_channels"],
+        output_dim=model_params["embedding_dim"],
+        input_timesteps=model_params["input_timesteps"],      
+        reg=model_params["reg"],
+        reg_head=model_params["reg_head"],
+        dropout=model_params["dropout"],
+        output_activation=model_params.get("output_activation", "tanh"),
+    )
+
+
+
+
+

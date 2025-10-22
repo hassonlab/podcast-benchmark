@@ -12,6 +12,10 @@ JOB_NAME = "$(PREFIX)-$(USR)-$(DT)"
 # To batch on slurm
 CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
+
+# To activate the environment later, run: source decoding_env/bin/activate
+#--config "configs/neural_conv_decoder/neural_conv_decoder$(CONFIG_SUFFIX).yml"
+
 FROZEN := frozen_attention frozen_linear
 FINETUNE := finetune_attention finetune
 
@@ -93,8 +97,9 @@ foundation-model-finetune:
 
 neural-conv:
 	mkdir -p logs
-	$(CMD) main.py \
-		--config "configs/neural_conv_decoder/neural_conv_decoder$(CONFIG_SUFFIX).yml"
+	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml"
+# 	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_pos.yml"
+		
 
 foundation-model-lags:
 	mkdir -p logs

@@ -1,0 +1,42 @@
+model_constructor_name: decoder_mlp #ensemble_pitom_model
+config_setter_name: neural_conv
+task_name: pos_task
+model_params:
+  conv_filters: 128
+  reg: 0.35
+  reg_head: 0
+  dropout: 0.2
+  num_models: 10
+  embedding_dim: 5 #number of classes for pos tagging
+  output_activation: softmax
+training_params:
+  batch_size: 32
+  epochs: 250
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 100
+  n_folds: 5
+  min_lag: -500
+  max_lag: 600
+  lag_step_size: 100
+  # Use BCE on probabilities with model outputting sigmoid
+  losses: [cross_entropy]
+  metrics: [roc_auc_multiclass, f1,confusion_matrix]
+  early_stopping_metric: roc_auc_multiclass
+  smaller_is_better: false
+
+data_params:
+  data_root: data
+  window_width: 0.625
+  preprocessing_fn_name: preprocess_neural_data
+  subject_ids: [9]
+  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+  preprocessor_params:
+    num_average_samples: 8
+  # Task-specific knobs (optional)
+  task_params:
+    
+    pos_path: /scratch/gpfs/arnab/podcast-benchmark/df_word_onset_with_pos_class.csv
+
+trial_name: pos_task_sig_elecs_early_stop_roc
+

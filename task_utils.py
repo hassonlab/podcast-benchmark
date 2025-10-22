@@ -2,10 +2,84 @@ import os
 
 import pandas as pd
 from sklearn.decomposition import PCA
-
+import numpy as np
 from config import DataParams
 import embeddings
 import registry
+
+
+@registry.register_task_data_getter()
+def content_noncontent_task(data_params: DataParams):
+    """
+    Binary classification dataset for content vs non-content word classification.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: 1.0 for content, 0.0 non-content
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("content_noncontent_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['is_content']
+
+    print(f"\n=== Content Non-content words DATASET ===")
+    print(f"Total examples: {len(df)}")
+    print(f"Positives: {np.sum(df.target==1)}")
+    print(f"Negatives: {len(df) - np.sum(df.target==1)}")
+
+    return df
+
+@registry.register_task_data_getter()
+def pos_task(data_params: DataParams):
+    """
+    Binary classification dataset for content vs non-content word classification.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: 1.0 for content, 0.0 non-content
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("pos_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['pos_class']
+
+    print(f"\n=== Parts of Speech DATASET ===")
+    print(f"Total examples: {len(df)}")
+    print(f"Noun: {np.sum(df.target==0)}")
+    print(f"Verb: {np.sum(df.target==1)}")
+    print(f"Adjective: {np.sum(df.target==2)}")
+    print(f"Adverb: {np.sum(df.target==3)}")
+    print(f"Other: {np.sum(df.target==4)}")
+
+    return df
+
+
 
 
 @registry.register_task_data_getter()
@@ -88,6 +162,41 @@ def sentence_onset_task(data_params: DataParams):
     print("=" * 50)
 
     return df_out
+
+@registry.register_task_data_getter()
+def gpt_surprise_task(data_params: DataParams):
+
+    """
+    Binary classification dataset for content vs non-content word classification.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: 1.0 for content, 0.0 non-content
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("content_noncontent_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['surprise']
+
+    # print(f"\n=== Content Non-content words DATASET ===")
+    # print(f"Total examples: {len(df)}")
+    # print(f"Positives: {np.sum(df.target==1)}")
+    # print(f"Negatives: {len(df) - np.sum(df.target==1)}")
+
+    return df
 
 
 @registry.register_task_data_getter()
