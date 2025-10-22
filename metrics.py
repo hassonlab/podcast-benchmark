@@ -17,10 +17,20 @@ def mse_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
 def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """Weighted BCE loss for binary classification using PyTorch's built-in functionality.
 
-    Uses sklearn's compute_class_weight for automatic class balancing.
-    Handles both logits and probabilities as input.
+    Expects probabilities in [0,1] range. Uses sklearn's compute_class_weight for automatic class balancing.
     """
     from sklearn.utils.class_weight import compute_class_weight
+    import warnings
+    
+    # Check if input looks like logits and warn user
+    if predicted.detach().min() < 0 or predicted.detach().max() > 1:
+        warnings.warn(
+            f"BCE metric received values outside [0,1] range (min={predicted.detach().min():.3f}, "
+            f"max={predicted.detach().max():.3f}). Function expects probabilities in [0,1] range.",
+            UserWarning
+        )
+    else:
+        probs = predicted
     
     # Convert to numpy for sklearn
     y_true = groundtruth.detach().cpu().numpy().astype(int)
@@ -30,13 +40,10 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     
     # If only one class present, use regular BCE (no weighting needed)
     if len(unique_classes) == 1:
-        probs = predicted
-        if probs.detach().min() < 0 or probs.detach().max() > 1:
-            probs = torch.sigmoid(probs)
         return F.binary_cross_entropy(probs, groundtruth)
     
-    # Compute balanced class weights using sklearn
     try:
+        # Compute balanced class weights using sklearn
         class_weights = compute_class_weight(
             'balanced', 
             classes=unique_classes, 
@@ -50,25 +57,13 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
         
         # Create per-sample weights based on class
         sample_weights = torch.where(groundtruth == 1, weight_1, weight_0)
-        sample_weights = sample_weights.to(dtype=predicted.dtype, device=predicted.device)
+        sample_weights = sample_weights.to(dtype=probs.dtype, device=probs.device)
         
-        # If input looks like probabilities, convert to logits
-        if predicted.detach().min() >= 0 and predicted.detach().max() <= 1:
-            # Convert probabilities to logits
-            probs = torch.clamp(predicted, 1e-7, 1 - 1e-7)  # Avoid log(0)
-            logits = torch.log(probs / (1 - probs))
-        else:
-            logits = predicted
-            
-        # Use weighted BCE with logits
-        return F.binary_cross_entropy_with_logits(logits, groundtruth, weight=sample_weights)
+        return F.binary_cross_entropy(probs, groundtruth, weight=sample_weights)
         
     except Exception as e:
-        print(f'Error in weighted BCE: {e}')
+        print(f'Using: regular BCE instead. Error in weighted BCE: {e}')
         # Fallback to regular BCE if class weight computation fails
-        probs = predicted
-        if probs.detach().min() < 0 or probs.detach().max() > 1:
-            probs = torch.sigmoid(probs)
         return F.binary_cross_entropy(probs, groundtruth)
         
 
