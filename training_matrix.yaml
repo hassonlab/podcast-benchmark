@@ -1,0 +1,28 @@
+# Training Matrix Configuration
+# Maps model types to tasks to config files
+# Format: {model_name: {task_name: [config_files]}}
+
+foundation_model:
+  word_embedding_decoding_task:
+    - foundation_model_base.yml
+    - foundation_model_frozen.yml
+    - foundation_model_finetune.yml
+    - foundation_model_attention.yml
+    - foundation_model_frozen_linear.yml
+  sentence_onset_task:
+    - foundation_model_sentence_onset.yml
+
+neural_conv_decoder:
+  word_embedding_decoding_task:
+    - neural_conv_decoder_base.yml
+    - neural_conv_decoder_binary.yml
+    - neural_conv_decoder_glove.yml
+    - neural_conv_decoder_arbitrary.yml
+  sentence_onset_task:
+    - neural_conv_decoder_sentence_onset.yml
+
+# Add more model/task combinations as needed
+# Example:
+# your_new_model:
+#   your_new_task:
+#     - your_config_file.yml
