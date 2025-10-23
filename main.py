@@ -47,11 +47,11 @@ def main():
     args, overrides = parse_known_args()
     experiment_config = load_config_with_overrides(args.config, overrides)
 
-    os.environ["PYTHONHASHSEED"] = str(
+    os.environ["PYTHONHASHSEED"] = str(experiment_config.training_params.random_seed)
+    set_seed(
         experiment_config.training_params.random_seed,
         experiment_config.training_params.cudnn_deterministic,
     )
-    set_seed(experiment_config.training_params.random_seed)
 
     # Load all data.
     raws = data_utils.load_raws(experiment_config.data_params)
