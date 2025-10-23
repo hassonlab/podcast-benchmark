@@ -84,6 +84,10 @@ class TrainingParams:
     min_test_freq_auc: int = -1
     # Sets the k we use in top-k metrics.
     top_k_thresholds: list[int] = field(default_factory=lambda: [1, 5, 10])
+    # Random seed to use for training.
+    random_seed: int = 42
+    # Whether to set cudnn to be deterministic. Will slow down training, but useful for maximizing reproducibility.
+    cudnn_deterministic: bool = False
 
 
 @dataclass
