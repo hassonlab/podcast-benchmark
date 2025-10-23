@@ -13,7 +13,6 @@ authors = [
 ]
 
 dependencies = [
-    "ecog_foundation_model @ git+https://github.com/zparis99/ECoG-foundation-model.git@v0.1.0",
     "absl-py==2.2.2",
     "astunparse==1.6.3",
     "certifi==2025.1.31",
