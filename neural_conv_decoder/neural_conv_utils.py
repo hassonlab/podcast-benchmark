@@ -23,7 +23,7 @@ def set_config_input_channels(
         experiment_config.model_params["logistic_regression"] = False
 
     experiment_config.model_params["input_timesteps"] = np.floor(
-        experiment_config.data_params.window_width * 512)/ experiment_config.data_params.preprocessor_params.num_average_samples
+        experiment_config.data_params.window_width * 512)/ experiment_config.data_params.preprocessor_params.get('num_average_samples')
             
 
 

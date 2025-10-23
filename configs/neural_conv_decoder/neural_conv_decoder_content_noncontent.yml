@@ -23,7 +23,7 @@ training_params:
   # Use BCE on probabilities with model outputting sigmoid
   losses: [bce]
   metrics: [roc_auc, f1,confusion_matrix]
-  early_stopping_metric: f1
+  early_stopping_metric: roc_auc
   smaller_is_better: false
 
 data_params:
