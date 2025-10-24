@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 import data_utils
+import task_utils  # Needed for registry population
 import decoding_utils
 import random
 from loader import import_all_from_package
