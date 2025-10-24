@@ -1,8 +1,15 @@
 # Podcast Benchmark Documentation
 
-A benchmarking framework for neural decoding from podcast listening data.
+A benchmarking framework for neural decoding from podcast listening data. 
 
-Comparing brain → word decoding performance to [previously published results](https://www.nature.com/articles/s41593-022-01026-4).
+## Decoding Tasks
+
+1. **Brain --> perceived word decoding** Translate brain signals to perceived words, comparing performance to [previously published results](https://www.nature.com/articles/s41593-022-01026-4).
+2. **Audio Reconstruction** Reconstruct podcast audio envelope from brain signal (Regression)
+3. **Sentence Onset Detection** Classify (binary) segments of brain data as containing the beginning of a sentence or not
+4. **Content/Non-Content Words Classification** (Binary classification)
+5. **Part of Speech Classification** (Multiclass classification)
+6. **LLM Surprise** Predict how likely the perceived word is given it's context (Regression)
 
 ## Table of Contents
 
