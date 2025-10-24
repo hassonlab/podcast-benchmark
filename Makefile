@@ -38,7 +38,8 @@ train-all:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		job_name="$(PREFIX)-$$model-$$task-$(USR)-$(DT)"; \
+		config_tag=$$(basename $$config .yml); \
+		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
 		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config MODEL_NAME="$$model" CONFIG="$$config"; \
 	done
