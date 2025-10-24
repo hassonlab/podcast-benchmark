@@ -40,7 +40,7 @@ train-all:
 		config=$$(echo $$target | cut -d'|' -f3); \
 		job_name="$(PREFIX)-$$model-$$task-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
-		$(CMD) main.py --config "configs/$$model/$$config"; \
+		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config MODEL_NAME="$$model" CONFIG="$$config"; \
 	done
 
 # Development and testing targets
