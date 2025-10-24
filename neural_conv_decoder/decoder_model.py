@@ -193,7 +193,7 @@ class Decoder_Mlp(nn.Module):
             reg: L2 regularization factor for dense head (default: 0)
             dropout: Dropout rate (default: 0.2)
         """
-        super(decoder_mlp, self).__init__()
+        super(Decoder_Mlp, self).__init__()
 
         self.reg = reg
         self.reg_head = reg_head
@@ -201,7 +201,7 @@ class Decoder_Mlp(nn.Module):
         self.output_dim = output_dim
         self.output_activation = output_activation
 
-        self.fc1 = nn.Linear(input_channels*input_timesteps, 128)
+        self.fc1 = nn.Linear(int(input_channels)*int(input_timesteps), 128)
         self.bn1 = nn.BatchNorm1d(128)
         self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(128, 64)

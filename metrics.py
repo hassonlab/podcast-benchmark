@@ -155,7 +155,8 @@ def pearson_correlation(pred: torch.Tensor, true: torch.Tensor) -> float:
 @register_metric("f1")
 def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
-    F1 score at a 0.5 threshold after sigmoid.
+    F1 score at a 0.5 threshold after sigmoid. (for binary classification)
+    Also works for multiclass by taking argmax after softmax.
     """
     # Ensure 1D
     if pred.ndim > 1 and pred.shape[-1] == 1:

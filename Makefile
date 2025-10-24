@@ -97,8 +97,11 @@ foundation-model-finetune:
 
 neural-conv:
 	mkdir -p logs
-	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml"
-# 	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_pos.yml"
+# 	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml"
+	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_pos.yml"
+# 	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise.yml"
+# 	$(CMD) main.py --config "configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml"
+
 		
 
 foundation-model-lags:

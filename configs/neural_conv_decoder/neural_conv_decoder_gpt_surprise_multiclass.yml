@@ -1,18 +1,18 @@
 model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
-task_name: content_noncontent_task
+task_name: gpt_surprise_multiclass_task
 model_params:
   conv_filters: 128
   reg: 0.35
   reg_head: 0
   dropout: 0.2
-  num_models: 1
-  embedding_dim: 1 #this is output dimension of the decoder
-  output_activation: sigmoid
+  num_models: 10
+  embedding_dim: 3 #this is output dimension of the decoder
+  output_activation: softmax
 
 training_params:
   batch_size: 32
-  epochs: 150
+  epochs: 50
   learning_rate: 0.001
   weight_decay: 0.0001
   early_stopping_patience: 100
@@ -21,9 +21,9 @@ training_params:
   max_lag: 400
   lag_step_size: 100
   # Use BCE on probabilities with model outputting sigmoid
-  losses: [bce]
-  metrics: [roc_auc, f1,confusion_matrix]
-  early_stopping_metric: roc_auc
+  losses: [cross_entropy]
+  metrics: [roc_auc_multiclass, f1, confusion_matrix]
+  early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
 
 data_params:
@@ -39,4 +39,4 @@ data_params:
     
     content_noncontent_path: df_word_onset_with_pos_class.csv
 
-trial_name: content_noncontent_task_sig_elecs_mlp_early_stop_roc
+trial_name: gpt_surprise

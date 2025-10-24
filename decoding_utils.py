@@ -23,14 +23,39 @@ from registry import metric_registry
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
 
+from sklearn.linear_model import LinearRegression
+from scipy.stats import pearsonr
+
 
 def logistic_regression(X_train, y_train, X_val, y_val):
+
+    X_train = np.reshape(X_train, (X_train.shape[0], -1))
+    X_val = np.reshape(X_val, (X_val.shape[0], -1))
+
     model = LogisticRegression(max_iter=1000)
     model.fit(X_train, y_train)
 
     val_score = f1_score(y_val, model.predict(X_val), average="weighted")
 
     return val_score
+
+def linear_regression(X_train, y_train, X_val, y_val):
+
+    X_train = np.reshape(X_train, (X_train.shape[0], -1))
+    X_val = np.reshape(X_val, (X_val.shape[0], -1))
+
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    
+    #Predict on validation set
+    y_pred = model.predict(X_val)
+
+    # Compute Pearson correlation coefficient
+    correlation, _ = pearsonr(y_val, y_pred)
+
+    return correlation
+
 
 def setup_metrics_and_loss(training_params: TrainingParams):
     """
@@ -208,6 +233,7 @@ def train_decoding_model(
 
     models, histories = [], []
     logistic_f1 = []
+    linear_reg_corr = []
 
     def run_epoch(model, loader, optimizer=None):
         """
@@ -306,6 +332,16 @@ def train_decoding_model(
         if model_params.get("logistic_regression"):
             # Logistic Regression model training
             logistic_f1.append( logistic_regression(
+                X[tr_idx].cpu().numpy(),
+                Y[tr_idx].cpu().numpy(),
+                X[te_idx].cpu().numpy(),
+                Y[te_idx].cpu().numpy(),
+                )
+            )
+
+        if model_params.get("linear_regression"):
+            # Logistic Regression model training
+            linear_reg_corr.append( linear_regression(
                 X[tr_idx].cpu().numpy(),
                 Y[tr_idx].cpu().numpy(),
                 X[te_idx].cpu().numpy(),
@@ -440,19 +476,24 @@ def train_decoding_model(
     if model_params.get("logistic_regression"):
         print("\nLogistic Regression F1 scores across folds:")
         
-        print(f"F1: {np.mean(logistic_f1):.4f} ± {np.std(logistic_f1):.4f}")        
+        print(f"F1: {np.mean(logistic_f1):.4f} ± {np.std(logistic_f1):.4f}")   
 
+    if model_params.get("linear_regression"):
+        print("\nLinear Regression Pearson Correlation across folds:")
+        
+        print(f"Correlation: {np.mean(linear_reg_corr):.4f} ± {np.std(linear_reg_corr):.4f}")       
 
 
     print("\n" + "=" * 60)
     print("CROSS-VALIDATION RESULTS")
     print("=" * 60)
 
-    conf_matrices = {
-    "train": conf_matrix_train,
-    "val": conf_matrix_val,
-    "test": conf_matrix_test,
-    }
+    if "confusion_matrix" in metric_names:
+        conf_matrices = {
+        "train": conf_matrix_train,
+        "val": conf_matrix_val,
+        "test": conf_matrix_test,
+        }
 
     for phase in phases:
         for name in metric_names:
