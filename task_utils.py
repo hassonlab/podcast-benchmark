@@ -66,8 +66,6 @@ def pos_task(data_params: DataParams):
 
     df1 = pd.read_csv(csv_path, index_col=0)
 
-    df1 = df1[df1["pos_class"] != 4] # Exclude 'other' class if labeled as 4
-
     df=pd.DataFrame()
     df['start']=df1['onset']  # convert samples to seconds
     df['target']=df1['pos_class']
@@ -194,11 +192,6 @@ def gpt_surprise_task(data_params: DataParams):
     df['start']=df1['onset']  # convert samples to seconds
     df['target']=df1['surprise']
 
-    # print(f"\n=== Content Non-content words DATASET ===")
-    # print(f"Total examples: {len(df)}")
-    # print(f"Positives: {np.sum(df.target==1)}")
-    # print(f"Negatives: {len(df) - np.sum(df.target==1)}")
-
     return df
 
 @registry.register_task_data_getter()
@@ -229,11 +222,6 @@ def gpt_surprise_multiclass_task(data_params: DataParams):
     df=pd.DataFrame()
     df['start']=df1['onset']  # convert samples to seconds
     df['target']=df1['surprise_class']
-
-    # print(f"\n=== Content Non-content words DATASET ===")
-    # print(f"Total examples: {len(df)}")
-    # print(f"Positives: {np.sum(df.target==1)}")
-    # print(f"Negatives: {len(df) - np.sum(df.target==1)}")
 
     return df
 

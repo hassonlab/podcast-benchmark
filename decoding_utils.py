@@ -450,6 +450,13 @@ def train_decoding_model(
                 # Log confusion matrix as text
                 elif name == "confusion_matrix":
                     writer.add_text(f"{name}/test", str(val), fold)
+
+            if logistic_f1:
+                writer.add_scalar(f"logistic_regression/f1_score", logistic_f1[-1], fold)
+            if linear_reg_corr:
+                writer.add_scalar(f"linear_regression/pearson_correlation", linear_reg_corr[-1], fold)
+
+
             writer.close()
 
         # word‐level ROC and top-k. Only useful for word embedding task.
