@@ -204,7 +204,15 @@ def train_decoding_model(
 
     # 5. Initialize CV containers
     phases = ("train", "val", "test")
-    cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
+    # cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
+    
+    cv_results = {
+        f"{phase}_{name}": []
+        for phase in phases
+        for name in metric_names
+        if name != "confusion_matrix"
+    }
+
     cv_results["num_epochs"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.

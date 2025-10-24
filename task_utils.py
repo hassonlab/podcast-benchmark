@@ -66,7 +66,7 @@ def pos_task(data_params: DataParams):
 
     df1 = pd.read_csv(csv_path, index_col=0)
 
-    df1 = df1[df1["label"] != 4] # Exclude 'other' class if labeled as 4
+    df1 = df1[df1["pos_class"] != 4] # Exclude 'other' class if labeled as 4
 
     df=pd.DataFrame()
     df['start']=df1['onset']  # convert samples to seconds
