@@ -84,8 +84,8 @@ def main():
     import yaml
     from dataclasses import asdict
 
-    with open(os.path.join(output_dir, "config.yml"), "w") as fp:
-        yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
+    # with open(os.path.join(output_dir, "config.yml"), "w") as fp:
+    #     yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
     # Decide what lags we need to train over.
     if experiment_config.training_params.lag:

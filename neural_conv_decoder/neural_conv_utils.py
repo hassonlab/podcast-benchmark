@@ -1,5 +1,6 @@
 import registry
 from config import ExperimentConfig
+import numpy as np
 
 
 @registry.register_data_preprocessor()
@@ -15,4 +16,23 @@ def set_config_input_channels(
 ) -> ExperimentConfig:
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
     experiment_config.model_params["input_channels"] = num_electrodes
+
+    if experiment_config.task_name == "content_noncontent_task":
+        experiment_config.model_params["logistic_regression"] = True
+
+    elif experiment_config.task_name == "gpt_surprise_multiclass_task":
+        experiment_config.model_params["logistic_regression"] = True
+    else:
+        experiment_config.model_params["logistic_regression"] = False
+
+    if experiment_config.task_name == "gpt_surprise_task":
+        experiment_config.model_params["linear_regression"] = True
+    else:
+        experiment_config.model_params["linear_regression"] = False
+
+    experiment_config.model_params["input_timesteps"] = np.floor(
+        experiment_config.data_params.window_width * 512)/ experiment_config.data_params.preprocessor_params.get('num_average_samples')
+            
+
+
     return experiment_config
