@@ -20,6 +20,7 @@ training_params:
 data_params:
   # Cross model data_params
   data_root: data
+  word_column: word
   embedding_type: glove
   embedding_layer: 24
   # embedding_pca_dim: 50

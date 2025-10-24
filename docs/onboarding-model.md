@@ -430,6 +430,31 @@ If you encounter errors:
 
 ---
 
+---
+
+## Complete Working Example
+
+See **`example_foundation_model/`** for a complete, self-contained example demonstrating:
+
+- Simple transformer foundation model implementation
+- Both integration patterns (feature extraction + finetuning)
+- Model directory structure with config and checkpoint
+- Full documentation and runnable examples
+
+This example shows exactly how all the pieces fit together for foundation models.
+
+```bash
+# Run feature extraction example
+python main.py --config configs/example_foundation_model/feature_extraction.yaml
+
+# Run finetuning example
+python main.py --config configs/example_foundation_model/finetuning.yaml
+```
+
+See `example_foundation_model/README.md` for details.
+
+---
+
 ## See Also
 
 - [Configuration Guide](configuration.md) - Detailed config options and patterns

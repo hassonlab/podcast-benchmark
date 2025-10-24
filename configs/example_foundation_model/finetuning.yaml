@@ -1,0 +1,58 @@
+# Example: Finetuning Foundation Model
+#
+# This config demonstrates PATTERN 2: Including the foundation model as part of
+# your decoder and training it end-to-end (with optional partial freezing).
+#
+# Flow: Neural Data → [Partially Frozen Foundation → Decoder Head] → Predictions
+#                            (single model, trained together)
+
+# Model constructor (creates decoder with foundation model inside)
+model_constructor_name: example_foundation_finetune
+
+# Config setter (sets window width based on foundation model)
+config_setter_name: example_foundation_finetune
+
+# Model parameters
+model_params:
+  # Path to pretrained foundation model directory
+  model_dir: example_foundation_model/pretrained_model
+
+  # Decoder head architecture
+  mlp_layer_sizes: [128]  # Hidden layers before output
+  output_dim: 50  # Final output dimension
+  dropout: 0.1
+
+  # Freezing options
+  freeze_foundation: false  # Set to true to freeze entire foundation model
+  num_frozen_layers: 2  # Freeze first N transformer layers (0 = freeze none)
+
+# Training parameters
+training_params:
+  batch_size: 32  # Smaller batch size for finetuning (uses more memory)
+  epochs: 100
+  learning_rate: 0.0001  # Lower learning rate for finetuning
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+
+  # Loss and metrics
+  losses: [mse]
+  loss_weights: [1.0]
+  metrics: [cosine_sim, nll_embedding]
+  early_stopping_metric: cosine_sim
+  smaller_is_better: false
+
+# Data parameters
+data_params:
+  data_root: data
+  word_column: word
+  embedding_type: gpt-2xl
+  embedding_layer: 24
+  embedding_pca_dim: 50
+  subject_ids: [1, 2, 3]
+
+  # No preprocessing function needed - raw data goes directly to model
+  # window_width will be set automatically by config_setter
+
+# Trial identifier
+trial_name: example_foundation_finetune

@@ -28,6 +28,7 @@ training_params:
 
 data_params:
   data_root: data
+  word_column: word
   window_width: 0.625
   preprocessing_fn_name: preprocess_neural_data
   subject_ids: [9]

@@ -2,24 +2,57 @@ import os
 from datetime import datetime
 
 import numpy as np
+import torch
 
-from config import ExperimentConfig
 import data_utils
+import task_utils  # Needed for registry population
 import decoding_utils
-import task_utils
+import random
 from loader import import_all_from_package
 import registry
 from config_utils import parse_known_args, load_config_with_overrides, get_nested_value
 
 # Import modules which define registry functions. REQUIRED FOR ANY NEW MODELS.
 import_all_from_package("neural_conv_decoder")
-import_all_from_package("foundation_model")
+import_all_from_package("example_foundation_model")
 # Add your model import here!
+
+
+def set_seed(seed=42, cudnn_deterministic=False):
+    """
+    Set random seeds for reproducibility across numpy, pytorch, and python's random module.
+
+    Args:
+        seed (int): Random seed value
+    """
+    # Python's built-in random module
+    random.seed(seed)
+
+    # NumPy
+    np.random.seed(seed)
+
+    # PyTorch CPU
+    torch.manual_seed(seed)
+
+    # PyTorch GPU (if available)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+
+    if cudnn_deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def main():
     args, overrides = parse_known_args()
     experiment_config = load_config_with_overrides(args.config, overrides)
+
+    os.environ["PYTHONHASHSEED"] = str(experiment_config.training_params.random_seed)
+    set_seed(
+        experiment_config.training_params.random_seed,
+        experiment_config.training_params.cudnn_deterministic,
+    )
 
     # Load all data.
     raws = data_utils.load_raws(experiment_config.data_params)

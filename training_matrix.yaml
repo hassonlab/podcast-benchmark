@@ -1,0 +1,18 @@
+# Training Matrix Configuration
+# Maps model types to tasks to config files
+# Format: {model_name: {task_name: [config_files]}}
+
+neural_conv_decoder:
+  word_embedding_decoding_task:
+    - neural_conv_decoder_base.yml
+    - neural_conv_decoder_binary.yml
+    - neural_conv_decoder_glove.yml
+    - neural_conv_decoder_arbitrary.yml
+  sentence_onset_task:
+    - neural_conv_decoder_sentence_onset.yml
+
+# Add more model/task combinations as needed
+# Example:
+# your_new_model:
+#   your_new_task:
+#     - your_config_file.yml
