@@ -40,6 +40,7 @@ training_params:
 # Data parameters
 data_params:
   data_root: data
+  word_column: word
   embedding_type: gpt-2xl
   embedding_layer: 24
   embedding_pca_dim: 50
