@@ -37,7 +37,7 @@ def volume_level_encoding_task(data_params: DataParams):
         ``target`` (log-amplitude or windowed representation) ready for the
         decoding pipeline.
     """
-
+    
     tp = getattr(data_params, "task_params", {}) or {}
 
     audio_rel_path = tp.get("audio_path", os.path.join("stimuli", "podcast.wav"))
@@ -118,15 +118,18 @@ def volume_level_encoding_task(data_params: DataParams):
     down = sr // g
     envelope_ds = resample_poly(smoothed, up, down)
 
+    # Keep linear envelope non-negative
     envelope_ds = np.clip(envelope_ds, 0.0, None)
-    if log_eps is None:
-        peak = float(envelope_ds.max()) if envelope_ds.size else 0.0
-        log_eps = max(1e-12, peak * 1e-6)
-    env_db = 20.0 * np.log10(envelope_ds + float(log_eps))
 
-    n_samples = env_db.shape[0]
+    n_samples = envelope_ds.shape[0]
 
+    # If no windowing requested, convert the per-sample linear envelope to dB
     if window_size_ms is None:
+        if log_eps is None:
+            peak = float(envelope_ds.max()) if envelope_ds.size else 0.0
+            log_eps = max(1e-12, peak * 1e-6)
+        env_db = 20.0 * np.log10(envelope_ds + float(log_eps))
+
         times = np.arange(n_samples, dtype=np.float32) / float(target_sr)
         df = pd.DataFrame(
             {
@@ -160,7 +163,14 @@ def volume_level_encoding_task(data_params: DataParams):
             f"Requested window of {window_samples} samples exceeds envelope length {n_samples}."
         )
     
-    targets = sliding_window_rms(env_db, window_samples, hop_samples)
+    # Compute RMS over the linear envelope, then convert each window RMS to dB.
+    targets_linear = sliding_window_rms(envelope_ds, window_samples, hop_samples)
+
+    if log_eps is None:
+        peak = float(targets_linear.max()) if targets_linear.size else 0.0
+        log_eps = max(1e-12, peak * 1e-6)
+
+    targets = 20.0 * np.log10(targets_linear + float(log_eps))
 
     starts = np.arange(0, n_samples - window_samples + 1, hop_samples, dtype=int)
     if starts.size == 0:
@@ -196,9 +206,78 @@ def volume_level_encoding_task(data_params: DataParams):
         "window_size_s": width,
         "hop_size_s": stride,
         "window_reduction": "rms",
+        # dB conversion was applied after RMS computation
+        "db_after_rms": True,
     }
 
     return df
+
+
+
+@registry.register_config_setter(name="volume_level_config_setter")
+def volume_level_config_setter(experiment_config, raws, df_word):
+    """Align experiment config to volume-level task outputs.
+
+    This setter will:
+      - Set data_params.window_width (seconds) from task_params.window_size (ms)
+        so that neural windows align with audio windows by default.
+      - Set the data preprocessing function to 'window_rms' if not already set,
+        so each neural window is reduced to RMS amplitudes like the audio.
+
+    The function is defensive: it will only set window_width if it is unset
+    (<= 0 or falsy) and will not overwrite an explicitly provided preprocessing
+    function unless none is present.
+    """
+
+    # Ensure nested objects exist
+    dp = experiment_config.data_params
+    tp = getattr(dp, "task_params", {}) or {}
+
+    # If the task defines a window size in ms, set the neural window width (s)
+    window_size_ms = tp.get("window_size")
+    if window_size_ms is not None:
+        try:
+            width_ms = float(window_size_ms)
+            if width_ms > 0:
+                # Only override if not already set to a positive value
+                if not getattr(dp, "window_width", None) or dp.window_width <= 0:
+                    dp.window_width = width_ms / 1000.0
+        except (TypeError, ValueError):
+            # Ignore invalid values and leave window_width unchanged
+            pass
+
+    if not dp.preprocessing_fn_name:
+        model_ctor = getattr(experiment_config, "model_constructor_name", None)
+        # If no model specified, default to window RMS preprocessing for neural data.
+        # Additionally, for ridge-like constructors we also want RMS inputs so detect
+        # common ridge constructor names (e.g., 'ridge' in the name) and enable RMS.
+        if not model_ctor:
+            dp.preprocessing_fn_name = "window_rms"
+        else:
+            try:
+                ctor_name = str(model_ctor).lower()
+            except Exception:
+                ctor_name = ""
+            if "ridge" in ctor_name or "torch_ridge" in ctor_name:
+                dp.preprocessing_fn_name = "window_rms"
+
+    # Auto-fill model_params.input_channels when missing by summing channels from raws
+    mp = getattr(experiment_config, "model_params", None) or {}
+    if mp.get("input_channels") in (None, 0, "", False):
+        try:
+            total_ch = sum(len(getattr(r, "ch_names", getattr(r, "info", {}).get("ch_names", []))) for r in raws) if raws else None
+            # Fallback to info['nchan'] if available
+            if (not total_ch or total_ch == 0) and raws:
+                total_ch = sum(getattr(r, "info", {}).get("nchan", 0) for r in raws)
+        except Exception:
+            total_ch = None
+
+        if total_ch and total_ch > 0:
+            mp["input_channels"] = int(total_ch)
+            experiment_config.model_params = mp
+
+    # No change to experiment_config identity, return for convenience
+    return experiment_config
 
 
 def sentence_onset_task(data_params: DataParams):

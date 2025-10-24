@@ -13,8 +13,6 @@ def _ensure_dir(p: Path) -> None:
 
 def write_outputs(results: Dict[str, Any], output_dir: Path, model_params: Dict[str, Any]) -> None:
     """Write per-subject/average/pooled CSVs and a combined summary.
-
-    Keeps the same CSV conventions as the original CLI.
     """
     _ensure_dir(output_dir)
     records = []

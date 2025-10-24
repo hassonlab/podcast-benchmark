@@ -153,6 +153,30 @@ def train_decoding_model(
     if isinstance(Y, np.ndarray):
         Y = torch.tensor(Y, dtype=torch.float32)
 
+    # Quick validation / auto-correction for common axes-swaps.
+    # The model expects X shaped as [num_examples, num_channels, seq_len].
+    # If the user supplied model_params with an explicit `input_channels`,
+    # we can detect the case where channels and time axes were swapped
+    # (i.e. X has shape [N, seq_len, channels]) and fix it automatically.
+    expected_in = None
+    if isinstance(model_params, dict):
+        expected_in = model_params.get("input_channels")
+
+    if expected_in is not None and X.dim() == 3:
+        n, a, b = X.shape
+        if a != expected_in and b == expected_in:
+            # Detected swapped axes: permute to [N, channels, seq_len]
+            print(
+                f"Auto-fixing input tensor axes: model expects {expected_in} channels but received shape {tuple(X.shape)}.\n"
+                "Permuting to (N, channels, seq_len) by swapping axes 1 and 2."
+            )
+            X = X.permute(0, 2, 1).contiguous()
+        elif a != expected_in:
+            raise ValueError(
+                f"Model expects {expected_in} input channels but X has {a} channels and {b} timesteps. "
+                "Check `model_params.input_channels` or data preprocessing (are you accidentally applying a preprocessor that collapses/permutes axes?)."
+            )
+
     # 3. Get fold indices
     if training_params.fold_type == "sequential_folds":
         fold_indices = get_sequential_folds(X, num_folds=training_params.n_folds)

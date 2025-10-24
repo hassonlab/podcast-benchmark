@@ -21,6 +21,7 @@ from vol_lvl_ridge_utils import (
 )
 from plot_utils import plot_ridge_results
 from analysis_utils import write_outputs, aggregate_average, aggregate_pooled
+from torch_models import RidgeRegression, train_ridge_model
 
 # Import registries so decorators run.
 import registry  # noqa: F401
@@ -145,6 +146,7 @@ def _ridge_lag_sweep(
     cv_splits: int,
     alphas: Optional[Iterable[float]],
     device: torch.device,
+    model_params: Optional[dict] = None,
 ) -> pd.DataFrame:
     # Run cross-validated ridge fits across lag offsets and alphas.
     if cv_splits < 2:
@@ -159,6 +161,38 @@ def _ridge_lag_sweep(
     )
     results: List[dict] = []
     kfold = KFold(n_splits=cv_splits, shuffle=True, random_state=0)
+    # Solver choice: 'closed_form' (default) or 'pytorch'
+    solver = (model_params or {}).get("solver", "closed_form")
+    # PyTorch training hyperparams (only used for 'pytorch' solver)
+    pt_epochs = int((model_params or {}).get("pytorch_epochs", 50))
+    pt_lr = float((model_params or {}).get("pytorch_lr", 1e-3))
+    pt_batch = int((model_params or {}).get("pytorch_batch_size", 256))
+
+    def fit_and_predict(X_tr: torch.Tensor, y_tr: torch.Tensor, X_eval: torch.Tensor, alpha_val: float) -> tuple[torch.Tensor, float]:
+        """Train (PyTorch) ridge on X_tr/y_tr and predict X_eval.
+
+        Returns (y_pred_tensor, coef_norm_float). For closed_form solver this
+        function will not be used; it's a small wrapper to centralize the
+        PyTorch training and coefficient-norm calculation.
+        """
+        model = RidgeRegression(input_dim=X_tr.shape[1], output_dim=1)
+        trained, _ = train_ridge_model(
+            model,
+            X_tr,
+            y_tr,
+            alpha=float(alpha_val),
+            lr=pt_lr,
+            epochs=pt_epochs,
+            batch_size=pt_batch,
+            device=device,
+        )
+        preds = trained(X_eval)
+        coef_sq = torch.tensor(0.0, device=device)
+        for p in trained.parameters():
+            coef_sq = coef_sq + torch.sum(p ** 2)
+        coef_norm_val = float(torch.sqrt(coef_sq).cpu().item())
+        return preds, coef_norm_val
+
     for lag in lag_values:
         shift = int(round(lag / 1000.0 * effective_sr))
         X, y = _align_for_shift(neural, audio, shift)
@@ -177,12 +211,19 @@ def _ridge_lag_sweep(
                 X_val = torch.index_select(X_tensor, 0, val_idx_t)
                 y_train = torch.index_select(y_tensor, 0, train_idx_t)
                 y_val = torch.index_select(y_tensor, 0, val_idx_t)
+
+                # Standardize features (same as closed-form pipeline)
                 y_train_mean = y_train.mean()
                 y_train_centered = y_train - y_train_mean
                 X_train_std, mean_t, std_t = _standardize_features(X_train)
                 X_val_std = (X_val - mean_t) / std_t
-                beta = _solve_ridge_closed_form(X_train_std, y_train_centered, float(alpha))
-                y_pred = X_val_std @ beta + y_train_mean
+
+                if solver == "closed_form":
+                    beta = _solve_ridge_closed_form(X_train_std, y_train_centered, float(alpha))
+                    y_pred = X_val_std @ beta + y_train_mean
+                else:
+                    preds_val, _ = fit_and_predict(X_train_std, y_train_centered, X_val_std, float(alpha))
+                    y_pred = preds_val + y_train_mean
                 fold_scores.append(_r2_score_torch(y_val, y_pred))
             score = float(np.nanmean(fold_scores))
             if score > best_score:
@@ -190,16 +231,23 @@ def _ridge_lag_sweep(
                 best_alpha = float(alpha)
         if best_alpha is None:
             continue
+        # Refit on full data using best_alpha depending on solver
         X_full_std, mean_full, std_full = _standardize_features(X_tensor)
         y_full_mean = y_tensor.mean()
         y_full_centered = y_tensor - y_full_mean
-        beta = _solve_ridge_closed_form(X_full_std, y_full_centered, best_alpha)
-        y_pred = X_full_std @ beta + y_full_mean
+        if solver == "closed_form":
+            beta = _solve_ridge_closed_form(X_full_std, y_full_centered, best_alpha)
+            y_pred = X_full_std @ beta + y_full_mean
+            coef_norm = float(torch.linalg.norm(beta).cpu().item())
+        else:
+            preds_full, coef_norm = fit_and_predict(X_full_std, y_full_centered, X_full_std, best_alpha)
+            y_pred = preds_full + y_full_mean
+
         records = {
             "lag_ms": float(lag),
             "r2": best_score,
             "alpha": best_alpha,
-            "coef_norm": float(torch.linalg.norm(beta).cpu().item()),
+            "coef_norm": coef_norm,
             "n_samples": int(y.shape[0]),
             "n_features": int(X.shape[1]),
             "train_r2": _r2_score_torch(y_tensor, y_pred),
@@ -286,6 +334,7 @@ def _compute_modes(
                 cv_splits,
                 alphas,
                 device,
+                model_params,
             )
             if not df.empty:
                 df["subject_id"] = entry["subject_id"]
@@ -297,7 +346,7 @@ def _compute_modes(
         results["average"] = aggregate_average(per_subject)
     if "pooled_electrodes" in modes:
         results["pooled_electrodes"] = aggregate_pooled(
-            datasets, lags_ms, cv_splits, alphas, device, _ridge_lag_sweep
+            datasets, lags_ms, cv_splits, alphas, device, lambda *a, **kw: _ridge_lag_sweep(*a, model_params=model_params, **kw)
         )
     return results
 
