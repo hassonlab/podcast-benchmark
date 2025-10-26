@@ -20,7 +20,7 @@ training_params:
   min_lag: 0
   max_lag: 400
   lag_step_size: 100
-  # Use BCE on probabilities with model outputting sigmoid
+  # Use cross entropy loss for classification tasks
   losses: [cross_entropy]
   metrics: [roc_auc_multiclass, f1, confusion_matrix]
   early_stopping_metric: roc_auc_multiclass
