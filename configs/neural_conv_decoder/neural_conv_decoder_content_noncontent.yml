@@ -25,12 +25,14 @@ training_params:
   metrics: [roc_auc, f1,confusion_matrix]
   early_stopping_metric: roc_auc
   smaller_is_better: false
+  logistic_regression_baseline: true
 
 data_params:
   data_root: data
   window_width: 0.625
   preprocessing_fn_name: preprocess_neural_data
   subject_ids: [9]
+  electrode_file_path: "all_subject_sig.csv"
   # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   preprocessor_params:
     num_average_samples: 32

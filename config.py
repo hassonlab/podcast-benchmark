@@ -21,7 +21,7 @@ class DataParams:
     embedding_pca_dim: Optional[int] = None
     # CSV file with columns subject (subject integer id) and elec (string name of electrode).
     # If not set then defaults to configured subject_ids and channel_reg_ex.
-    electrode_file_path: Optional[str] = '/scratch/gpfs/arnab/podcast-benchmark/all_subject_sig.csv'  #None
+    electrode_file_path: Optional[str] = None
     # TODO: Transition to making this dictionary the only field that needs to be set for specifying electrodes.
     # Per-subject electrode list, should be a dictionary from subject id's to a list of electrode names.
     # Optional and can instead use channel_reg_ex if not set.
@@ -84,6 +84,10 @@ class TrainingParams:
     min_test_freq_auc: int = -1
     # Sets the k we use in top-k metrics.
     top_k_thresholds: list[int] = field(default_factory=lambda: [1, 5, 10])
+    # If true trains and evaluates a linear regression baseline.
+    linear_regression_baseline: bool = False
+    # If true trains and evaluates a logistic regression baseline.
+    logistic_regression_baseline: bool = False
 
 
 @dataclass

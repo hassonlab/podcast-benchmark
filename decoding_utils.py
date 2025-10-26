@@ -39,6 +39,7 @@ def logistic_regression(X_train, y_train, X_val, y_val):
 
     return val_score
 
+
 def linear_regression(X_train, y_train, X_val, y_val):
 
     X_train = np.reshape(X_train, (X_train.shape[0], -1))
@@ -47,8 +48,7 @@ def linear_regression(X_train, y_train, X_val, y_val):
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    
-    #Predict on validation set
+    # Predict on validation set
     y_pred = model.predict(X_val)
 
     # Compute Pearson correlation coefficient
@@ -205,7 +205,7 @@ def train_decoding_model(
     # 5. Initialize CV containers
     phases = ("train", "val", "test")
     # cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
-    
+
     cv_results = {
         f"{phase}_{name}": []
         for phase in phases
@@ -283,35 +283,44 @@ def train_decoding_model(
 
             # accumulate each metric
             for name, fn in all_fns.items():
-                # val = fn(out, yb)
+                # TODO: make metrics classes so we can customize per-metric behavior better.
                 if name == "confusion_matrix":
-                    
-                    if model_params.get("embedding_dim") ==1:
-                        num_classes=2
+                    if model_params.get("embedding_dim") == 1:
+                        num_classes = 2
                     else:
-                        num_classes=model_params.get("embedding_dim")
-                    
+                        num_classes = model_params.get("embedding_dim")
+
                     val = fn(out, yb, num_classes)
-                    
+
                     # Initialize if first batch
                     if name not in sums or sums[name] is None:
-                        sums[name] = val.detach().cpu().numpy() if torch.is_tensor(val) else np.array(val)
+                        sums[name] = (
+                            val.detach().cpu().numpy()
+                            if torch.is_tensor(val)
+                            else np.array(val)
+                        )
                     else:
                         # Accumulate confusion matrices
-                        sums[name] += val.detach().cpu().numpy() if torch.is_tensor(val) else np.array(val)
+                        sums[name] += (
+                            val.detach().cpu().numpy()
+                            if torch.is_tensor(val)
+                            else np.array(val)
+                        )
                 else:
                     val = fn(out, yb)
                     # get a scalar float
                     if torch.is_tensor(val):
                         val = val.detach().mean().item()
-                    sums[name] += val 
+                    sums[name] += val
 
             # add loss to sums
             if torch.is_tensor(loss):
                 loss = loss.detach().mean().item()
             sums["loss"] += loss
         return {
-            name: (sums[name] if name == "confusion_matrix" else sums[name] / len(loader))
+            name: (
+                sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
+            )
             for name in sums
         }
 
@@ -337,27 +346,27 @@ def train_decoding_model(
             for phase, ds in datasets.items()
         }
 
-        if model_params.get("logistic_regression"):
+        if training_params.logistic_regression_baseline:
             # Logistic Regression model training
-            logistic_f1.append( logistic_regression(
-                X[tr_idx].cpu().numpy(),
-                Y[tr_idx].cpu().numpy(),
-                X[te_idx].cpu().numpy(),
-                Y[te_idx].cpu().numpy(),
+            logistic_f1.append(
+                logistic_regression(
+                    X[tr_idx].cpu().numpy(),
+                    Y[tr_idx].cpu().numpy(),
+                    X[te_idx].cpu().numpy(),
+                    Y[te_idx].cpu().numpy(),
                 )
             )
 
-        if model_params.get("linear_regression"):
+        if training_params.linear_regression_baseline:
             # Logistic Regression model training
-            linear_reg_corr.append( linear_regression(
-                X[tr_idx].cpu().numpy(),
-                Y[tr_idx].cpu().numpy(),
-                X[te_idx].cpu().numpy(),
-                Y[te_idx].cpu().numpy(),
+            linear_reg_corr.append(
+                linear_regression(
+                    X[tr_idx].cpu().numpy(),
+                    Y[tr_idx].cpu().numpy(),
+                    X[te_idx].cpu().numpy(),
+                    Y[te_idx].cpu().numpy(),
                 )
             )
-            
-            
 
         # Model, optimizer, early‐stop setup
         model = model_constructor_fn(model_params).to(device)
@@ -388,7 +397,9 @@ def train_decoding_model(
                 history[f"train_{name}"].append(val)
                 if write_to_tensorboard:
                     # Only log scalars
-                    if np.isscalar(val) or (isinstance(val, np.ndarray) and val.size == 1):
+                    if np.isscalar(val) or (
+                        isinstance(val, np.ndarray) and val.size == 1
+                    ):
                         writer.add_scalar(f"{name}/train", val, epoch)
                     # Optionally, log confusion matrix as image or text
                     elif name == "confusion_matrix":
@@ -397,7 +408,9 @@ def train_decoding_model(
                 history[f"val_{name}"].append(val)
                 if write_to_tensorboard:
                     # Only log scalars
-                    if np.isscalar(val) or (isinstance(val, np.ndarray) and val.size == 1):
+                    if np.isscalar(val) or (
+                        isinstance(val, np.ndarray) and val.size == 1
+                    ):
                         writer.add_scalar(f"{name}/val", val, epoch)
                     # Optionally, log confusion matrix as image or text
                     elif name == "confusion_matrix":
@@ -432,11 +445,11 @@ def train_decoding_model(
         # record into cv_results
         for name in metric_names:
 
-            if name!="confusion_matrix":
+            if name != "confusion_matrix":
                 cv_results[f"train_{name}"].append(history[f"train_{name}"][best_epoch])
                 cv_results[f"val_{name}"].append(history[f"val_{name}"][best_epoch])
                 cv_results[f"test_{name}"].append(test_mets[name])
-            elif name=="confusion_matrix":
+            elif name == "confusion_matrix":
                 conf_matrix_train = history[f"train_{name}"][best_epoch]
                 conf_matrix_val = history[f"val_{name}"][best_epoch]
                 conf_matrix_test = test_mets[name]
@@ -452,10 +465,13 @@ def train_decoding_model(
                     writer.add_text(f"{name}/test", str(val), fold)
 
             if logistic_f1:
-                writer.add_scalar(f"logistic_regression/f1_score", logistic_f1[-1], fold)
+                writer.add_scalar(
+                    f"logistic_regression/f1_score", logistic_f1[-1], fold
+                )
             if linear_reg_corr:
-                writer.add_scalar(f"linear_regression/pearson_correlation", linear_reg_corr[-1], fold)
-
+                writer.add_scalar(
+                    f"linear_regression/pearson_correlation", linear_reg_corr[-1], fold
+                )
 
             writer.close()
 
@@ -490,14 +506,15 @@ def train_decoding_model(
     # 7. Print CV summary
     if model_params.get("logistic_regression"):
         print("\nLogistic Regression F1 scores across folds:")
-        
-        print(f"F1: {np.mean(logistic_f1):.4f} ± {np.std(logistic_f1):.4f}")   
+
+        print(f"F1: {np.mean(logistic_f1):.4f} ± {np.std(logistic_f1):.4f}")
 
     if model_params.get("linear_regression"):
         print("\nLinear Regression Pearson Correlation across folds:")
-        
-        print(f"Correlation: {np.mean(linear_reg_corr):.4f} ± {np.std(linear_reg_corr):.4f}")       
 
+        print(
+            f"Correlation: {np.mean(linear_reg_corr):.4f} ± {np.std(linear_reg_corr):.4f}"
+        )
 
     print("\n" + "=" * 60)
     print("CROSS-VALIDATION RESULTS")
@@ -505,27 +522,19 @@ def train_decoding_model(
 
     if "confusion_matrix" in metric_names:
         conf_matrices = {
-        "train": conf_matrix_train,
-        "val": conf_matrix_val,
-        "test": conf_matrix_test,
+            "train": conf_matrix_train,
+            "val": conf_matrix_val,
+            "test": conf_matrix_test,
         }
 
     for phase in phases:
         for name in metric_names:
             if name != "confusion_matrix":
-                
                 vals = cv_results[f"{phase}_{name}"]
                 print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
             elif name == "confusion_matrix":
                 print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
-                # if phase == "train":
-                #     print(conf_matrix_train)
-                # elif phase == "val":
-                #     print(conf_matrix_val)
-                # elif phase == "test":
-                #     print(conf_matrix_test)
-                
-                
+
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]
