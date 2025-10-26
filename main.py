@@ -55,7 +55,7 @@ def main():
             experiment_config.data_params.electrode_file_path,
             subject_mapping=subject_id_map,
         )
-        experiment_config.data_params.subject_ids = subject_electrode_map.keys()
+        experiment_config.data_params.subject_ids = list(subject_electrode_map.keys())
         experiment_config.data_params.per_subject_electrodes = subject_electrode_map
 
     # Generate trial name if user specified format string.
@@ -84,8 +84,8 @@ def main():
     import yaml
     from dataclasses import asdict
 
-    # with open(os.path.join(output_dir, "config.yml"), "w") as fp:
-    #     yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
+    with open(os.path.join(output_dir, "config.yml"), "w") as fp:
+        yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
 
     # Decide what lags we need to train over.
     if experiment_config.training_params.lag:
