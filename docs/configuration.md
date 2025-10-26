@@ -84,6 +84,10 @@ training_params:
   min_lag: -500      # Start 500ms before word onset
   max_lag: 1000      # End 1000ms after word onset
   lag_step_size: 100 # Test every 100ms
+
+  # Baseline models
+  linear_regression_baseline: false    # Train and evaluate linear regression baseline
+  logistic_regression_baseline: false  # Train and evaluate logistic regression baseline
 ```
 
 See `config.py:TrainingParams` for all available fields.
