@@ -4,9 +4,11 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=32G
 #SBATCH --gres=gpu:1
-#SBATCH --time=15:00:00
+#SBATCH --time=2:00:00
 #SBATCH --output='./logs/%x.out'
 #SBATCH --error='./logs/%x.err'
+#SBATCH --account=uhasson
+
 
 module purge
 source decoding_env/bin/activate

@@ -55,7 +55,7 @@ def main():
             experiment_config.data_params.electrode_file_path,
             subject_mapping=subject_id_map,
         )
-        experiment_config.data_params.subject_ids = subject_electrode_map.keys()
+        experiment_config.data_params.subject_ids = list(subject_electrode_map.keys())
         experiment_config.data_params.per_subject_electrodes = subject_electrode_map
 
     # Generate trial name if user specified format string.
