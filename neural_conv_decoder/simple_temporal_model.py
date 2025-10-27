@@ -43,9 +43,23 @@ class SimpleTemporalModel(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x):
-        # Expect x shape: (B, C, T)
+        # Expect x shape: (B, C, T). Accept common swapped layout (B, T, C)
         if x.ndim != 3:
             raise ValueError(f"SimpleTemporalModel expects 3D input (B,C,T), got {x.shape}")
+
+        # If model_params.input_channels is known, detect and fix axes swap where
+        # the caller passed (B, T, C) instead of (B, C, T).
+        try:
+            n, a, b = x.shape
+            if a != self.input_channels and b == self.input_channels:
+                # Detected swapped axes: permute to [B, C, T]
+                x = x.permute(0, 2, 1).contiguous()
+            elif a != self.input_channels:
+                raise ValueError(
+                    f"SimpleTemporalModel expects {self.input_channels} channels but input has shape {tuple(x.shape)}"
+                )
+        except Exception:
+            raise
 
         # Pool temporal dimension
         x = self.time_pool(x).squeeze(-1)  # -> (B, C)

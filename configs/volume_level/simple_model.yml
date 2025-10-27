@@ -28,7 +28,7 @@ training_params:
   lag_step_size: 50
   lag: null
   batch_size: 64
-  epochs: 100
+  epochs: 50
   n_folds: 5
   losses: [mse]
   metrics: [r2]

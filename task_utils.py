@@ -213,7 +213,6 @@ def volume_level_encoding_task(data_params: DataParams):
     return df
 
 
-
 @registry.register_config_setter(name="volume_level_config_setter")
 def volume_level_config_setter(experiment_config, raws, df_word):
     """Align experiment config to volume-level task outputs.
@@ -246,35 +245,9 @@ def volume_level_config_setter(experiment_config, raws, df_word):
             # Ignore invalid values and leave window_width unchanged
             pass
 
+    # Ensure neural preprocessing reduces to RMS windows like the audio
     if not dp.preprocessing_fn_name:
-        model_ctor = getattr(experiment_config, "model_constructor_name", None)
-        # If no model specified, default to window RMS preprocessing for neural data.
-        # Additionally, for ridge-like constructors we also want RMS inputs so detect
-        # common ridge constructor names (e.g., 'ridge' in the name) and enable RMS.
-        if not model_ctor:
-            dp.preprocessing_fn_name = "window_rms"
-        else:
-            try:
-                ctor_name = str(model_ctor).lower()
-            except Exception:
-                ctor_name = ""
-            if "ridge" in ctor_name or "torch_ridge" in ctor_name:
-                dp.preprocessing_fn_name = "window_rms"
-
-    # Auto-fill model_params.input_channels when missing by summing channels from raws
-    mp = getattr(experiment_config, "model_params", None) or {}
-    if mp.get("input_channels") in (None, 0, "", False):
-        try:
-            total_ch = sum(len(getattr(r, "ch_names", getattr(r, "info", {}).get("ch_names", []))) for r in raws) if raws else None
-            # Fallback to info['nchan'] if available
-            if (not total_ch or total_ch == 0) and raws:
-                total_ch = sum(getattr(r, "info", {}).get("nchan", 0) for r in raws)
-        except Exception:
-            total_ch = None
-
-        if total_ch and total_ch > 0:
-            mp["input_channels"] = int(total_ch)
-            experiment_config.model_params = mp
+        dp.preprocessing_fn_name = "window_rms"
 
     # No change to experiment_config identity, return for convenience
     return experiment_config

@@ -26,8 +26,15 @@ class TorchRidgeModel(nn.Module):
         self.linear = nn.Linear(self.input_channels, self.output_dim, bias=bias)
 
     def forward(self, x):
-        # Support both time-series input (B, C, T) and preprocessed RMS input (B, C).
+        # Support both time-series input (B, C, T), preprocessed RMS input (B, C),
+        # and the common swapped layout (B, T, C).
         if x.ndim == 3:
+            # If channels are in the last axis (B, T, C) and we know expected
+            # input channels, permute to (B, C, T).
+            n, a, b = x.shape
+            if a != self.input_channels and b == self.input_channels:
+                x = x.permute(0, 2, 1).contiguous()
+
             # x: (B, C, T) -> pool -> (B, C)
             x = self.time_pool(x).squeeze(-1)
         elif x.ndim == 2:

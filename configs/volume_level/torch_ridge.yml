@@ -27,9 +27,9 @@ training_params:
   max_lag: 1001
   lag_step_size: 50
   lag: null
-  batch_size: 128
-  epochs: 100
-  n_folds: 5
+  batch_size: 64
+  epochs: 50
+  n_folds: 10
   losses: [mse]
   metrics: [r2]
   early_stopping_metric: r2
@@ -41,4 +41,4 @@ model_params:
   embedding_dim: 1
   bias: true
   preprocessor_params: {}
-  # input_channels will be auto-filled by the volume_level_config_setter from the loaded raws
+

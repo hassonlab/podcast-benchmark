@@ -96,14 +96,14 @@ neural-conv:
 	$(CMD) main.py \
 		--config "configs/neural_conv_decoder/neural_conv_decoder$(CONFIG_SUFFIX).yml"
 
-simple_vol_lvl_smoke:
+simple_vol_lvl:
 	mkdir -p logs
 	module load anaconda3/2025.6
 	conda activate decoding_env
 	$(CMD) main.py \
 		--config "configs/volume_level/simple_model.yml"
 
-torch_vol_lvl_smoke:
+torch_vol_lvl:
 	mkdir -p logs
 	module load anaconda3/2025.6
 	conda activate decoding_env
