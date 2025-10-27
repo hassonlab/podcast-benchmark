@@ -104,6 +104,20 @@ neural-conv:
 
 		
 
+simple_vol_lvl:
+	mkdir -p logs
+	module load anaconda3/2025.6
+	conda activate decoding_env
+	$(CMD) main.py \
+		--config "configs/volume_level/simple_model.yml"
+
+torch_vol_lvl:
+	mkdir -p logs
+	module load anaconda3/2025.6
+	conda activate decoding_env
+	$(CMD) main.py \
+		--config "configs/volume_level/torch_ridge.yml"
+
 foundation-model-lags:
 	mkdir -p logs
 	$(CMD) main.py \

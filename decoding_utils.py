@@ -749,6 +749,7 @@ def run_training_over_lags(
             word_column=data_params.word_column,
         )
 
+
         X_tensor = torch.FloatTensor(X)
         Y_tensor = torch.FloatTensor(Y)
 
