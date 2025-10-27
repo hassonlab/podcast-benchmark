@@ -108,12 +108,6 @@ def sentence_onset_task(data_params: DataParams):
 
     df = pd.read_csv(csv_path, index_col=0)
 
-    # Convert ms -> seconds if needed (CSV stores ms; pipeline expects seconds)
-    # Heuristic: if values are large (e.g., >1e4), treat as ms.
-    if df["sentence_onset"].max() > 1e4 or df["sentence_offset"].max() > 1e4:
-        df["sentence_onset"] = df["sentence_onset"] / 1000.0
-        df["sentence_offset"] = df["sentence_offset"] / 1000.0
-
     # Expect columns: sentence_onset, sentence_offset
     if not {"sentence_onset", "sentence_offset"}.issubset(df.columns):
         raise ValueError(
