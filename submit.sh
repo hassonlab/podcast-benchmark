@@ -4,9 +4,11 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256G
 #SBATCH --gres=gpu:1
-#SBATCH --time=20:00:00
+#SBATCH --time=2:00:00
 #SBATCH --output='./logs/%x.out'
 #SBATCH --error='./logs/%x.err'
+#SBATCH --account=uhasson
+
 
 module purge
 module load anaconda3/2025.6

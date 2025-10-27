@@ -8,7 +8,7 @@ import pandas as pd
 from scipy.io import wavfile
 from scipy.signal import butter, hilbert, resample_poly, sosfilt, sosfiltfilt
 from sklearn.decomposition import PCA
-
+import numpy as np
 from config import DataParams
 import embeddings
 import registry
@@ -253,6 +253,82 @@ def volume_level_config_setter(experiment_config, raws, df_word):
     return experiment_config
 
 
+@registry.register_task_data_getter()
+def content_noncontent_task(data_params: DataParams):
+    """
+    Binary classification dataset for content vs non-content word classification.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: 1.0 for content, 0.0 non-content
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("content_noncontent_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['is_content']
+
+    print(f"\n=== Content Non-content words DATASET ===")
+    print(f"Total examples: {len(df)}")
+    print(f"Positives: {np.sum(df.target==1)}")
+    print(f"Negatives: {len(df) - np.sum(df.target==1)}")
+
+    return df
+
+@registry.register_task_data_getter()
+def pos_task(data_params: DataParams):
+    """
+    Dataset for Parts of Speech Classification. It contains five classes:
+    Noun (0), Verb (1), Adjective (2), Adverb (3) and others (4)
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: Parts of Speech class label
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("pos_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['pos_class']
+
+    print(f"\n=== Parts of Speech DATASET ===")
+    print(f"Total examples: {len(df)}")
+    print(f"Noun: {np.sum(df.target==0)}")
+    print(f"Verb: {np.sum(df.target==1)}")
+    print(f"Adjective: {np.sum(df.target==2)}")
+    print(f"Adverb: {np.sum(df.target==3)}")
+    print(f"Other: {np.sum(df.target==4)}")
+
+    return df
+
+
+
+
+@registry.register_task_data_getter()
 def sentence_onset_task(data_params: DataParams):
     """
     Binary classification dataset for sentence onset detection.
@@ -326,6 +402,67 @@ def sentence_onset_task(data_params: DataParams):
     print("=" * 50)
 
     return df_out
+
+@registry.register_task_data_getter()
+def gpt_surprise_task(data_params: DataParams):
+
+    """
+    Dataset for GPT@XL surprise values as regression targets for each word.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: surprise value from GPT-2 XL
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("content_noncontent_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['surprise']
+
+    return df
+
+@registry.register_task_data_getter()
+def gpt_surprise_multiclass_task(data_params: DataParams):
+
+    """
+    Multiclass classification dataset for GPT2 XL surprise levels. The surprise levels are binned into 3 classes:
+    Low (0): < mean-std, Medium (1) within std distance from mean, High (2) : > mean+std.
+
+    Returns a DataFrame with columns:
+      - start: time (in seconds) to center the neural window
+      - target: class label: 0 (Low), 1 (Medium), 2 (High)
+
+    Notes:
+      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+        `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
+      
+    """
+    # Pull task-specific params from data_params.task_params with local defaults
+    tp = getattr(data_params, "task_params", {}) or {}
+
+    # Resolve CSV path
+    default_csv = os.path.join(os.getcwd(), "df_word_onset_with_pos_class.csv")
+    csv_path = tp.get("content_noncontent_path", default_csv)
+
+    df1 = pd.read_csv(csv_path, index_col=0)
+
+    df=pd.DataFrame()
+    df['start']=df1['onset']  # convert samples to seconds
+    df['target']=df1['surprise_class']
+
+    return df
 
 
 @registry.register_task_data_getter()

@@ -84,6 +84,10 @@ class TrainingParams:
     min_test_freq_auc: int = -1
     # Sets the k we use in top-k metrics.
     top_k_thresholds: list[int] = field(default_factory=lambda: [1, 5, 10])
+    # If true trains and evaluates a linear regression baseline.
+    linear_regression_baseline: bool = False
+    # If true trains and evaluates a logistic regression baseline.
+    logistic_regression_baseline: bool = False
 
 
 @dataclass
