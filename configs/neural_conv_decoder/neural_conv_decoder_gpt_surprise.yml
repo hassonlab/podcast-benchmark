@@ -3,8 +3,6 @@ config_setter_name: neural_conv
 task_name: gpt_surprise_task
 model_params:
   conv_filters: 128
-  reg: 0.35
-  reg_head: 0
   dropout: 0.2
   num_models: 10
   embedding_dim: 1 #this is output dimension of the decoder
@@ -30,14 +28,14 @@ training_params:
 data_params:
   data_root: data
   window_width: 0.625
-  preprocessing_fn_name: preprocess_neural_data
+  preprocessing_fn_name: window_average_neural_data
+  # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
   subject_ids: [9]
-  electrode_file_path: "all_subject_sig.csv"
   # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   preprocessor_params:
     num_average_samples: 32
   # Task-specific knobs (optional)
   task_params:
-    content_noncontent_path: df_word_onset_with_pos_class.csv
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 
 trial_name: gpt_surprise

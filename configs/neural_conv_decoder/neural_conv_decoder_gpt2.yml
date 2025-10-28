@@ -1,0 +1,32 @@
+model_constructor_name: ensemble_pitom_model
+config_setter_name: neural_conv
+model_params:
+  conv_filters: 128
+  dropout: 0.2
+  num_models: 10
+  embedding_dim: 50
+training_params:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -2000
+  max_lag: 2000
+  lag_step_size: 100
+data_params:
+  # Cross model data_params
+  data_root: data
+  word_column: word
+  # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
+  subject_ids: [9]
+  embedding_type: glove
+  embedding_layer: 24
+  # embedding_pca_dim: 50
+  window_width: 0.625
+  preprocessing_fn_name: window_average_neural_data
+  # neural_conv_decoder specific config
+  preprocessor_params:
+    num_average_samples: 32
+trial_name: ensemble_model_10_gpt2

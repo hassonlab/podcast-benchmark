@@ -9,10 +9,10 @@ import torch
 import numpy as np
 from unittest.mock import Mock, patch
 
-import registry
-from config import TrainingParams
-from registry import metric_registry
-import decoding_utils
+from core import registry
+from core.config import TrainingParams
+from core.registry import metric_registry
+from utils import decoding_utils
 
 
 class TestLossAndMetricSetup:

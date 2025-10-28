@@ -179,7 +179,7 @@ CLAUDE.md
 
 # Results
 data/
-models/
+checkpoints/
 results/
 logs/
 event_logs/

@@ -19,10 +19,9 @@ if 'pytest' in sys.modules or '--pytest' in sys.argv:
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from plot_utils import (
+from utils.plot_utils import (
     plot_training_history,
     plot_cv_results,
-    plot_ridge_results,
     extract_metric_names,
     format_metric_name,
     get_subplot_layout,
@@ -187,28 +186,6 @@ def test_plot_cv_results(show_plots=False):
     print("✓ New CV format plot test passed")
 
 
-def test_plot_ridge_results(show_plots=False):
-    """Test ridge plotting helper with synthetic results."""
-    print("Testing plot_ridge_results...")
-
-    results = {
-        'lag_ms': [-100.0, 0.0, 100.0, 200.0],
-        'r2': [0.15, 0.42, 0.35, 0.1],
-        'train_r2': [0.6, 0.82, 0.75, 0.5],
-        'alpha': [0.1, 0.01, 0.05, 0.2],
-        'coef_norm': [2.0, 1.5, 1.7, 2.2],
-        'n_samples': [500, 520, 510, 480],
-        'n_features': [128, 128, 128, 128],
-    }
-
-    fig, axes = plot_ridge_results(results, show=show_plots)
-    assert fig is not None
-    assert len(axes) == 4
-    if not show_plots:
-        plt.close(fig)
-    print("✓ Ridge plot test passed")
-
-
 def main():
     """Run all tests."""
     parser = argparse.ArgumentParser(description='Test plot_utils.py functions')
@@ -229,7 +206,6 @@ def main():
     test_get_subplot_layout()
     test_plot_training_history(show_plots=args.show_plots)
     test_plot_cv_results(show_plots=args.show_plots)
-    test_plot_ridge_results(show_plots=args.show_plots)
 
     print("\n✅ All tests passed! The refactored plot_utils.py functions work correctly.")
 

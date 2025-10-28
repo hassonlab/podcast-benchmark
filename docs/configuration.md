@@ -90,7 +90,7 @@ training_params:
   logistic_regression_baseline: false  # Train and evaluate logistic regression baseline
 ```
 
-See `config.py:TrainingParams` for all available fields.
+See `core/config.py:TrainingParams` for all available fields.
 
 ---
 
@@ -154,7 +154,7 @@ data_params:
     param1: value1
 ```
 
-See `config.py:DataParams` for all available fields.
+See `core/config.py:DataParams` for all available fields.
 
 ---
 
@@ -233,8 +233,43 @@ training_params:
 
 ---
 
+## Batch Training with Training Matrix
+
+The `training_matrix.yaml` file enables running multiple experiments at once. Define model/task/config combinations:
+
+```yaml
+neural_conv_decoder:
+  word_embedding_decoding_task:
+    - neural_conv_decoder_base.yml
+    - neural_conv_decoder_binary.yml
+```
+
+**Usage**:
+```bash
+make train-all                                    # Run all configs
+make train-all MODELS=neural_conv_decoder         # Filter by model
+make train-all TASKS=sentence_onset_task          # Filter by task
+make train-all MODELS=model1,model2 TASKS=task1   # Combine filters
+```
+
+**Adding New Model/Task Combinations**:
+
+Edit `training_matrix.yaml` to add your experiments:
+
+```yaml
+your_new_model:
+  your_new_task:
+    - config_file_1.yml
+    - config_file_2.yml
+    - config_file_3.yml
+```
+
+---
+
 ## See Also
 
-- **`config.py`**: Source code with all available fields and defaults
+- **`core/config.py`**: Source code with all available fields and defaults
+- **`training_matrix.yaml`**: Batch experiment configuration
+- [Task Reference](task-reference.md): Complete reference for all available tasks
 - [Onboarding a Model](onboarding-model.md): How to use configs with your models
 - [API Reference](api-reference.md): Detailed API documentation

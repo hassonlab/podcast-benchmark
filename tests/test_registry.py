@@ -8,7 +8,7 @@ import pytest
 import torch
 import numpy as np
 
-import registry
+from core import registry
 
 
 @pytest.fixture(autouse=True)

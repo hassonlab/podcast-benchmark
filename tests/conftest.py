@@ -5,7 +5,7 @@ Shared fixtures and configuration for pytest tests.
 import pytest
 import tempfile
 import os
-from config import ExperimentConfig, DataParams, TrainingParams
+from core.config import ExperimentConfig, DataParams, TrainingParams
 
 
 @pytest.fixture
@@ -69,5 +69,5 @@ def sample_experiment_config():
         ),
         trial_name="test_experiment",
         output_dir="test_results",
-        model_dir="test_models",
+        checkpoint_dir="test_checkpoints",
     )

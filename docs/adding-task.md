@@ -25,11 +25,13 @@ To add a new task:
 
 ## 1. Create Task Data Getter
 
-Create a function that loads and processes your task-specific data.
+Create a new file in tasks/ with a function that loads and processes your task-specific data.
 
 ### Function Signature
 
 ```python
+from core.config import DataParams
+
 def my_task_data_getter(data_params: DataParams) -> pd.DataFrame:
     """
     Load task-specific data.
@@ -57,9 +59,9 @@ def my_task_data_getter(data_params: DataParams) -> pd.DataFrame:
 ### Minimal Example
 
 ```python
-from config import DataParams
+from core.config import DataParams
 import pandas as pd
-import registry
+import core.registry as registry
 
 @registry.register_task_data_getter()
 def constant_prediction_task(data_params: DataParams):
@@ -87,7 +89,7 @@ def constant_prediction_task(data_params: DataParams):
 Use the `@registry.register_task_data_getter()` decorator:
 
 ```python
-import registry
+import core.registry as registry
 
 @registry.register_task_data_getter()
 def my_custom_task(data_params: DataParams):
@@ -130,13 +132,20 @@ def my_custom_task(data_params: DataParams):
 
 ## 4. Optional: Custom Metrics
 
-Define metrics specific to your task:
+Define metrics specific to your task. Add them to the appropriate file in the `metrics/` package based on the metric type:
+
+- **Regression metrics** → `metrics/regression_metrics.py`
+- **Classification metrics** → `metrics/classification_metrics.py`
+- **Embedding metrics** → `metrics/embedding_metrics.py`
+- **Utility functions** → `metrics/utils.py`
+
+Example:
 
 ```python
 import torch
-import registry
+from core.registry import register_metric
 
-@registry.register_metric('my_accuracy')
+@register_metric('my_accuracy')
 def my_accuracy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor):
     """
     Custom metric for your task.
@@ -159,13 +168,22 @@ training_params:
   metrics: [my_accuracy, cosine_sim]
 ```
 
+The metrics are automatically registered when the package is imported.
+
 ---
 
 ## Examples
 
-See `task_utils.py` for complete examples:
-- `word_embedding_decoding_task` - Default task for decoding word embeddings (lines 11-72)
-- `placeholder_task` - Minimal example showing required structure (lines 75-92)
+See the `tasks/` directory for complete examples:
+- `tasks/word_embedding.py` - Default task for decoding word embeddings
+- `tasks/placeholder_task.py` - Minimal example showing required structure
+- `tasks/content_noncontent.py` - Binary classification example
+- `tasks/pos_task.py` - Part-of-speech tagging example
+- `tasks/sentence_onset.py` - Sentence onset detection
+- `tasks/gpt_surprise.py` - Regression and multiclass classification examples
+- `tasks/volume_level.py` - Audio feature prediction with custom config setter
+
+For detailed documentation on all available tasks and their configuration parameters, see the [Task Reference](task-reference.md)
 
 ---
 
@@ -183,6 +201,8 @@ data_params:
 
 Access in your function:
 ```python
+from core.config import DataParams
+
 def my_task(data_params: DataParams):
     feature_file = data_params.task_params['feature_file']
     threshold = data_params.task_params.get('threshold', 0.5)
@@ -193,6 +213,7 @@ def my_task(data_params: DataParams):
 
 ## See Also
 
+- [Task Reference](task-reference.md) - Complete reference for all available tasks
 - [Configuration Guide](configuration.md) - How to configure tasks
 - [API Reference](api-reference.md) - Task data getter API
-- `task_utils.py` - Complete task examples
+- `tasks/` directory - Complete task examples
