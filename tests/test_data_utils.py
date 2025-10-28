@@ -15,16 +15,13 @@ from math import gcd
 from unittest.mock import patch, MagicMock
 
 from scipy.signal import resample_poly
-from data_utils import (
+from utils.data_utils import (
     get_data,
     read_electrode_file,
     load_raws,
     read_subject_mapping,
-    window_rms_preprocessor,
-    log_transform_preprocessor,
-    zscore_preprocessor,
 )
-from config import DataParams
+from core.config import DataParams
 
 
 @pytest.fixture
@@ -50,7 +47,7 @@ def mock_raw():
 
 
 @pytest.fixture
-def df_word_in_bounds():
+def task_df_in_bounds():
     """Create a DataFrame with word events that fall within the data bounds."""
     return pd.DataFrame(
         {
@@ -63,7 +60,7 @@ def df_word_in_bounds():
 
 
 @pytest.fixture
-def df_word_out_of_bounds():
+def task_df_out_of_bounds():
     """Create a DataFrame with word events that fall outside the data bounds."""
     return pd.DataFrame(
         {
@@ -78,7 +75,7 @@ def df_word_out_of_bounds():
 class TestGetDataOutOfBounds:
     """Test get_data function with out-of-bounds time windows."""
 
-    def test_get_data_in_bounds_baseline(self, mock_raw, df_word_in_bounds):
+    def test_get_data_in_bounds_baseline(self, mock_raw, task_df_in_bounds):
         """Test that get_data works correctly with in-bounds events."""
         lag = 0
         window_width = 0.5
@@ -86,16 +83,16 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_in_bounds,
+            task_df=task_df_in_bounds,
             window_width=window_width,
             word_column="word",
         )
 
-        assert data.shape[0] == len(df_word_in_bounds)
-        assert len(targets) == len(df_word_in_bounds)
-        assert len(words) == len(df_word_in_bounds)
+        assert data.shape[0] == len(task_df_in_bounds)
+        assert len(targets) == len(task_df_in_bounds)
+        assert len(words) == len(task_df_in_bounds)
 
-    def test_get_data_without_word_column(self, mock_raw, df_word_in_bounds):
+    def test_get_data_without_word_column(self, mock_raw, task_df_in_bounds):
         """Test that get_data works correctly with in-bounds events."""
         lag = 0
         window_width = 0.5
@@ -103,14 +100,14 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_in_bounds,
+            task_df=task_df_in_bounds,
             window_width=window_width,
         )
 
-        assert data.shape[0] == len(df_word_in_bounds)
-        assert len(targets) == len(df_word_in_bounds)
+        assert data.shape[0] == len(task_df_in_bounds)
+        assert len(targets) == len(task_df_in_bounds)
 
-    def test_get_data_out_of_bounds_bug(self, mock_raw, df_word_out_of_bounds):
+    def test_get_data_out_of_bounds_bug(self, mock_raw, task_df_out_of_bounds):
         """Test that out-of-bounds events raise ValueError instead of creating empty epochs."""
         lag = 500
         window_width = 1.0
@@ -121,13 +118,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_out_of_bounds,
+                task_df=task_df_out_of_bounds,
                 window_width=window_width,
             )
 
     def test_get_data_extreme_out_of_bounds(self, mock_raw):
         """Test that extremely out-of-bounds events raise ValueError without warnings."""
-        df_word_extreme = pd.DataFrame(
+        task_df_extreme = pd.DataFrame(
             {
                 "start": [-3.0, 20.0, 25.0],
                 "end": [15.5, 20.5, 25.5],
@@ -145,13 +142,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_extreme,
+                task_df=task_df_extreme,
                 window_width=window_width,
             )
 
     def test_get_data_mixed_bounds(self, mock_raw):
         """Test that only in-bounds events are kept when mix of valid/invalid events."""
-        df_word_mixed = pd.DataFrame(
+        task_df_mixed = pd.DataFrame(
             {
                 "start": [2.0, 9.8, 4.0, 10.1],
                 "end": [2.5, 9.9, 4.5, 10.2],
@@ -166,7 +163,7 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_mixed,
+            task_df=task_df_mixed,
             window_width=window_width,
             word_column="word",
         )
@@ -178,7 +175,7 @@ class TestGetDataOutOfBounds:
 
     def test_get_data_negative_time_bounds(self, mock_raw):
         """Test that events with negative time windows are filtered out."""
-        df_word_early = pd.DataFrame(
+        task_df_early = pd.DataFrame(
             {
                 "start": [0.1, 0.2, 0.3],
                 "end": [0.2, 0.3, 0.4],
@@ -197,13 +194,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_early,
+                task_df=task_df_early,
                 window_width=window_width,
             )
 
     def test_get_data_mixed_negative_bounds(self, mock_raw):
         """Test filtering with mix of valid events and negative time window events."""
-        df_word_mixed_neg = pd.DataFrame(
+        task_df_mixed_neg = pd.DataFrame(
             {
                 "start": [
                     0.7,
@@ -223,7 +220,7 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_mixed_neg,
+            task_df=task_df_mixed_neg,
             window_width=window_width,
             word_column="word",
         )
@@ -232,134 +229,6 @@ class TestGetDataOutOfBounds:
         assert data.shape[0] == expected_valid_events
         assert len(targets) == expected_valid_events
         assert len(words) == expected_valid_events
-
-
-class TestWindowRMSPreprocessor:
-    """Validate the RMS neural window preprocessor."""
-
-    def test_window_rms_outputs_expected_values(self):
-        data = np.array(
-            [
-                [[0.0, 3.0, 4.0, 0.0], [1.0, -1.0, 1.0, -1.0]],
-                [[2.0, 2.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]],
-            ],
-            dtype=np.float32,
-        )
-
-        rms = window_rms_preprocessor(data)
-
-        expected = np.array(
-            [
-                [2.5, 1.0],
-                [np.sqrt(2.5), 0.0],
-            ],
-            dtype=np.float32,
-        )
-
-        assert rms.shape == (2, 2)
-        assert rms.dtype == np.float32
-        np.testing.assert_allclose(rms, expected, rtol=1e-6)
-
-    def test_window_rms_rejects_invalid_shape(self):
-        bad_input = np.zeros((3, 4), dtype=np.float32)
-        with pytest.raises(ValueError, match="expects data with shape"):
-            window_rms_preprocessor(bad_input)
-
-
-class TestLogTransformPreprocessor:
-    """Ensure the log-transform preprocessor matches expected behaviour."""
-
-    def test_log_transform_matches_numpy(self):
-        data = np.array(
-            [[0.0, 1.0, 10.0], [5.0, 50.0, 500.0]],
-            dtype=np.float32,
-        )[None, :, :]
-
-        params = {"epsilon": 1e-3, "scale": 20.0}
-        transformed = log_transform_preprocessor(data, params)
-
-        expected = 20.0 * np.log10(np.clip(data, 0.0, None) + 1e-3)
-
-        np.testing.assert_allclose(
-            transformed, expected.astype(np.float32), rtol=1e-5, atol=5e-6
-        )
-        assert transformed.shape == data.shape
-        assert transformed.dtype == np.float32
-
-    def test_log_transform_supports_natural_log(self):
-        data = np.array([[0.1, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=np.float32)
-        params = {"log_base": "e", "epsilon": 1e-4}
-
-        transformed = log_transform_preprocessor(data, params)
-        expected = np.log(np.clip(data, 0.0, None) + 1e-4)
-
-        np.testing.assert_allclose(
-            transformed, expected.astype(np.float32), rtol=1e-5, atol=1e-7
-        )
-
-    def test_log_transform_rejects_nonpositive_epsilon(self):
-        data = np.ones((1, 2, 3), dtype=np.float32)
-        with pytest.raises(ValueError):
-            log_transform_preprocessor(data, {"epsilon": 0.0})
-
-
-class TestZScorePreprocessor:
-    """Validate channel-wise z-scoring."""
-
-    def test_zscore_computes_channel_stats(self):
-        data = np.array(
-            [
-                [[1.0, 2.0, 3.0], [2.0, 2.0, 2.0]],
-                [[4.0, 5.0, 6.0], [1.0, 2.0, 3.0]],
-            ],
-            dtype=np.float32,
-        )
-
-        params: dict = {}
-        zscored = zscore_preprocessor(data, params)
-
-        channel0 = np.array([1, 2, 3, 4, 5, 6], dtype=np.float64)
-        channel1 = np.array([2, 2, 2, 1, 2, 3], dtype=np.float64)
-
-        expected = np.empty_like(zscored)
-        expected[:, 0, :] = (
-            data[:, 0, :] - channel0.mean()
-        ) / channel0.std(ddof=0)
-        expected[:, 1, :] = (
-            data[:, 1, :] - channel1.mean()
-        ) / channel1.std(ddof=0)
-
-        np.testing.assert_allclose(zscored, expected.astype(np.float32), rtol=1e-6)
-        assert "channel_means" in params and "channel_stds" in params
-        assert params["channel_means"].shape == (2,)
-
-    def test_zscore_reuses_provided_stats(self):
-        data = np.array(
-            [
-                [[1.0, 2.0], [10.0, 10.0]],
-                [[3.0, 4.0], [10.0, 10.0]],
-            ],
-            dtype=np.float32,
-        )
-
-        means = np.array([2.5, 10.0], dtype=np.float32)
-        stds = np.array([1.118034, 1.0], dtype=np.float32)
-
-        params = {"channel_means": means, "channel_stds": stds}
-        zscored = zscore_preprocessor(data, params)
-
-        expected = np.empty_like(zscored)
-        expected[:, 0, :] = (data[:, 0, :] - means[0]) / stds[0]
-        expected[:, 1, :] = (data[:, 1, :] - means[1]) / stds[1]
-
-        np.testing.assert_allclose(zscored, expected.astype(np.float32), rtol=1e-6)
-
-    def test_zscore_raises_on_bad_stats(self):
-        data = np.ones((1, 2, 3), dtype=np.float32)
-        params = {"channel_means": np.array([0.0]), "channel_stds": np.array([1.0])}
-
-        with pytest.raises(ValueError):
-            zscore_preprocessor(data, params)
 
 
 @pytest.fixture
@@ -543,8 +412,8 @@ def bids_temp_files(mock_raw_with_channels):
 class TestLoadRaws:
     """Test load_raws function for loading multiple subjects with different configurations."""
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_multiple_subjects(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -600,8 +469,8 @@ class TestLoadRaws:
             for key, value in expected.items():
                 assert call_kwargs[key] == value
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_single_subject(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -621,8 +490,8 @@ class TestLoadRaws:
         call_kwargs = mock_bids_path.call_args_list[0][1]
         assert call_kwargs["subject"] == "05"
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_no_subjects(self, mock_bids_path, mock_read_raw_fif):
         """Test loading raw data with empty subject list."""
         data_params = DataParams(subject_ids=[], data_root="/fake/data")
@@ -633,8 +502,8 @@ class TestLoadRaws:
         assert mock_read_raw_fif.call_count == 0
         assert mock_bids_path.call_count == 0
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_per_subject_electrodes(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -669,8 +538,8 @@ class TestLoadRaws:
         # but we can verify that the function completed without errors
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_channel_reg_ex(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -690,8 +559,8 @@ class TestLoadRaws:
         assert len(raws) == 2
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_per_subject_electrodes_priority(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -876,7 +745,9 @@ class TestReadSubjectMapping:
         for participant_id in result.values():
             assert isinstance(participant_id, int)
 
-    def test_read_subject_mapping_participant_id_extraction(self, temp_participant_mapping_tsv):
+    def test_read_subject_mapping_participant_id_extraction(
+        self, temp_participant_mapping_tsv
+    ):
         """Test that participant IDs are correctly extracted from sub-XX format."""
         result = read_subject_mapping(temp_participant_mapping_tsv)
 
@@ -911,7 +782,9 @@ class TestReadSubjectMapping:
     ):
         """Test integration between read_subject_mapping and read_electrode_file."""
         # First, get the subject mapping
-        subject_mapping = read_subject_mapping(temp_participant_mapping_csv, delimiter=",")
+        subject_mapping = read_subject_mapping(
+            temp_participant_mapping_csv, delimiter=","
+        )
 
         # Expected mapping: {661: 5, 717: 12, 723: 8}
         assert subject_mapping == {661: 5, 717: 12, 723: 8}
@@ -940,5 +813,3 @@ class TestReadSubjectMapping:
         assert 5 in electrode_mapping
         assert 12 in electrode_mapping
         assert 8 in electrode_mapping
-
-

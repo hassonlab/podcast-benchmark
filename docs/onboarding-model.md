@@ -19,10 +19,10 @@ To set up a new model (e.g., BrainBERT), you need to:
 
 ## 1. Create a New Folder
 
-Organize all code for your model in its own directory:
+Organize all code for your model in its own directory inside the `models/` folder:
 
 ```bash
-mkdir my_model
+mkdir models/my_model
 ```
 
 Write all model-specific code in this folder.
@@ -33,7 +33,7 @@ Write all model-specific code in this folder.
 
 ### Define Your Model
 
-Create your PyTorch model in `my_model/model.py`. For example:
+Create your PyTorch model in `models/my_model/model.py`. For example:
 
 ```python
 import torch.nn as nn
@@ -54,7 +54,7 @@ class MyDecodingModel(nn.Module):
 Define a constructor that takes model parameters from your config:
 
 ```python
-import registry
+import core.registry as registry
 
 @registry.register_model_constructor()
 def my_model_constructor(model_params):
@@ -152,6 +152,8 @@ def foundation_model_finetune_mlp(model_params):
 Create a function to transform neural data for your model.
 
 ```python
+import core.registry as registry
+
 @registry.register_data_preprocessor()
 def my_preprocessing_fn(data, preprocessor_params):
     # data shape: [num_words, num_electrodes, timesteps]
@@ -163,7 +165,9 @@ def my_preprocessing_fn(data, preprocessor_params):
 
 **Function Signature**:
 ```python
-preprocessing_fn(
+import numpy as np
+
+def preprocessing_fn(
     data: np.array,  # [num_words, num_electrodes, timesteps]
     preprocessor_params: dict
 ) -> np.array  # [num_words, ...]
@@ -174,7 +178,7 @@ preprocessing_fn(
 **Neural Conv Decoder** (temporal averaging):
 ```python
 @registry.register_data_preprocessor()
-def preprocess_neural_data(data, preprocessor_params):
+def window_average_neural_data(data, preprocessor_params):
     # Average over num_average_samples to reduce sample rate
     return data.reshape(
         data.shape[0],
@@ -310,6 +314,8 @@ trial_name: foundation_finetune_v1
 Sometimes you need to set config values at runtime based on the loaded data.
 
 ```python
+import core.registry as registry
+
 @registry.register_config_setter('my_model')
 def my_config_setter(experiment_config, raws, df_word):
     # Set values based on data
@@ -320,7 +326,9 @@ def my_config_setter(experiment_config, raws, df_word):
 
 **Function Signature**:
 ```python
-config_setter(
+from core.config import ExperimentConfig
+
+def config_setter(
     experiment_config: ExperimentConfig,
     raws: list[mne.io.Raw],
     df_word: pd.DataFrame
@@ -370,14 +378,14 @@ def foundation_model_mlp_finetune_config_setter(
 
 ## 6. Import Module
 
-Add your module to `main.py` so functions are registered:
+Your module will be automatically imported! The framework recursively imports all models from the `models/` directory:
 
 ```python
-# Import modules which define registry functions
-import_all_from_package('neural_conv_decoder')
-import_all_from_package('foundation_model')
-import_all_from_package('my_model')  # Add this line
+# Import all models from the models/ directory (recursively imports all subpackages)
+import_all_from_package("models", recursive=True)
 ```
+
+As long as your model is in `models/my_model/`, it will be automatically discovered and loaded at runtime.
 
 **Critical**: Make sure you've added the `@registry` decorators to your functions!
 
@@ -430,8 +438,34 @@ If you encounter errors:
 
 ---
 
+---
+
+## Complete Working Example
+
+See **`models/example_foundation_model/`** for a complete, self-contained example demonstrating:
+
+- Simple transformer foundation model implementation
+- Both integration patterns (feature extraction + finetuning)
+- Model directory structure with config and checkpoint
+- Full documentation and runnable examples
+
+This example shows exactly how all the pieces fit together for foundation models.
+
+```bash
+# Run feature extraction example
+python main.py --config configs/example_foundation_model/feature_extraction.yaml
+
+# Run finetuning example
+python main.py --config configs/example_foundation_model/finetuning.yaml
+```
+
+See `models/example_foundation_model/README.md` for details.
+
+---
+
 ## See Also
 
 - [Configuration Guide](configuration.md) - Detailed config options and patterns
+- [Task Reference](task-reference.md) - Complete reference for all available tasks
 - [Adding a Task](adding-task.md) - Create custom decoding tasks
 - [API Reference](api-reference.md) - Complete API documentation

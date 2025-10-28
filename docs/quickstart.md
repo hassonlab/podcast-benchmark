@@ -48,7 +48,9 @@ To modify data, behavior, or hyperparameters:
 
 Edit the relevant configuration file in `configs/`:
 - `configs/neural_conv_decoder/` - Neural convolutional decoder settings
-- `configs/foundation_model/` - Foundation model decoder settings
+- `configs/example_foundation_model/` - Foundation model decoder settings
+
+Model implementations can be found in the `models/` directory.
 
 See [Onboarding a New Model](onboarding-model.md) for details on configuration options.
 
@@ -56,4 +58,5 @@ See [Onboarding a New Model](onboarding-model.md) for details on configuration o
 
 - [Add your own model](onboarding-model.md)
 - [Create a custom task](adding-task.md)
+- [View all available tasks](task-reference.md)
 - [Explore the API](api-reference.md)

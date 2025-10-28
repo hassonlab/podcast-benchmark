@@ -17,7 +17,8 @@ A benchmarking framework for neural decoding from podcast listening data.
 2. [Onboarding a New Model](onboarding-model.md) - Step-by-step guide to adding your own decoding model
 3. [Adding a New Task](adding-task.md) - How to implement custom decoding tasks
 4. [Configuration Guide](configuration.md) - Understanding and configuring experiments
-5. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
+5. [Task Reference](task-reference.md) - Complete reference for all available tasks
+6. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
 
 ## Overview
 

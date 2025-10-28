@@ -1,22 +1,15 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=32G
 #SBATCH --gres=gpu:1
-#SBATCH --time=2:00:00
+#SBATCH --time=15:00:00
 #SBATCH --output='./logs/%x.out'
 #SBATCH --error='./logs/%x.err'
-#SBATCH --account=uhasson
-
 
 module purge
-module load anaconda3/2025.6
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate decoding_env
-
-mkdir -p logs
-cd /scratch/gpfs/HASSON/gidon/pb/podcast-benchmark
+source decoding_env/bin/activate
 
 echo 'Requester:' $USER 'Node:' $HOSTNAME
 echo "$@"

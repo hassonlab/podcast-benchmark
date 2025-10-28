@@ -4,13 +4,13 @@ import numpy as np
 import torch
 from scipy.spatial.distance import cosine
 
-from metrics import (
+from metrics.utils import (
     calculate_auc_roc,
     top_k_accuracy,
-    perplexity,
     compute_class_scores,
     compute_cosine_distances,
 )
+from metrics.classification_metrics import perplexity
 
 
 class TestComputeCosineDistances:

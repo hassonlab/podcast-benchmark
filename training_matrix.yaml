@@ -1,0 +1,29 @@
+# Training Matrix Configuration
+# Maps model types to tasks to config files
+# Format: {model_name: {task_name: [config_files]}}
+
+neural_conv_decoder:
+  word_embedding_decoding_task:
+    - neural_conv_decoder_gpt2.yml
+    - neural_conv_decoder_glove.yml
+    - neural_conv_decoder_arbitrary.yml
+  sentence_onset_task:
+    - neural_conv_decoder_sentence_onset.yml
+  gpt_surprise_task:
+    - neural_conv_decoder_gpt_surprise.yml
+  gpt_surprise_multiclass_task:
+    - neural_conv_decoder_gpt_surprise_multiclass.yml
+  content_noncontent_task:
+    - neural_conv_decoder_content_noncontent.yml
+  pos_task:
+    - neural_conv_decoder_pos.yml
+time_pooling_model:
+  volume_level_decoding_task:
+    - simple_model.yml
+    - torch_ridge.yml
+
+# Add more model/task combinations as needed
+# Example:
+# your_new_model:
+#   your_new_task:
+#     - your_config_file.yml

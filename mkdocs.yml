@@ -38,6 +38,7 @@ nav:
       - Adding a Task: adding-task.md
       - Configuration: configuration.md
   - Reference:
+      - Task Reference: task-reference.md
       - Registry API: api-reference.md
 
 markdown_extensions:
