@@ -63,12 +63,48 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
 
 
 @register_metric("cross_entropy")
-def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+def weighted_cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """
-    Cross-entropy loss for multi-class classification, expects raw logits.
-    Groundtruth should contain class indices (not one-hot).
+    Weighted cross-entropy loss for multi-class classification using PyTorch's built-in functionality.
+    
+    Uses sklearn's compute_class_weight for automatic class balancing.
+    Expects raw logits. Groundtruth should contain class indices (not one-hot).
     """
-    return F.cross_entropy(predicted, groundtruth.long())
+    from sklearn.utils.class_weight import compute_class_weight
+    
+    # Convert to numpy for sklearn
+    y_true = groundtruth.detach().cpu().numpy().astype(int)
+    
+    # Get unique classes in the batch
+    unique_classes = np.unique(y_true)
+    
+    # If only one class present, use regular cross-entropy (no weighting needed)
+    if len(unique_classes) == 1:
+        return F.cross_entropy(predicted, groundtruth.long())
+    
+    # Compute balanced class weights using sklearn
+    try:
+        class_weights = compute_class_weight(
+            'balanced', 
+            classes=unique_classes, 
+            y=y_true
+        )
+        
+        # Create weight tensor
+        # Map class weights to all possible classes
+        num_classes = predicted.shape[-1]
+        weight_tensor = torch.ones(num_classes, dtype=predicted.dtype, device=predicted.device)
+        
+        for class_idx, weight in zip(unique_classes, class_weights):
+            if 0 <= class_idx < num_classes:
+                weight_tensor[class_idx] = weight
+        
+        return F.cross_entropy(predicted, groundtruth.long(), weight=weight_tensor)
+        
+    except Exception as e:
+        print(f'Error in weighted cross-entropy: {e}')
+        # Fallback to regular cross-entropy if class weight computation fails
+        return F.cross_entropy(predicted, groundtruth.long())
 
 
 @register_metric("roc_auc")
