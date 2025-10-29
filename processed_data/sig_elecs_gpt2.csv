@@ -1,6 +1,6 @@
-subject,electrode,matfile
-662,EEGPO_02REF,2
-662,EEGPO_03REF,3
+subject,elec,matfile
+662,PO2,2
+662,PO3,3
 717,LGA10,10
 717,LGA11,11
 717,LGA17,17
