@@ -23,6 +23,7 @@ training_params:
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
   logistic_regression_baseline: true
+  visualize_fold_distribution: false
 
 data_params:
   data_root: data

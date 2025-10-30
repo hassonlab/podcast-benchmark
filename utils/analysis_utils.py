@@ -67,3 +67,58 @@ def aggregate_pooled(datasets: list, lags_ms, cv_splits: int, alphas, device, ri
     df = ridge_fn(pooled_neural, pooled_audio, pooled_sr, lags_ms, cv_splits, alphas, device)
     df["subject_id"] = "pooled"
     return df
+
+
+def visualize_fold_distribution(Y: np.ndarray, fold_indices: list, task_name: str = "", lag: int = None):
+    """
+    Print class distribution for each fold's train/val/test splits.
+    
+    Args:
+        Y: Target labels (numpy array)
+        fold_indices: List of (train_idx, val_idx, test_idx) tuples
+        task_name: Name of the task for display
+        lag: Current lag value (optional, for display)
+    """
+    print("\n" + "=" * 80)
+    if lag is not None:
+        print(f"FOLD CLASS DISTRIBUTION - {task_name} (Lag: {lag}ms)")
+    else:
+        print(f"FOLD CLASS DISTRIBUTION - {task_name}")
+    print("=" * 80)
+    
+    # Determine if binary or multi-class
+    unique_classes = np.unique(Y)
+    n_classes = len(unique_classes)
+    is_binary = n_classes == 2
+    
+    # Overall distribution
+    print(f"\nOverall Dataset Distribution:")
+    print(f"  Total samples: {len(Y)}")
+    for cls in unique_classes:
+        count = np.sum(Y == cls)
+        pct = (count / len(Y)) * 100
+        class_label = f"Class {int(cls)}" if not is_binary else ("Negative" if cls == 0 else "Positive")
+        print(f"  {class_label}: {count} ({pct:.1f}%)")
+    
+    # Per-fold distribution
+    print(f"\nPer-Fold Distribution:")
+    print("-" * 80)
+    
+    for fold_num, (train_idx, val_idx, test_idx) in enumerate(fold_indices, 1):
+        print(f"\nFold {fold_num}:")
+        
+        for split_name, indices in [("Train", train_idx), ("Val", val_idx), ("Test", test_idx)]:
+            split_labels = Y[indices]
+            print(f"  {split_name:5s} ({len(indices):4d} samples):", end=" ")
+            
+            # Print class counts
+            class_counts = []
+            for cls in unique_classes:
+                count = np.sum(split_labels == cls)
+                pct = (count / len(indices)) * 100 if len(indices) > 0 else 0
+                class_label = f"Class {int(cls)}" if not is_binary else ("Neg" if cls == 0 else "Pos")
+                class_counts.append(f"{class_label}: {count} ({pct:.1f}%)")
+            
+            print(" | ".join(class_counts))
+    
+    print("=" * 80 + "\n")

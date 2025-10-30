@@ -363,6 +363,13 @@ def train_decoding_model(
     else:
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
 
+    # 3.5. Visualize fold distribution if requested
+    if training_params.visualize_fold_distribution:
+        from utils.analysis_utils import visualize_fold_distribution
+        # Convert Y to numpy if it's a tensor
+        Y_np = Y.cpu().numpy() if isinstance(Y, torch.Tensor) else Y
+        visualize_fold_distribution(Y_np, fold_indices, task_name=task_name, lag=lag)
+
     # 4. Build a single dict of all metric functions (including loss)
     all_fns = setup_metrics_and_loss(training_params)
     metric_names = all_fns.keys()
