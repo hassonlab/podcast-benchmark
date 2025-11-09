@@ -1,0 +1,44 @@
+model_constructor_name: simple_temporal_model
+config_setter_name: [volume_level_config_setter, set_input_channels]
+task_name: volume_level_decoding_task
+trial_name: volume_level_simple
+output_dir: results
+model_dir: models
+tensorboard_dir: event_logs
+
+data_params:
+  data_root: data
+  subject_ids: [1,2,3,4,5,6,7,8,9]
+  channel_reg_ex: null
+  window_width: 0.2
+  preprocessing_fn_name: window_rms
+  task_params:
+    audio_path: stimuli/podcast.wav
+    target_sr: 512
+    cutoff_hz: 8.0
+    butter_order: 4
+    zero_phase: true
+    allow_resample_audio: true
+    window_size: 200.0
+    hop_size: 25.0
+
+training_params:
+  min_lag: -1000
+  max_lag: 1001
+  lag_step_size: 50
+  lag: null
+  batch_size: 64
+  epochs: 50
+  n_folds: 5
+  losses: [mse]
+  metrics: [r2, corr]
+  early_stopping_metric: r2
+  weight_decay: 0.0001
+  learning_rate: 0.005
+
+model_params:
+  device: cuda
+  embedding_dim: 1
+  hidden_dim: 256
+  dropout: 0.2
+  output_activation: null

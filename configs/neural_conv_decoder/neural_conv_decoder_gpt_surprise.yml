@@ -1,0 +1,40 @@
+model_constructor_name: ensemble_pitom_model
+config_setter_name: neural_conv
+task_name: gpt_surprise_task
+model_params:
+  conv_filters: 28
+  dropout: 0.2
+  num_models: 10
+  embedding_dim: 1 #this is output dimension of the decoder
+  output_activation: linear
+
+training_params:
+  batch_size: 16
+  epochs: 80
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  early_stopping_patience: 100
+  n_folds: 5
+  min_lag: 0
+  max_lag: 300
+  lag_step_size: 100
+  losses: [mse]
+  metrics: [mse,corr]
+  early_stopping_metric: corr
+  smaller_is_better: false
+  linear_regression_baseline: true
+
+data_params:
+  data_root: data
+  window_width: 0.625
+  preprocessing_fn_name: window_average_neural_data
+  electrode_file_path: "processed_data/all_subject_sig.csv"
+  subject_ids: [9]
+  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+  preprocessor_params:
+    num_average_samples: 32
+  # Task-specific knobs (optional)
+  task_params:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+
+trial_name: gpt_surprise_corr

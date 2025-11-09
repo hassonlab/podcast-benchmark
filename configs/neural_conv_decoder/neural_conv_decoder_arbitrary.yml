@@ -2,8 +2,6 @@ model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
 model_params:
   conv_filters: 128
-  reg: 0.35
-  reg_head: 0
   dropout: 0.2
   num_models: 10
   embedding_dim: 50
@@ -22,11 +20,12 @@ data_params:
   data_root: data
   embedding_type: arbitrary
   embedding_layer: 24
+  word_column: word
+  subject_ids: [9]
+  # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
   embedding_pca_dim: 50
   window_width: 0.625
-  preprocessing_fn_name: preprocess_neural_data
-  subject_ids: [9]
-  # channel_reg_ex: LG[AB]*
+  preprocessing_fn_name: window_average_neural_data
   # neural_conv_decoder specific config
   preprocessor_params:
     num_average_samples: 32
