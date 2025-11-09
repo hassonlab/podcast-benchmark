@@ -6,7 +6,7 @@ Tests argument parsing, config override application, and nested attribute handli
 
 import pytest
 
-from config_utils import (
+from utils.config_utils import (
     parse_override_args,
     apply_overrides,
     set_nested_attr,

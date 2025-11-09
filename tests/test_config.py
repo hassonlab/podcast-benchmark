@@ -8,7 +8,7 @@ import pytest
 import yaml
 from dataclasses import asdict
 
-from config import DataParams, TrainingParams, ExperimentConfig, dict_to_config
+from core.config import DataParams, TrainingParams, ExperimentConfig, dict_to_config
 
 
 @pytest.fixture

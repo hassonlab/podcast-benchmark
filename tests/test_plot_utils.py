@@ -19,7 +19,13 @@ if 'pytest' in sys.modules or '--pytest' in sys.argv:
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from plot_utils import plot_training_history, plot_cv_results, extract_metric_names, format_metric_name, get_subplot_layout
+from utils.plot_utils import (
+    plot_training_history,
+    plot_cv_results,
+    extract_metric_names,
+    format_metric_name,
+    get_subplot_layout,
+)
 
 
 def test_extract_metric_names():

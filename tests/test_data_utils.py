@@ -11,9 +11,17 @@ import pandas as pd
 import mne
 import tempfile
 import os
+from math import gcd
 from unittest.mock import patch, MagicMock
-from data_utils import get_data, read_electrode_file, load_raws, read_subject_mapping
-from config import DataParams
+
+from scipy.signal import resample_poly
+from utils.data_utils import (
+    get_data,
+    read_electrode_file,
+    load_raws,
+    read_subject_mapping,
+)
+from core.config import DataParams
 
 
 @pytest.fixture
@@ -39,7 +47,7 @@ def mock_raw():
 
 
 @pytest.fixture
-def df_word_in_bounds():
+def task_df_in_bounds():
     """Create a DataFrame with word events that fall within the data bounds."""
     return pd.DataFrame(
         {
@@ -52,7 +60,7 @@ def df_word_in_bounds():
 
 
 @pytest.fixture
-def df_word_out_of_bounds():
+def task_df_out_of_bounds():
     """Create a DataFrame with word events that fall outside the data bounds."""
     return pd.DataFrame(
         {
@@ -67,7 +75,7 @@ def df_word_out_of_bounds():
 class TestGetDataOutOfBounds:
     """Test get_data function with out-of-bounds time windows."""
 
-    def test_get_data_in_bounds_baseline(self, mock_raw, df_word_in_bounds):
+    def test_get_data_in_bounds_baseline(self, mock_raw, task_df_in_bounds):
         """Test that get_data works correctly with in-bounds events."""
         lag = 0
         window_width = 0.5
@@ -75,16 +83,16 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_in_bounds,
+            task_df=task_df_in_bounds,
             window_width=window_width,
             word_column="word",
         )
 
-        assert data.shape[0] == len(df_word_in_bounds)
-        assert len(targets) == len(df_word_in_bounds)
-        assert len(words) == len(df_word_in_bounds)
+        assert data.shape[0] == len(task_df_in_bounds)
+        assert len(targets) == len(task_df_in_bounds)
+        assert len(words) == len(task_df_in_bounds)
 
-    def test_get_data_without_word_column(self, mock_raw, df_word_in_bounds):
+    def test_get_data_without_word_column(self, mock_raw, task_df_in_bounds):
         """Test that get_data works correctly with in-bounds events."""
         lag = 0
         window_width = 0.5
@@ -92,14 +100,14 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_in_bounds,
+            task_df=task_df_in_bounds,
             window_width=window_width,
         )
 
-        assert data.shape[0] == len(df_word_in_bounds)
-        assert len(targets) == len(df_word_in_bounds)
+        assert data.shape[0] == len(task_df_in_bounds)
+        assert len(targets) == len(task_df_in_bounds)
 
-    def test_get_data_out_of_bounds_bug(self, mock_raw, df_word_out_of_bounds):
+    def test_get_data_out_of_bounds_bug(self, mock_raw, task_df_out_of_bounds):
         """Test that out-of-bounds events raise ValueError instead of creating empty epochs."""
         lag = 500
         window_width = 1.0
@@ -110,13 +118,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_out_of_bounds,
+                task_df=task_df_out_of_bounds,
                 window_width=window_width,
             )
 
     def test_get_data_extreme_out_of_bounds(self, mock_raw):
         """Test that extremely out-of-bounds events raise ValueError without warnings."""
-        df_word_extreme = pd.DataFrame(
+        task_df_extreme = pd.DataFrame(
             {
                 "start": [-3.0, 20.0, 25.0],
                 "end": [15.5, 20.5, 25.5],
@@ -134,13 +142,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_extreme,
+                task_df=task_df_extreme,
                 window_width=window_width,
             )
 
     def test_get_data_mixed_bounds(self, mock_raw):
         """Test that only in-bounds events are kept when mix of valid/invalid events."""
-        df_word_mixed = pd.DataFrame(
+        task_df_mixed = pd.DataFrame(
             {
                 "start": [2.0, 9.8, 4.0, 10.1],
                 "end": [2.5, 9.9, 4.5, 10.2],
@@ -155,7 +163,7 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_mixed,
+            task_df=task_df_mixed,
             window_width=window_width,
             word_column="word",
         )
@@ -167,7 +175,7 @@ class TestGetDataOutOfBounds:
 
     def test_get_data_negative_time_bounds(self, mock_raw):
         """Test that events with negative time windows are filtered out."""
-        df_word_early = pd.DataFrame(
+        task_df_early = pd.DataFrame(
             {
                 "start": [0.1, 0.2, 0.3],
                 "end": [0.2, 0.3, 0.4],
@@ -186,13 +194,13 @@ class TestGetDataOutOfBounds:
             data, targets, words = get_data(
                 lag=lag,
                 raws=[mock_raw],
-                df_word=df_word_early,
+                task_df=task_df_early,
                 window_width=window_width,
             )
 
     def test_get_data_mixed_negative_bounds(self, mock_raw):
         """Test filtering with mix of valid events and negative time window events."""
-        df_word_mixed_neg = pd.DataFrame(
+        task_df_mixed_neg = pd.DataFrame(
             {
                 "start": [
                     0.7,
@@ -212,7 +220,7 @@ class TestGetDataOutOfBounds:
         data, targets, words = get_data(
             lag=lag,
             raws=[mock_raw],
-            df_word=df_word_mixed_neg,
+            task_df=task_df_mixed_neg,
             window_width=window_width,
             word_column="word",
         )
@@ -404,8 +412,8 @@ def bids_temp_files(mock_raw_with_channels):
 class TestLoadRaws:
     """Test load_raws function for loading multiple subjects with different configurations."""
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_multiple_subjects(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -461,8 +469,8 @@ class TestLoadRaws:
             for key, value in expected.items():
                 assert call_kwargs[key] == value
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_single_subject(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -482,8 +490,8 @@ class TestLoadRaws:
         call_kwargs = mock_bids_path.call_args_list[0][1]
         assert call_kwargs["subject"] == "05"
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_no_subjects(self, mock_bids_path, mock_read_raw_fif):
         """Test loading raw data with empty subject list."""
         data_params = DataParams(subject_ids=[], data_root="/fake/data")
@@ -494,8 +502,8 @@ class TestLoadRaws:
         assert mock_read_raw_fif.call_count == 0
         assert mock_bids_path.call_count == 0
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_per_subject_electrodes(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -530,8 +538,8 @@ class TestLoadRaws:
         # but we can verify that the function completed without errors
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_channel_reg_ex(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -551,8 +559,8 @@ class TestLoadRaws:
         assert len(raws) == 2
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("data_utils.mne.io.read_raw_fif")
-    @patch("data_utils.BIDSPath")
+    @patch("utils.data_utils.mne.io.read_raw_fif")
+    @patch("utils.data_utils.BIDSPath")
     def test_load_raws_per_subject_electrodes_priority(
         self, mock_bids_path, mock_read_raw_fif, mock_raw_with_channels
     ):
@@ -737,7 +745,9 @@ class TestReadSubjectMapping:
         for participant_id in result.values():
             assert isinstance(participant_id, int)
 
-    def test_read_subject_mapping_participant_id_extraction(self, temp_participant_mapping_tsv):
+    def test_read_subject_mapping_participant_id_extraction(
+        self, temp_participant_mapping_tsv
+    ):
         """Test that participant IDs are correctly extracted from sub-XX format."""
         result = read_subject_mapping(temp_participant_mapping_tsv)
 
@@ -772,7 +782,9 @@ class TestReadSubjectMapping:
     ):
         """Test integration between read_subject_mapping and read_electrode_file."""
         # First, get the subject mapping
-        subject_mapping = read_subject_mapping(temp_participant_mapping_csv, delimiter=",")
+        subject_mapping = read_subject_mapping(
+            temp_participant_mapping_csv, delimiter=","
+        )
 
         # Expected mapping: {661: 5, 717: 12, 723: 8}
         assert subject_mapping == {661: 5, 717: 12, 723: 8}
