@@ -63,48 +63,81 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
 
 
 @register_metric("cross_entropy")
-def weighted_cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """
-    Weighted cross-entropy loss for multi-class classification using PyTorch's built-in functionality.
+    Cross-entropy loss for multi-class classification, expects raw logits.
+    Groundtruth should contain class indices (not one-hot).
+    """
+    return F.cross_entropy(predicted, groundtruth.long())
+
+@register_metric("weighted_cross_entropy")
+def weighted_cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> torch.Tensor:
+    """
+    Weighted cross-entropy loss for classification (binary and multiclass).
     
-    Uses sklearn's compute_class_weight for automatic class balancing.
-    Expects raw logits. Groundtruth should contain class indices (not one-hot).
+    Returns:
+        Scalar tensor containing weighted cross-entropy loss.
+    
+    Raises:
+        ValueError: If input shapes are invalid or don't match PyTorch requirements.
     """
     from sklearn.utils.class_weight import compute_class_weight
     
-    # Convert to numpy for sklearn
-    y_true = groundtruth.detach().cpu().numpy().astype(int)
-    
-    # Get unique classes in the batch
-    unique_classes = np.unique(y_true)
-    
-    # If only one class present, use regular cross-entropy (no weighting needed)
-    if len(unique_classes) == 1:
-        return F.cross_entropy(predicted, groundtruth.long())
-    
-    # Compute balanced class weights using sklearn
-    try:
-        class_weights = compute_class_weight(
-            'balanced', 
-            classes=unique_classes, 
-            y=y_true
+    # Input must be at least 2D: (N, C) or (N, C, d1, d2, ..., dK)
+    if predicted.ndim < 2:
+        raise ValueError(
+            f"predicted must have at least 2 dimensions (N, C), got shape {predicted.shape}. "
+            f"Per PyTorch docs: input should be (N, C) or (N, C, d1, d2, ..., dK)"
         )
-        
-        # Create weight tensor
-        # Map class weights to all possible classes
-        num_classes = predicted.shape[-1]
-        weight_tensor = torch.ones(num_classes, dtype=predicted.dtype, device=predicted.device)
-        
-        for class_idx, weight in zip(unique_classes, class_weights):
-            if 0 <= class_idx < num_classes:
-                weight_tensor[class_idx] = weight
-        
-        return F.cross_entropy(predicted, groundtruth.long(), weight=weight_tensor)
-        
-    except Exception as e:
-        print(f'Error in weighted cross-entropy: {e}')
-        # Fallback to regular cross-entropy if class weight computation fails
-        return F.cross_entropy(predicted, groundtruth.long())
+    
+    # Get number of classes from second dimension (C)
+    num_classes = predicted.shape[1]
+    
+    # Validate batch dimension matches between input and target
+    # Per PyTorch docs: target should be (N,) or (N, d1, d2, ..., dK)
+    if groundtruth.ndim == 0:
+        raise ValueError(
+            f"groundtruth cannot be scalar when predicted has batch dimension. "
+            f"Expected shape (N,) or (N, d1, ...), got shape {groundtruth.shape}"
+        )
+    
+    if predicted.shape[0] != groundtruth.shape[0]:
+        raise ValueError(
+            f"Batch size mismatch: predicted has {predicted.shape[0]} samples, "
+            f"groundtruth has {groundtruth.shape[0]} samples"
+        )
+    
+    groundtruth_long = groundtruth.long()
+    
+    # Flatten target to 1D array for scikit-learn compute_class_weight
+    # Per scikit-learn docs: y should be array-like of shape (n_samples,)
+    y_true_flat = groundtruth_long.detach().cpu().numpy().flatten()
+    
+    # Get unique classes present in the batch
+    unique_classes = np.unique(y_true_flat)
+    
+    # If only one class present, no weighting needed (all samples are same class)
+    if len(unique_classes) == 1:
+        return F.cross_entropy(predicted, groundtruth_long)
+    
+    class_weights = compute_class_weight(
+        'balanced',
+        classes=unique_classes,
+        y=y_true_flat
+    )
+    
+    weight_tensor = torch.ones(
+        num_classes,
+        dtype=predicted.dtype,
+        device=predicted.device
+    )
+    
+    # Assign computed weights to corresponding class indices
+    for class_idx, weight in zip(unique_classes, class_weights):
+        if 0 <= class_idx < num_classes:
+            weight_tensor[class_idx] = float(weight)
+    
+    return F.cross_entropy(predicted, groundtruth_long, weight=weight_tensor)
 
 
 @register_metric("roc_auc")
