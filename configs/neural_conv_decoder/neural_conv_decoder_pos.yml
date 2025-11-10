@@ -29,7 +29,7 @@ training_params:
   metrics: [roc_auc_multiclass, f1,confusion_matrix]
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
-  logistic_regression_baseline: false
+  logistic_regression_baseline: true
 
 data_params:
   data_root: data
