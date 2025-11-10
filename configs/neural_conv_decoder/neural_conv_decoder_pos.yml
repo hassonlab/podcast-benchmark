@@ -12,6 +12,13 @@ training_params:
   epochs: 100
   learning_rate: 0.001
   weight_decay: 0.0001
+  # Learning rate scheduler: reduces LR when validation metric plateaus
+  use_lr_scheduler: true
+  scheduler_params:
+    factor: 0.5    # Reduce LR by half when metric plateaus
+    patience: 10   # Wait 10 epochs without improvement
+    min_lr: 1e-6   # Minimum learning rate
+    # mode is automatically set to "max" because smaller_is_better: false
   early_stopping_patience: 100
   n_folds: 5
   min_lag: -100
@@ -22,7 +29,7 @@ training_params:
   metrics: [roc_auc_multiclass, f1,confusion_matrix]
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
-  logistic_regression_baseline: true
+  logistic_regression_baseline: false
 
 data_params:
   data_root: data
