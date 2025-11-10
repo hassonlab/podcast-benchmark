@@ -47,10 +47,13 @@ class TrainingParams:
     batch_size: int = 32
     # The maximum number of epochs to train over each fold with.
     epochs: int = 100
-    # The learning rate to use when training. TODO: currently staic lr, could use a scheduler in the future.
+    # The learning rate to use when training.
     learning_rate: float = 0.001
     # The amount of weight decay to use as regularization in our optimizer.
     weight_decay: float = 0.0001
+    # Learning rate scheduler 
+    use_lr_scheduler: bool = False
+    scheduler_params: Optional[dict] = None
     # If cosine similarity between our predicted embeddings and the actual embeddings do not improve after this many steps
     # stop training for this fold early.
     early_stopping_patience: int = 10

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
@@ -303,6 +304,33 @@ def should_update_best(current_val, best_val, smaller_is_better):
         return current_val < best_val
     else:
         return current_val > best_val
+
+
+def create_lr_scheduler(optimizer, training_params: TrainingParams):
+    """
+    Create a ReduceLROnPlateau learning rate scheduler.
+
+    Args:
+        optimizer: PyTorch optimizer
+        training_params: Training parameters containing scheduler config
+
+    Returns:
+        ReduceLROnPlateau scheduler or None if use_lr_scheduler is False
+    """
+    if not training_params.use_lr_scheduler:
+        return None
+
+    params = training_params.scheduler_params or {}
+    
+    # Auto-detect mode based on smaller_is_better unless explicitly provided
+    mode = params.get("mode", "min" if training_params.smaller_is_better else "max")
+    factor = params.get("factor", 0.5)
+    patience = params.get("patience", 10)
+    min_lr = params.get("min_lr", 1e-6)
+    
+    return lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode=mode, factor=factor, patience=patience, min_lr=min_lr
+    )
 
 
 def should_update_gradient_accumulation(
@@ -616,6 +644,9 @@ def train_decoding_model(
             weight_decay=training_params.weight_decay,
         )
 
+        # Create learning rate scheduler if specified
+        scheduler = create_lr_scheduler(optimizer, training_params)
+
         best_val, patience = setup_early_stopping_state(training_params)
         best_epoch = 0
 
@@ -654,6 +685,15 @@ def train_decoding_model(
                 patience += 1
                 if patience >= training_params.early_stopping_patience:
                     break
+
+            # learning rate scheduler 
+            if scheduler is not None:
+                scheduler.step(cur)
+
+            # Log learning rate to TensorBoard
+            if write_to_tensorboard:
+                current_lr = optimizer.param_groups[0]["lr"]
+                writer.add_scalar("learning_rate", current_lr, epoch)
 
             loop.set_postfix(
                 {
