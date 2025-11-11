@@ -12,6 +12,22 @@ import warnings
 from core.registry import register_metric
 
 
+def looks_like_probabilities(pred: torch.Tensor, dim: int = 1, tol: float = 1e-3) -> bool:
+    """
+    Heuristically checks if `pred` looks like probabilities:
+    - All values in [0, 1]
+    - Row-wise sums are approximately 1
+    """
+    # Ensure pred is a PyTorch tensor
+    pred = torch.as_tensor(pred)
+
+    if pred.min() < 0 or pred.max() > 1:
+        return False
+    row_sums = pred.sum(dim=dim)
+    return torch.allclose(row_sums, torch.ones_like(row_sums), atol=tol)
+
+
+
 @register_metric("bce")
 def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """Weighted BCE loss for binary classification using PyTorch's built-in functionality.
@@ -172,6 +188,12 @@ def roc_auc_multiclass(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
     # Convert to CPU numpy arrays
     y_true = true.detach().cpu().numpy()
+
+    
+    if not looks_like_probabilities(pred):
+        pred = torch.softmax(pred, dim=1)
+
+
     y_score = pred.detach().cpu().numpy()
 
     # Handle edge case: fewer than 2 classes in batch
@@ -192,33 +214,44 @@ def roc_auc_multiclass(pred: torch.Tensor, true: torch.Tensor) -> float:
 
 
 @register_metric("f1")
-def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
+def f1_multiclass(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
-    F1 score for binary classification at 0.5 threshold.
-    Expects probabilities in [0,1] range. (for binary classification)
-    Also works for multiclass by taking argmax after softmax.
+    Computes F1 score for binary or multiclass classification.
+    - For binary: expects probabilities in [0,1] and applies 0.5 threshold.
+    - For multiclass: expects class probabilities or logits; applies softmax + argmax.
     """
-    # Ensure 1D
-    if pred.ndim > 1 and pred.shape[-1] == 1:
-        pred = pred.squeeze(-1)
+    # Ensure 1D or 2D shape
     if true.ndim > 1:
         true = true.squeeze(-1)
-
     y_true = true.detach().cpu().numpy().astype(int)
 
-    # Check if input looks like logits and warn user
-    if pred.detach().min() < 0 or pred.detach().max() > 1:
-        warnings.warn(
-            f"F1 metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
-            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
-            UserWarning,
-        )
+    if pred.ndim == 1 or (pred.ndim == 2 and pred.shape[1] == 1):
+        # Binary classification
+        pred = pred.squeeze(-1)
+        if pred.min() < 0 or pred.max() > 1:
+            warnings.warn(
+                f"F1 metric received values outside [0,1] range (min={pred.min():.3f}, "
+                f"max={pred.max():.3f}). Function expects probabilities in [0,1] range.",
+                UserWarning,
+            )
+            pred = torch.sigmoid(pred)
+        y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
+    else:
+        # Multiclass classification
+        # if pred.min() < 0 or pred.max() > 1:
+        #     # Assume logits, apply softmax
+        #     pred = torch.softmax(pred, dim=1)
 
-    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
+        if not looks_like_probabilities(pred):
+            pred = torch.softmax(pred, dim=1)
+
+        y_pred = torch.argmax(pred, dim=1).detach().cpu().numpy()
+
     try:
         return float(f1_score(y_true, y_pred, zero_division=0, average="weighted"))
     except Exception:
         return 0.0
+
 
 
 @register_metric("sensitivity")
@@ -364,15 +397,22 @@ def conf_matrix(
     Returns:
         Confusion matrix as a 2D numpy array.
     """
+    # if not looks_like_probabilities(predictions):
+    #         predictions = torch.softmax(predictions, dim=1)
 
     # Move to CPU and convert to numpy if tensors
-    if isinstance(predictions, torch.Tensor):
-        predictions = predictions.detach().cpu().numpy()
+    # if isinstance(predictions, torch.Tensor):
+    #     predictions = predictions.detach().cpu().numpy()
     if isinstance(ground_truth, torch.Tensor):
         ground_truth = ground_truth.detach().cpu().numpy()
 
     # If predictions are probabilities, convert to class indices
     if predictions.ndim > 1:
+        if not looks_like_probabilities(predictions):
+            predictions = torch.softmax(predictions, dim=1)
+            
+            if isinstance(predictions, torch.Tensor):
+                predictions = predictions.detach().cpu().numpy()
         pred_labels = np.argmax(predictions, axis=1)
     else:
         pred_labels = (predictions >= 0.5).astype(int)

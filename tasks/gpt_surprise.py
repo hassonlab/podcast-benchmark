@@ -32,8 +32,10 @@ def gpt_surprise_task(data_params: DataParams):
     df1 = pd.read_csv(csv_path, index_col=0)
 
     df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
-    df["target"] = df1["surprise"]
+    df["start"] = df1["onset"]  
+    # df["target"] = df1["surprise"]
+    df["target"] = (df1["surprise"] - df1["surprise"].mean()) / df1["surprise"].std()
+
 
     return df
 
@@ -63,9 +65,14 @@ def gpt_surprise_multiclass_task(data_params: DataParams):
     csv_path = tp.get("content_noncontent_path", default_csv)
 
     df1 = pd.read_csv(csv_path, index_col=0)
+    df1=df1[df1['surprise_class'].isin([0, 2])]
+    
+    # Update surprise_class values: change 2 to 1
+    df1.loc[df1['surprise_class'] == 2, 'surprise_class'] = 1
+
 
     df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
+    df["start"] = df1["onset"]  
     df["target"] = df1["surprise_class"]
 
     return df

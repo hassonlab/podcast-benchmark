@@ -137,6 +137,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Additional files to ignore
+Makefile
+submit.sh
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -183,3 +187,4 @@ checkpoints/
 results/
 logs/
 event_logs/
+models/

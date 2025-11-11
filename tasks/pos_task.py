@@ -33,6 +33,11 @@ def pos_task(data_params: DataParams):
 
     df1 = pd.read_csv(csv_path, index_col=0)
 
+    df1=df1[df1['pos_class'].isin([0, 1,4])]
+    
+    # Update pos_class values: change 2 to 1
+    df1.loc[df1['pos_class'] == 4, 'pos_class'] = 2
+
     df = pd.DataFrame()
     df["start"] = df1["onset"]  # convert samples to seconds
     df["target"] = df1["pos_class"]
