@@ -90,6 +90,8 @@ class TrainingParams:
     random_seed: int = 42
     # Whether to set cudnn to be deterministic. Will slow down training, but useful for maximizing reproducibility.
     cudnn_deterministic: bool = False
+    # Whether to visualize fold class distribution before training.
+    visualize_fold_distribution: bool = False
     # If true writes training logs to Tensorboard.
     tensorboard_logging: bool = True
     # If true trains and evaluates a linear regression baseline.
