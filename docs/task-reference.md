@@ -13,13 +13,12 @@ All tasks are located in the `tasks/` directory and must be registered using the
 ## Task List
 
 - [word_embedding_decoding_task](#word_embedding_decoding_task)
-- [volume_level_decoding_task](#volume_level_decoding_task)
+- [sentence_onset_task](#sentence_onset_task)
 - [content_noncontent_task](#content_noncontent_task)
 - [pos_task](#pos_task)
-- [sentence_onset_task](#sentence_onset_task)
 - [gpt_surprise_task](#gpt_surprise_task)
 - [gpt_surprise_multiclass_task](#gpt_surprise_multiclass_task)
-- [placeholder_task](#placeholder_task)
+- [volume_level_decoding_task](#volume_level_decoding_task)
 
 ---
 
@@ -37,13 +36,13 @@ All tasks are located in the `tasks/` directory and must be registered using the
 
 ### Configuration Parameters
 
-Parameters are specified in `data_params` (not `task_params`):
+Configured via `WordEmbeddingConfig` in `task_specific_config`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `embedding_type` | string | Required | Embedding type: `"gpt-2xl"`, `"glove"`, or `"arbitrary"` |
-| `embedding_layer` | int | 24 | GPT-2 layer to extract (0-47 for GPT-2 XL) |
-| `embedding_pca_dim` | int | None | Optional: reduce dimensionality with PCA |
+| `embedding_type` | string | `"gpt-2xl"` | Embedding type: `"gpt-2xl"`, `"glove"`, or `"arbitrary"` |
+| `embedding_layer` | int | `None` | GPT-2 layer to extract (0-47 for GPT-2 XL) |
+| `embedding_pca_dim` | int | `None` | Optional: reduce dimensionality with PCA |
 
 ### Embedding Types
 
@@ -72,11 +71,16 @@ The task automatically:
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: word_embedding_decoding_task
-  embedding_type: gpt-2xl
-  embedding_layer: 24
-  embedding_pca_dim: 50  # Optional: reduce from 1600 to 50 dims
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50  # Optional: reduce from 1600 to 50 dims
 ```
 
 ---
@@ -95,7 +99,7 @@ data_params:
 
 ### Configuration Parameters
 
-All parameters are specified in `data_params.task_params`:
+Configured via `VolumeLevelConfig` in `task_specific_config`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -126,15 +130,18 @@ All parameters are specified in `data_params.task_params`:
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: volume_level_decoding_task
-  task_params:
-    audio_path: "stimuli/podcast.wav"
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.2
+  task_specific_config:
+    audio_path: stimuli/podcast.wav
     target_sr: 512
     cutoff_hz: 8.0
-    window_size: 625    # 625ms windows
-    hop_size: 100       # 100ms hops
-    zero_phase: true
+    window_size: 200.0
+    hop_size: 25.0
 ```
 
 ---
@@ -153,23 +160,23 @@ data_params:
 
 ### Configuration Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` | Path to CSV with word annotations (relative to cwd or absolute) |
+Configured via `ContentNonContentConfig`:
 
-### CSV Format
-
-Expected columns:
-- `onset`: Word onset time in seconds
-- `is_content`: Binary label (1=content, 0=non-content)
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` |
 
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: content_noncontent_task
-  task_params:
-    content_noncontent_path: "processed_data/df_word_onset_with_pos_class.csv"
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 ```
 
 ---
@@ -180,14 +187,7 @@ data_params:
 
 **Description**: Multi-class part-of-speech classification for words.
 
-**Task Type**: Multi-class classification (5 classes)
-
-**Classes**:
-- `0`: Noun
-- `1`: Verb
-- `2`: Adjective
-- `3`: Adverb
-- `4`: Other
+**Task Type**: Multi-class classification (5 classes: Noun, Verb, Adjective, Adverb, Other)
 
 **Output**:
 - `start`: Word onset time in seconds
@@ -195,23 +195,23 @@ data_params:
 
 ### Configuration Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `pos_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` | Path to CSV with POS annotations (relative to cwd or absolute) |
+Configured via `PosTaskConfig`:
 
-### CSV Format
-
-Expected columns:
-- `onset`: Word onset time in seconds
-- `pos_class`: Integer class label (0-4)
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `pos_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` |
 
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: pos_task
-  task_params:
-    pos_path: "processed_data/df_word_onset_with_pos_class.csv"
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    pos_path: processed_data/df_word_onset_with_pos_class.csv
 ```
 
 ---
@@ -220,7 +220,7 @@ data_params:
 
 **File**: `tasks/sentence_onset.py`
 
-**Description**: Binary classification for detecting sentence onsets. Includes positive examples at sentence starts and negative examples sampled away from onsets.
+**Description**: Binary classification for detecting sentence onsets with negative sampling.
 
 **Task Type**: Binary classification
 
@@ -230,35 +230,27 @@ data_params:
 
 ### Configuration Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `sentence_csv_path` | string | `"processed_data/all_sentences_podcast.csv"` | Path to CSV with sentence boundaries (relative to cwd or absolute) |
-| `negatives_per_positive` | int | `1` | Number of negative examples to sample per positive |
-| `negative_margin_s` | float | `2.0` | Minimum time (seconds) after onset before sampling negatives |
+Configured via `SentenceOnsetConfig`:
 
-### CSV Format
-
-Expected columns:
-- `sentence_onset`: Sentence start time in seconds
-- `sentence_offset`: Sentence end time in seconds
-
-### Negative Sampling Strategy
-
-For each sentence:
-1. Sample negatives between `onset + negative_margin_s` and `offset - window_width`
-2. This ensures negatives don't overlap with the actual onset window
-3. Uses `window_width` from `data_params` to avoid sampling too close to sentence end
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `sentence_csv_path` | string | `"processed_data/all_sentences_podcast.csv"` |
+| `negatives_per_positive` | int | `1` |
+| `negative_margin_s` | float | `2.0` |
 
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: sentence_onset_task
-  window_width: 0.625  # Used for negative sampling
-  task_params:
-    sentence_csv_path: "processed_data/all_sentences_podcast.csv"
-    negatives_per_positive: 2
-    negative_margin_s: 2.0
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    sentence_csv_path: processed_data/all_sentences_podcast.csv
+    negatives_per_positive: 5
+    negative_margin_s: 0.75
 ```
 
 ---
@@ -267,33 +259,33 @@ data_params:
 
 **File**: `tasks/gpt_surprise.py`
 
-**Description**: Regression task predicting GPT-2 XL surprise values (negative log probability) for each word.
+**Description**: Regression task predicting GPT-2 XL surprise values.
 
 **Task Type**: Regression (continuous targets)
 
 **Output**:
 - `start`: Word onset time in seconds
-- `target`: GPT-2 XL surprise value (higher = more surprising/unpredictable)
+- `target`: GPT-2 XL surprise value
 
 ### Configuration Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` | Path to CSV with word annotations (relative to cwd or absolute) |
+Configured via `GptSurpriseConfig`:
 
-### CSV Format
-
-Expected columns:
-- `onset`: Word onset time in seconds
-- `surprise`: GPT-2 XL surprise value
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` |
 
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: gpt_surprise_task
-  task_params:
-    content_noncontent_path: "processed_data/df_word_onset_with_pos_class.csv"
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 ```
 
 ---
@@ -302,14 +294,9 @@ data_params:
 
 **File**: `tasks/gpt_surprise.py`
 
-**Description**: Multi-class classification of GPT-2 XL surprise levels. Surprise values are binned based on mean and standard deviation.
+**Description**: Multi-class classification of GPT-2 XL surprise levels.
 
-**Task Type**: Multi-class classification (3 classes)
-
-**Classes**:
-- `0`: Low surprise (< mean - std)
-- `1`: Medium surprise (within std of mean)
-- `2`: High surprise (> mean + std)
+**Task Type**: Multi-class classification (3 classes: Low, Medium, High surprise)
 
 **Output**:
 - `start`: Word onset time in seconds
@@ -317,57 +304,23 @@ data_params:
 
 ### Configuration Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` | Path to CSV with word annotations (relative to cwd or absolute) |
+Configured via `GptSurpriseConfig`:
 
-### CSV Format
-
-Expected columns:
-- `onset`: Word onset time in seconds
-- `surprise_class`: Integer class label (0-2)
+| Parameter | Type | Default |
+|-----------|------|---------|
+| `content_noncontent_path` | string | `"processed_data/df_word_onset_with_pos_class.csv"` |
 
 ### Example Config
 
 ```yaml
-data_params:
+task_config:
   task_name: gpt_surprise_multiclass_task
-  task_params:
-    content_noncontent_path: "processed_data/df_word_onset_with_pos_class.csv"
-```
-
----
-
-## placeholder_task
-
-**File**: `tasks/placeholder_task.py`
-
-**Description**: Minimal example task for testing. Returns constant targets (always 1.0).
-
-**Task Type**: Regression (trivial)
-
-**Output**:
-- `start`: Word start time in seconds
-- `target`: `1.0` (constant)
-
-### Configuration Parameters
-
-None. This task takes no parameters.
-
-### Purpose
-
-This is a template showing the minimum requirements for a task:
-1. Register with `@registry.register_task_data_getter()`
-2. Accept `data_params: DataParams` argument
-3. Return DataFrame with `start` and `target` columns
-
-Models will learn to always predict 1.0, making this useful only for testing infrastructure.
-
-### Example Config
-
-```yaml
-data_params:
-  task_name: placeholder_task
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 ```
 
 ---

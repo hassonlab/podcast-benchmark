@@ -1,16 +1,28 @@
 from dataclasses import is_dataclass, dataclass, fields, field
-from typing import Optional
+from typing import Optional, Union
+from abc import ABC
 
 # These classes exist to document all of the model-agnostic fields for data collection and model training.
 
 
+# ============================================================================
+# Task-Specific Configuration Base Class
+# ============================================================================
+
+@dataclass
+class BaseTaskConfig(ABC):
+    """Base class for all task-specific configurations.
+
+    Each task should define its own config dataclass in its task file that inherits from this.
+    """
+    pass
+
+
 @dataclass
 class DataParams:
-    # The name of the embeddings to use. Currently supports gpt-2xl, glove, and arbitrary.
-    embedding_type: str = "gpt-2xl"
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
-    # The name of your model's preprocessing function. Your function msut be registered using the register_data_preprocessor
+    # The name of your model's preprocessing function. Your function must be registered using the register_data_preprocessor
     # decorator and imported into main.py. See registry.py for details. Can provide either a single value or a list of names to apply in order.
     # Should align with desired parameters in preprocessor_params.
     preprocessing_fn_name: Optional[str | list[str]] = None
@@ -18,8 +30,6 @@ class DataParams:
     subject_ids: list[int] = field(default_factory=lambda: [])
     # Root of data folder.
     data_root: str = "data"
-    # Number of embeddings to reduce the embeddings to using pca. If None, don't run PCA.
-    embedding_pca_dim: Optional[int] = None
     # CSV file with columns subject (subject integer id) and elec (string name of electrode).
     # If not set then defaults to configured subject_ids and channel_reg_ex.
     electrode_file_path: Optional[str] = None
@@ -30,15 +40,9 @@ class DataParams:
     # A regular expression to pick which channels you are interested in.
     # (i.e. "LG[AB]*" will select channels that start with "LGA" or "LGB")
     channel_reg_ex: Optional[str] = None
-    # Layer of model to gather embeddings from. Required if using gpt2-xl.
-    embedding_layer: Optional[int] = None
     # A user defined configuration for their specific models preprocessor function.  Can provide either a single value or a
     # list of parameters to apply in order. Should align with desired function in preprocessing_fn_name.
     preprocessor_params: Optional[dict | list[dict]] = None
-    # Name of word column in dataframe to use. Optional.
-    word_column: Optional[str] = None
-    # Dictionary of parameters to pass to your specific task_data_getter if needed.
-    task_params: dict = field(default_factory=lambda: {})
 
 
 @dataclass
@@ -109,19 +113,26 @@ class TrainingParams:
 
 
 @dataclass
+class TaskConfig:
+    """Configuration for a specific task, including data params and task-specific config."""
+    task_name: str
+    data_params: DataParams
+    task_specific_config: BaseTaskConfig
+
+
+@dataclass
 class ExperimentConfig:
     # Model constructor function name. Must be registered using @registry.register_model_constructor()
     model_constructor_name: str = ""
     # Config setter function name. Must be registered using @registry.register_config_setter(). Can provide a list of names to apply multiple setters in order.
     config_setter_name: Optional[str | list[str]] = None
-    # Task to run for decoding. Must have a function registered using @registry.register_task_data_getter(). Defaults to decoding word embeddings.
-    task_name: str = "word_embedding_decoding_task"
+    # Task configuration including task name, data params, and task-specific config
+    # Note: task_specific_config will be set based on the task_name at runtime
+    task_config: Optional[TaskConfig] = None
     # Parameters for this model. Can be any user-defined dictionary.
     model_params: dict = field(default_factory=lambda: {})
     # Parameters for training.
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
-    # Parameters for data loading and preprocessing. Sub-field preprocessor_params can be set for your use-case.
-    data_params: DataParams = field(default_factory=lambda: DataParams())
     # Name for trial. Will be used for separating results in storage. Can use format strings such as
     # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""

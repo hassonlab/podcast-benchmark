@@ -1,6 +1,23 @@
 model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
-task_name: sentence_onset_task
+
+task_config:
+  task_name: sentence_onset_task
+  data_params:
+    data_root: data
+    window_width: 0.625
+    preprocessing_fn_name: window_average_neural_data
+    subject_ids: [9]
+    # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+    preprocessor_params:
+      num_average_samples: 32
+  task_specific_config:
+    #this is the number of negative samples (no sentence onset) per positive sample (sentence onset)
+    negatives_per_positive: 5
+    #Negative examples are sampled within each sentence, at least `negative_margin_s` seconds after onset
+    negative_margin_s: 0.75
+    sentence_csv_path: processed_data/all_sentences_podcast.csv
+
 model_params:
   conv_filters: 128
   dropout: 0.2
@@ -23,22 +40,6 @@ training_params:
   metrics: [roc_auc,sensitivity, specificity, f1, precision]
   early_stopping_metric: f1
   smaller_is_better: false
-
-data_params:
-  data_root: data
-  window_width: 0.625
-  preprocessing_fn_name: window_average_neural_data
-  subject_ids: [9]
-  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
-  preprocessor_params:
-    num_average_samples: 32
-  # Task-specific knobs (optional)
-  task_params:
-    #this is the number of negative samples (no sentence onset) per positive sample (sentence onset)
-    negatives_per_positive: 5
-    #Negative examples are sampled within each sentence, at least `negative_margin_s` seconds after onset
-    negative_margin_s: 0.75 #
-    sentence_csv_path: processed_data/all_sentences_podcast.csv
 
 trial_name: sentence_onset_lr
 

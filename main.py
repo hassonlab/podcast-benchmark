@@ -9,6 +9,7 @@ from utils import decoding_utils
 import random
 from utils.module_loader_utils import import_all_from_package
 from core import registry
+from core.config import TaskConfig, DataParams, dict_to_config
 from utils.config_utils import (
     parse_known_args,
     load_config_with_overrides,
@@ -56,23 +57,49 @@ def main():
         experiment_config.training_params.cudnn_deterministic,
     )
 
+    # Build TaskConfig if not already set
+    if experiment_config.task_config is None:
+        raise ValueError("task_config must be set in experiment configuration")
+
+    # Instantiate TaskConfig from dict if needed
+    if isinstance(experiment_config.task_config, dict):
+        task_config_dict = experiment_config.task_config
+        task_name = task_config_dict["task_name"]
+        task_info = registry.task_registry[task_name]
+
+        # Instantiate DataParams
+        data_params = dict_to_config(task_config_dict["data_params"], DataParams)
+
+        # Instantiate task-specific config
+        config_class = task_info["config_type"]
+        task_specific_config = config_class(**task_config_dict["task_specific_config"])
+
+        # Create TaskConfig
+        experiment_config.task_config = TaskConfig(
+            task_name=task_name,
+            data_params=data_params,
+            task_specific_config=task_specific_config
+        )
+
     # Overwrite subject id's and set per-subject electrodes based on file if provided.
-    if experiment_config.data_params.electrode_file_path:
+    if experiment_config.task_config.data_params.electrode_file_path:
         subject_id_map = data_utils.read_subject_mapping(
             "data/participants.tsv", delimiter="\t"
         )
         subject_electrode_map = data_utils.read_electrode_file(
-            experiment_config.data_params.electrode_file_path,
+            experiment_config.task_config.data_params.electrode_file_path,
             subject_mapping=subject_id_map,
         )
-        experiment_config.data_params.subject_ids = list(subject_electrode_map.keys())
-        experiment_config.data_params.per_subject_electrodes = subject_electrode_map
+        experiment_config.task_config.data_params.subject_ids = list(subject_electrode_map.keys())
+        experiment_config.task_config.data_params.per_subject_electrodes = subject_electrode_map
+
+    task_name = experiment_config.task_config.task_name
+    task_info = registry.task_registry[task_name]
 
     # Load all data.
-    raws = data_utils.load_raws(experiment_config.data_params)
-    task_df = registry.task_data_getter_registry[experiment_config.task_name](
-        experiment_config.data_params
-    )
+    raws = data_utils.load_raws(experiment_config.task_config.data_params)
+    task_getter = task_info["getter"]
+    task_df = task_getter(experiment_config.task_config)
 
     # Allow user defined function to alter config if necessary for their model.
     if experiment_config.config_setter_name:
@@ -86,13 +113,13 @@ def main():
 
     # User defined preprocessing function.
     preprocessing_fns = None
-    if experiment_config.data_params.preprocessing_fn_name:
-        if not isinstance(experiment_config.data_params.preprocessing_fn_name, list):
-            experiment_config.data_params.preprocessing_fn_name = [
-                experiment_config.data_params.preprocessing_fn_name
+    if experiment_config.task_config.data_params.preprocessing_fn_name:
+        if not isinstance(experiment_config.task_config.data_params.preprocessing_fn_name, list):
+            experiment_config.task_config.data_params.preprocessing_fn_name = [
+                experiment_config.task_config.data_params.preprocessing_fn_name
             ]
         preprocessing_fns = []
-        for fn_name in experiment_config.data_params.preprocessing_fn_name:
+        for fn_name in experiment_config.task_config.data_params.preprocessing_fn_name:
             preprocessing_fns.append(registry.data_preprocessor_registry[fn_name])
 
     # User defined model constructor function.
@@ -146,10 +173,10 @@ def main():
         task_df,
         preprocessing_fns,
         model_constructor_fn,
-        experiment_config.task_name,
+        experiment_config.task_config.task_name,
         model_params=experiment_config.model_params,
         training_params=experiment_config.training_params,
-        data_params=experiment_config.data_params,
+        data_params=experiment_config.task_config.data_params,
         output_dir=output_dir,
         checkpoint_dir=checkpoint_dir,
         tensorboard_dir=tensorboard_dir,

@@ -1,12 +1,27 @@
 model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
-task_name: pos_task
+
+task_config:
+  task_name: pos_task
+  data_params:
+    data_root: data
+    window_width: 0.625
+    preprocessing_fn_name: window_average_neural_data
+    # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
+    subject_ids: [9]
+    # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+    preprocessor_params:
+      num_average_samples: 8
+  task_specific_config:
+    pos_path: processed_data/df_word_onset_with_pos_class.csv
+
 model_params:
   conv_filters: 128
   dropout: 0.2
   num_models: 10
   embedding_dim: 5 #number of classes for pos tagging
   output_activation: softmax
+
 training_params:
   batch_size: 32
   epochs: 100
@@ -25,19 +40,4 @@ training_params:
   logistic_regression_baseline: true
   visualize_fold_distribution: false
 
-data_params:
-  data_root: data
-  window_width: 0.625
-  preprocessing_fn_name: window_average_neural_data
-  # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
-  subject_ids: [9]
-  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
-  preprocessor_params:
-    num_average_samples: 8
-  # Task-specific knobs (optional)
-  task_params:
-    
-    pos_path: processed_data/df_word_onset_with_pos_class.csv
-
 trial_name: pos_task_sig_elecs_without_other_classes
-

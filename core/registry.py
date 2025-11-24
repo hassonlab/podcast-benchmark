@@ -6,8 +6,9 @@ data_preprocessor_registry = {}
 config_setter_registry = {}
 # Registry of functions for metric calculations.
 metric_registry = {}
-# Registry of functions for loading task-specific word data.
-task_data_getter_registry = {}
+# Registry of task information including data getter functions and config types.
+# Structure: {task_name: {"getter": function, "config_type": ConfigClass}}
+task_registry = {}
 
 
 def register_model_constructor(name=None):
@@ -138,15 +139,15 @@ def register_metric(name=None):
     return decorator
 
 
-def register_task_data_getter(name=None):
+def register_task_data_getter(name=None, config_type=None):
     """
     Decorator to register a task data getter function that gathers the data relevant for your task.
 
     The decorated function must follow the signature:
-        task_data_getter(data_params: DataParams) -> pd.DataFrame
+        task_data_getter(task_config: TaskConfig) -> pd.DataFrame
 
     Where:
-        - data_params: DataParams object containing parameters for data loading
+        - task_config: TaskConfig object containing task name, data params, and task-specific config
         - Returns: A pandas DataFrame with required columns: 'start', 'target'
                   - start: Time to center the neural data example around. Most likely the start time of the word/token but can vary depending on task.
                   - word: The actual word/token text (Optional)
@@ -159,15 +160,22 @@ def register_task_data_getter(name=None):
     Args:
         name (str, optional): Optional name to register the task data getter under.
                               Defaults to the function's __name__.
+        config_type (type, required): The dataclass type for this task's configuration.
+                                      Must be a subclass of BaseTaskConfig.
 
     Returns:
-        function: A decorator that registers the task data getter in
-                  task_data_getter_registry.
+        function: A decorator that registers the task data getter and config type in
+                  task_registry.
     """
 
     def decorator(fn):
-        task_data_getter_name = name or fn.__name__
-        task_data_getter_registry[task_data_getter_name] = fn
+        task_name = name or fn.__name__
+        if config_type is None:
+            raise ValueError(f"config_type is required when registering task '{task_name}'")
+        task_registry[task_name] = {
+            "getter": fn,
+            "config_type": config_type
+        }
         return fn
 
     return decorator

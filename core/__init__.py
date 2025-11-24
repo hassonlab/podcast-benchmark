@@ -11,7 +11,7 @@ from .registry import (
     data_preprocessor_registry,
     config_setter_registry,
     metric_registry,
-    task_data_getter_registry,
+    task_registry,
 )
 
 __all__ = [
@@ -31,5 +31,5 @@ __all__ = [
     "data_preprocessor_registry",
     "config_setter_registry",
     "metric_registry",
-    "task_data_getter_registry",
+    "task_registry",
 ]

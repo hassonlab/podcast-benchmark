@@ -2,7 +2,6 @@
 
 from tasks.content_noncontent import content_noncontent_task
 from tasks.gpt_surprise import gpt_surprise_task, gpt_surprise_multiclass_task
-from tasks.placeholder_task import placeholder_task
 from tasks.pos_task import pos_task
 from tasks.sentence_onset import sentence_onset_task
 from tasks.volume_level import (
@@ -15,7 +14,6 @@ __all__ = [
     "content_noncontent_task",
     "gpt_surprise_task",
     "gpt_surprise_multiclass_task",
-    "placeholder_task",
     "pos_task",
     "sentence_onset_task",
     "volume_level_decoding_task",

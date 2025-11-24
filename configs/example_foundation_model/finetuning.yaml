@@ -12,6 +12,19 @@ model_constructor_name: example_foundation_finetune
 # Config setter (sets window width based on foundation model)
 config_setter_name: example_foundation_finetune
 
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    subject_ids: [1, 2, 3]
+    # No preprocessing function needed - raw data goes directly to model
+    # window_width will be set automatically by config_setter
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
+
 # Model parameters
 model_params:
   # Path to pretrained foundation model directory
@@ -41,18 +54,6 @@ training_params:
   metrics: [cosine_sim, nll_embedding]
   early_stopping_metric: cosine_sim
   smaller_is_better: false
-
-# Data parameters
-data_params:
-  data_root: data
-  word_column: word
-  embedding_type: gpt-2xl
-  embedding_layer: 24
-  embedding_pca_dim: 50
-  subject_ids: [1, 2, 3]
-
-  # No preprocessing function needed - raw data goes directly to model
-  # window_width will be set automatically by config_setter
 
 # Trial identifier
 trial_name: example_foundation_finetune

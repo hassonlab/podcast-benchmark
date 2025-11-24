@@ -1,14 +1,23 @@
 import os
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from core.config import DataParams
+from core.config import BaseTaskConfig, TaskConfig
 from core import registry
 
 
-@registry.register_task_data_getter()
-def sentence_onset_task(data_params: DataParams):
+@dataclass
+class SentenceOnsetConfig(BaseTaskConfig):
+    """Configuration for sentence_onset_task."""
+    sentence_csv_path: str = "processed_data/all_sentences_podcast.csv"
+    negatives_per_positive: int = 1
+    negative_margin_s: float = 2.0
+
+
+@registry.register_task_data_getter(config_type=SentenceOnsetConfig)
+def sentence_onset_task(task_config: TaskConfig):
     """
     Binary classification dataset for sentence onset detection.
 
@@ -17,20 +26,16 @@ def sentence_onset_task(data_params: DataParams):
       - target: 1.0 for sentence onset, 0.0 for negatives sampled away from onsets
 
     Notes:
-      - Uses `data_params.sentence_csv_path` if provided; else defaults to
+      - Uses config.sentence_csv_path if provided; else defaults to
         `<data_root>/all_sentences_podcast.csv`.
       - Negative examples are sampled within each sentence, at least
         `negative_margin_s` seconds after onset and at least one window width
         before the sentence end.
     """
-    # Pull task-specific params from data_params.task_params with local defaults
-    tp = getattr(data_params, "task_params", {}) or {}
-
-    # Resolve CSV path
-    default_csv = os.path.join(
-        os.getcwd(), "processed_data", "all_sentences_podcast.csv"
-    )
-    csv_path = tp.get("sentence_csv_path", default_csv)
+    # Get typed task-specific config
+    config: SentenceOnsetConfig = task_config.task_specific_config
+    data_params = task_config.data_params
+    csv_path = config.sentence_csv_path
 
     df = pd.read_csv(csv_path, index_col=0)
 
@@ -47,9 +52,9 @@ def sentence_onset_task(data_params: DataParams):
     pos = pd.DataFrame({"start": onsets, "target": 1.0})
 
     # Negatives: sample away from onsets within the same sentence when possible
-    window = getattr(data_params, "window_width", 0.625) or 0.625
-    negatives_per_positive = int(tp.get("negatives_per_positive", 1))
-    negative_margin_s = float(tp.get("negative_margin_s", 2.0))
+    window = data_params.window_width if data_params.window_width > 0 else 0.625
+    negatives_per_positive = config.negatives_per_positive
+    negative_margin_s = config.negative_margin_s
 
     rng = np.random.default_rng(0)
     neg_starts = []

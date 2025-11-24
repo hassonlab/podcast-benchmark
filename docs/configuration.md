@@ -11,10 +11,17 @@ All experiments are configured via YAML files in the `configs/` directory. Each 
 ## Configuration Structure
 
 ```yaml
-# Which model and task to use
+# Which model to use
 model_constructor_name: my_model
 config_setter_name: my_config_setter  # Optional
-task_name: word_embedding_decoding_task  # Optional
+
+# Task configuration (nested structure)
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    # Shared data parameters (subjects, electrodes, window size, etc.)
+  task_specific_config:
+    # Task-specific parameters (type-safe, defined per task)
 
 # Model-specific parameters
 model_params:
@@ -23,10 +30,6 @@ model_params:
 # How to train
 training_params:
   # Batch size, learning rate, losses, metrics, etc.
-
-# What data to use
-data_params:
-  # Subjects, electrodes, embeddings, preprocessing
 
 # Where to save results
 output_dir: results
@@ -94,67 +97,91 @@ See `core/config.py:TrainingParams` for all available fields.
 
 ---
 
-## Data Parameters
+## Task Configuration
 
-**Purpose**: Specify which subjects, electrodes, and data to use.
+**Purpose**: Specify the task, data parameters, and task-specific settings.
 
-**Key concepts**:
-- **Subject selection**: Which participants to include
-- **Electrode selection**: Which brain regions to decode from
-- **Embeddings**: What target representations to predict
-- **Preprocessing**: How to transform raw neural data
+The `task_config` section has three parts:
+1. **task_name**: Which task to run (e.g., `word_embedding_decoding_task`)
+2. **data_params**: Shared parameters (subjects, electrodes, preprocessing)
+3. **task_specific_config**: Task-specific parameters (type-safe, validated)
 
-**Particularly useful fields**:
-
-### Electrode Selection
-
-You have three options for choosing which electrodes to use:
+**Example structure**:
 
 ```yaml
-data_params:
-  # Option 1: Regular expression (most flexible)
-  channel_reg_ex: "LG[AB]*"  # Channels starting with LGA or LGB
-  # Examples:
-  #   "^G([1-9]|[1-5][0-9]|6[0-4])$"  - Channels G1-G64
-  #   ".*"  - All channels
-
-  # Option 2: CSV file with electrode list
-  electrode_file_path: configs/significant_electrodes.csv
-  # Format: subject,elec
-
-  # Option 3: Per-subject dictionary
-  per_subject_electrodes:
-    1: [LGA1, LGA2, LGA3]
-    2: [LGB1, LGB2]
+task_config:
+  task_name: sentence_onset_task
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+    preprocessing_fn_name: window_average_neural_data
+  task_specific_config:
+    sentence_csv_path: processed_data/sentences.csv
+    negatives_per_positive: 5
+    negative_margin_s: 0.75
 ```
 
-### Other Key Fields
+### Data Parameters
+
+**Shared fields used across all tasks**:
+
+#### Electrode Selection
 
 ```yaml
-data_params:
-  subject_ids: [1, 2, 3]        # Which subjects to include
+task_config:
+  data_params:
+    # Option 1: Regular expression
+    channel_reg_ex: "LG[AB]*"
 
-  # Target embeddings
-  embedding_type: gpt-2xl       # "gpt-2xl", "glove", or "arbitrary"
-  embedding_layer: 24           # Which layer to extract (for GPT-2)
-  embedding_pca_dim: 50         # Optional dimensionality reduction
+    # Option 2: CSV file
+    electrode_file_path: configs/significant_electrodes.csv
 
-  # Neural data window
-  window_width: 0.625           # Width of data window in seconds
-
-  # Preprocessing
-  preprocessing_fn_name: my_preprocessor  # Your registered function
-  preprocessor_params:          # Custom params for your preprocessor
-    param1: value1
-
-  # Task configuration
-  task_name: my_custom_task     # Optional, defaults to word embeddings
-  word_column: lemmatized_word  # For zero-shot folds
-  task_params:                  # Task-specific parameters
-    param1: value1
+    # Option 3: Per-subject dictionary
+    per_subject_electrodes:
+      1: [LGA1, LGA2, LGA3]
+      2: [LGB1, LGB2]
 ```
 
-See `core/config.py:DataParams` for all available fields.
+#### Other Key Fields
+
+```yaml
+task_config:
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625           # Width of neural data window (seconds)
+    word_column: lemmatized_word  # For zero-shot folds
+
+    # Preprocessing
+    preprocessing_fn_name: my_preprocessor
+    preprocessor_params:
+      param1: value1
+```
+
+### Task-Specific Config
+
+Each task defines its own config dataclass with type-safe parameters. See [Task Reference](task-reference.md) for details on each task's configuration options.
+
+**Example for word_embedding_decoding_task**:
+```yaml
+task_config:
+  task_name: word_embedding_decoding_task
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
+```
+
+**Example for sentence_onset_task**:
+```yaml
+task_config:
+  task_name: sentence_onset_task
+  task_specific_config:
+    sentence_csv_path: processed_data/sentences.csv
+    negatives_per_positive: 5
+    negative_margin_s: 0.75
+```
 
 ---
 

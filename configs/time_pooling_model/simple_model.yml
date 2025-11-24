@@ -1,18 +1,15 @@
 model_constructor_name: simple_temporal_model
 config_setter_name: [volume_level_config_setter, set_input_channels]
-task_name: volume_level_decoding_task
-trial_name: volume_level_simple
-output_dir: results
-model_dir: models
-tensorboard_dir: event_logs
 
-data_params:
-  data_root: data
-  subject_ids: [1,2,3,4,5,6,7,8,9]
-  channel_reg_ex: null
-  window_width: 0.2
-  preprocessing_fn_name: window_rms
-  task_params:
+task_config:
+  task_name: volume_level_decoding_task
+  data_params:
+    data_root: data
+    subject_ids: [1,2,3,4,5,6,7,8,9]
+    channel_reg_ex: null
+    window_width: 0.2
+    preprocessing_fn_name: window_rms
+  task_specific_config:
     audio_path: stimuli/podcast.wav
     target_sr: 512
     cutoff_hz: 8.0
@@ -42,3 +39,8 @@ model_params:
   hidden_dim: 256
   dropout: 0.2
   output_activation: null
+
+trial_name: volume_level_simple
+output_dir: results
+model_dir: models
+tensorboard_dir: event_logs

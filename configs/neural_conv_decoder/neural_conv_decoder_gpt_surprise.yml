@@ -1,6 +1,20 @@
 model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
-task_name: gpt_surprise_task
+
+task_config:
+  task_name: gpt_surprise_task
+  data_params:
+    data_root: data
+    window_width: 0.625
+    preprocessing_fn_name: window_average_neural_data
+    # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
+    subject_ids: [9]
+    # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
+    preprocessor_params:
+      num_average_samples: 32
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+
 model_params:
   conv_filters: 128
   dropout: 0.2
@@ -24,18 +38,5 @@ training_params:
   early_stopping_metric: mse
   smaller_is_better: false
   linear_regression_baseline: true
-
-data_params:
-  data_root: data
-  window_width: 0.625
-  preprocessing_fn_name: window_average_neural_data
-  # electrode_file_path: "processed_data/all_subject_sig_corrected.csv"
-  subject_ids: [9]
-  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
-  preprocessor_params:
-    num_average_samples: 32
-  # Task-specific knobs (optional)
-  task_params:
-    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 
 trial_name: gpt_surprise
