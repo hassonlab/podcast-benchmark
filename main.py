@@ -122,10 +122,8 @@ def main():
         for fn_name in experiment_config.task_config.data_params.preprocessing_fn_name:
             preprocessing_fns.append(registry.data_preprocessor_registry[fn_name])
 
-    # User defined model constructor function.
-    model_constructor_fn = registry.model_constructor_registry[
-        experiment_config.model_constructor_name
-    ]
+    # User defined model specification - will be built at each lag
+    model_spec = experiment_config.model_spec
 
     # Generate trial name if user specified format string.
     trial_name = experiment_config.trial_name
@@ -172,9 +170,8 @@ def main():
         raws,
         task_df,
         preprocessing_fns,
-        model_constructor_fn,
+        model_spec,
         experiment_config.task_config.task_name,
-        model_params=experiment_config.model_params,
         training_params=experiment_config.training_params,
         data_params=experiment_config.task_config.data_params,
         output_dir=output_dir,

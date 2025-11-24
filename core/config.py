@@ -1,5 +1,5 @@
 from dataclasses import is_dataclass, dataclass, fields, field
-from typing import Optional, Union
+from typing import Optional, Union, Dict, Any
 from abc import ABC
 
 # These classes exist to document all of the model-agnostic fields for data collection and model training.
@@ -121,23 +121,55 @@ class TaskConfig:
 
 
 @dataclass
+class ModelSpec:
+    """Specification for building a model, including support for nested sub-models.
+
+    This allows for hierarchical model construction where a parent model can receive
+    pre-built sub-models as constructor arguments. For example, a GPT2Brain model
+    could receive an encoder model built from its own ModelSpec.
+
+    Attributes:
+        constructor_name: Name of the registered model constructor function
+        params: Dictionary of parameters to pass to the constructor (excluding sub-models)
+        sub_models: Dictionary mapping parameter names to ModelSpec objects.
+                   The keys indicate the keyword argument names that will receive
+                   the built sub-models when constructing the parent model.
+
+    Example:
+        # Nested encoder model inside GPT2Brain
+        ModelSpec(
+            constructor_name="gpt2_brain",
+            params={"lm_model": "gpt2", "freeze_lm": True},
+            sub_models={
+                "encoder_model": ModelSpec(
+                    constructor_name="pitom_model",
+                    params={"input_channels": 64, "output_dim": 768},
+                    sub_models={}
+                )
+            }
+        )
+    """
+    constructor_name: str
+    params: Dict[str, Any] = field(default_factory=dict)
+    sub_models: Dict[str, 'ModelSpec'] = field(default_factory=dict)
+
+
+@dataclass
 class ExperimentConfig:
-    # Model constructor function name. Must be registered using @registry.register_model_constructor()
-    model_constructor_name: str = ""
+    # Model specification with support for nested sub-models
+    model_spec: ModelSpec = field(default_factory=lambda: ModelSpec(constructor_name=""))
     # Config setter function name. Must be registered using @registry.register_config_setter(). Can provide a list of names to apply multiple setters in order.
     config_setter_name: Optional[str | list[str]] = None
     # Task configuration including task name, data params, and task-specific config
     # Note: task_specific_config will be set based on the task_name at runtime
     task_config: Optional[TaskConfig] = None
-    # Parameters for this model. Can be any user-defined dictionary.
-    model_params: dict = field(default_factory=lambda: {})
     # Parameters for training.
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
     # Name for trial. Will be used for separating results in storage. Can use format strings such as
     # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""
     # Path to fields of config to be formatted into trial_name. For example if your trial_name is
-    # "decoding_dim={}_lr={:.2f}" you could set format_fields to ["model_params.dim", "training_params.learning_rate"]
+    # "decoding_dim={}_lr={:.2f}" you could set format_fields to ["model_spec.params.dim", "training_params.learning_rate"]
     format_fields: Optional[list[str]] = None
     # Base directory to output results to.
     output_dir: str = "results"

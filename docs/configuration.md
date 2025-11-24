@@ -11,8 +11,15 @@ All experiments are configured via YAML files in the `configs/` directory. Each 
 ## Configuration Structure
 
 ```yaml
-# Which model to use
-model_constructor_name: my_model
+# Model specification (supports nested sub-models)
+model_spec:
+  constructor_name: my_model
+  params:
+    # Model-specific parameters (passed to constructor)
+  sub_models:
+    # Optional: nested models passed as constructor arguments
+    # encoder_model: {...}
+
 config_setter_name: my_config_setter  # Optional
 
 # Task configuration (nested structure)
@@ -22,10 +29,6 @@ task_config:
     # Shared data parameters (subjects, electrodes, window size, etc.)
   task_specific_config:
     # Task-specific parameters (type-safe, defined per task)
-
-# Model-specific parameters
-model_params:
-  # Fully customizable - passed to your model constructor
 
 # How to train
 training_params:
@@ -39,20 +42,49 @@ trial_name: my_experiment
 
 ---
 
-## Model Parameters
+## Model Specification
 
-**Purpose**: Define architecture and hyperparameters for your specific model.
+**Purpose**: Define your model architecture with support for nested sub-models.
 
-This section is **completely customizable** - whatever you put here gets passed directly to your model constructor function. The framework doesn't impose any specific fields.
+The `model_spec` section specifies how to build your model:
+- **constructor_name**: Registered model constructor function name
+- **params**: Parameters passed to the constructor (fully customizable)
+- **sub_models**: Dictionary of nested models to build and pass as constructor arguments
 
-**Example**:
+**Simple Example**:
 ```yaml
-model_params:
-  hidden_dim: 512
-  num_layers: 3
-  dropout: 0.2
-  # Anything your model needs
+model_spec:
+  constructor_name: pitom_model
+  params:
+    input_channels: 64
+    output_dim: 768
+    conv_filters: 128
+    dropout: 0.2
+  sub_models: {}
 ```
+
+**Nested Model Example** (e.g., GPT2Brain with encoder):
+```yaml
+model_spec:
+  constructor_name: gpt2_brain
+  params:
+    freeze_lm: true
+    device: cuda
+  sub_models:
+    encoder_model:
+      constructor_name: pitom_model
+      params:
+        input_channels: 64
+        output_dim: 768
+        conv_filters: 128
+        dropout: 0.2
+      sub_models: {}
+```
+
+In this example:
+1. The `pitom_model` encoder is built first with the specified params
+2. The built encoder is then passed to `gpt2_brain` as the `encoder_model` argument
+3. This allows you to train different encoders at each lag while using the same parent model
 
 ---
 
@@ -193,7 +225,7 @@ task_config:
 # Dynamic trial naming with formatting
 trial_name: "model_{}_lr={}_bs={}"
 format_fields:
-  - model_params.model_name
+  - model_spec.params.model_name
   - training_params.learning_rate
   - training_params.batch_size
 

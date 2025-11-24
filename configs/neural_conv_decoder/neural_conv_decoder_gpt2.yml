@@ -1,4 +1,3 @@
-model_constructor_name: ensemble_pitom_model
 config_setter_name: neural_conv
 
 task_config:
@@ -17,11 +16,14 @@ task_config:
     embedding_layer: 24
     # embedding_pca_dim: 50
 
-model_params:
-  conv_filters: 128
-  dropout: 0.2
-  num_models: 10
-  embedding_dim: 50
+model_spec:
+  constructor_name: ensemble_pitom_model
+  params:
+    conv_filters: 128
+    dropout: 0.2
+    num_models: 10
+    embedding_dim: 50
+  sub_models: {}
 
 training_params:
   batch_size: 32

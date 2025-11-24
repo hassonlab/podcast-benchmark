@@ -23,8 +23,9 @@ from tqdm import tqdm
 import mne
 
 from utils import data_utils
-from core.config import TrainingParams, DataParams
+from core.config import TrainingParams, DataParams, ModelSpec
 from utils.fold_utils import get_sequential_folds, get_zero_shot_folds
+from utils.model_utils import build_model_from_spec
 import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
@@ -321,10 +322,9 @@ def train_decoding_model(
     X: np.ndarray,
     Y: np.ndarray,
     selected_words: list[str],
-    model_constructor_fn,
+    model_spec: ModelSpec,
     task_name: str,
     lag: int,
-    model_params: dict,
     training_params: TrainingParams,
     checkpoint_dir: str,
     plot_results: bool = False,
@@ -458,7 +458,7 @@ def train_decoding_model(
                     loss = compute_loss(out, yb, training_params, all_fns)
 
             # Compute all metrics for this batch using the helper function
-            batch_metrics = compute_all_metrics(out, yb, all_fns, model_params)
+            batch_metrics = compute_all_metrics(out, yb, all_fns, model_spec.params)
 
             # Accumulate metrics
             for name, val in batch_metrics.items():
@@ -557,7 +557,7 @@ def train_decoding_model(
 
             # Compute all metrics
             logistic_baseline_metrics = compute_baseline_metrics(
-                logistic_model, X_splits, Y_splits, all_fns, model_params
+                logistic_model, X_splits, Y_splits, all_fns, model_spec.params
             )
             logistic_regression_results.append(logistic_baseline_metrics)
 
@@ -583,7 +583,7 @@ def train_decoding_model(
 
             # Compute all metrics
             linear_baseline_metrics = compute_baseline_metrics(
-                linear_model, X_splits, Y_splits, all_fns, model_params
+                linear_model, X_splits, Y_splits, all_fns, model_spec.params
             )
             linear_regression_results.append(linear_baseline_metrics)
 
@@ -610,12 +610,12 @@ def train_decoding_model(
 
             # Compute all metrics
             ridge_baseline_metrics = compute_baseline_metrics(
-                ridge_model, X_splits, Y_splits, all_fns, model_params
+                ridge_model, X_splits, Y_splits, all_fns, model_spec.params
             )
             ridge_regression_results.append(ridge_baseline_metrics)
 
         # Model, optimizer, early‐stop setup
-        model = model_constructor_fn(model_params).to(device)
+        model = build_model_from_spec(model_spec).to(device)
         optimizer = optim.Adam(
             model.parameters(),
             lr=training_params.learning_rate,
@@ -810,9 +810,8 @@ def run_training_over_lags(
     raws: list[mne.io.Raw],
     task_df: pd.DataFrame,
     preprocessing_fns: list[callable] | None,
-    model_constructor_fn,
+    model_spec: ModelSpec,
     task_name: str,
-    model_params: dict,
     training_params: TrainingParams,
     data_params: DataParams,
     output_dir="results/",
@@ -868,10 +867,9 @@ def run_training_over_lags(
             X_tensor,
             Y_tensor,
             selected_words,
-            model_constructor_fn,
+            model_spec,
             task_name,
             lag,
-            model_params=model_params,
             training_params=training_params,
             checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
             write_to_tensorboard=write_to_tensorboard,
