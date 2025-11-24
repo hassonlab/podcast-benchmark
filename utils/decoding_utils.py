@@ -29,10 +29,8 @@ import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score
 
 from sklearn.linear_model import LinearRegression, Ridge
-from scipy.stats import pearsonr
 
 
 def train_logistic_regression(X_train, y_train):
@@ -366,6 +364,7 @@ def train_decoding_model(
     # 3.5. Visualize fold distribution if requested
     if training_params.visualize_fold_distribution:
         from utils.analysis_utils import visualize_fold_distribution
+
         # Convert Y to numpy if it's a tensor
         Y_np = Y.cpu().numpy() if isinstance(Y, torch.Tensor) else Y
         visualize_fold_distribution(Y_np, fold_indices, task_name=task_name, lag=lag)
