@@ -540,86 +540,42 @@ def train_decoding_model(
         }
 
         # Train baseline models and compute all metrics
-        logistic_baseline_metrics = None
-        linear_baseline_metrics = None
-        ridge_baseline_metrics = None
+        def train_and_eval_baseline(training_fn, **kwargs):
+            model = training_fn(
+                neural_data[tr_idx].cpu().numpy(),
+                Y_train_norm.cpu().numpy(),
+                **kwargs,
+            )
+            # Prepare data splits for metric computation (use normalized targets)
+            X_splits = {
+                "train": neural_data[tr_idx].cpu().numpy(),
+                "val": neural_data[va_idx].cpu().numpy(),
+                "test": neural_data[te_idx].cpu().numpy(),
+            }
+            Y_splits = {
+                "train": Y_train_norm.cpu().numpy(),
+                "val": Y_val_norm.cpu().numpy(),
+                "test": Y_test_norm.cpu().numpy(),
+            }
+            # Compute all metrics
+            return compute_baseline_metrics(
+                model, X_splits, Y_splits, all_fns, model_spec.params
+            )
 
         if training_params.logistic_regression_baseline:
             print("Training logistic regression baseline...")
-            # Train logistic regression model (use normalized targets if applicable)
-            logistic_model = train_logistic_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            logistic_baseline_metrics = compute_baseline_metrics(
-                logistic_model, X_splits, Y_splits, all_fns, model_spec.params
+            logistic_baseline_metrics = train_and_eval_baseline(
+                train_logistic_regression
             )
             logistic_regression_results.append(logistic_baseline_metrics)
-
         if training_params.linear_regression_baseline:
             print("Training linear regression baseline...")
-            # Train linear regression model (use normalized targets if applicable)
-            linear_model = train_linear_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            linear_baseline_metrics = compute_baseline_metrics(
-                linear_model, X_splits, Y_splits, all_fns, model_spec.params
-            )
+            linear_baseline_metrics = train_and_eval_baseline(train_linear_regression)
             linear_regression_results.append(linear_baseline_metrics)
-
         if training_params.ridge_regression_baseline:
             print("Training ridge regression baseline...")
-            # Train ridge regression model (use normalized targets if applicable)
-            ridge_model = train_ridge_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-                alpha=training_params.ridge_alpha,
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            ridge_baseline_metrics = compute_baseline_metrics(
-                ridge_model, X_splits, Y_splits, all_fns, model_spec.params
+            ridge_baseline_metrics = train_and_eval_baseline(
+                train_ridge_regression, alpha=training_params.ridge_alpha
             )
             ridge_regression_results.append(ridge_baseline_metrics)
 
