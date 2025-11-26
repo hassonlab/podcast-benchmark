@@ -347,7 +347,9 @@ def train_decoding_model(
 
     # 3. Get fold indices
     if training_params.fold_type == "sequential_folds":
-        fold_indices = get_sequential_folds(X, num_folds=training_params.n_folds)
+        fold_indices = get_sequential_folds(
+            neural_data, num_folds=training_params.n_folds
+        )
     elif training_params.fold_type == "zero_shot_folds":
         fold_indices = get_zero_shot_folds(
             data_df[task_config.data_params.word_column].values,
