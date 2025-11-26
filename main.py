@@ -78,7 +78,7 @@ def main():
         experiment_config.task_config = TaskConfig(
             task_name=task_name,
             data_params=data_params,
-            task_specific_config=task_specific_config
+            task_specific_config=task_specific_config,
         )
 
     # Overwrite subject id's and set per-subject electrodes based on file if provided.
@@ -90,8 +90,12 @@ def main():
             experiment_config.task_config.data_params.electrode_file_path,
             subject_mapping=subject_id_map,
         )
-        experiment_config.task_config.data_params.subject_ids = list(subject_electrode_map.keys())
-        experiment_config.task_config.data_params.per_subject_electrodes = subject_electrode_map
+        experiment_config.task_config.data_params.subject_ids = list(
+            subject_electrode_map.keys()
+        )
+        experiment_config.task_config.data_params.per_subject_electrodes = (
+            subject_electrode_map
+        )
 
     task_name = experiment_config.task_config.task_name
     task_info = registry.task_registry[task_name]
@@ -114,7 +118,9 @@ def main():
     # User defined preprocessing function.
     preprocessing_fns = None
     if experiment_config.task_config.data_params.preprocessing_fn_name:
-        if not isinstance(experiment_config.task_config.data_params.preprocessing_fn_name, list):
+        if not isinstance(
+            experiment_config.task_config.data_params.preprocessing_fn_name, list
+        ):
             experiment_config.task_config.data_params.preprocessing_fn_name = [
                 experiment_config.task_config.data_params.preprocessing_fn_name
             ]
@@ -173,7 +179,7 @@ def main():
         model_spec,
         experiment_config.task_config.task_name,
         training_params=experiment_config.training_params,
-        data_params=experiment_config.task_config.data_params,
+        task_params=experiment_config.task_config,
         output_dir=output_dir,
         checkpoint_dir=checkpoint_dir,
         tensorboard_dir=tensorboard_dir,

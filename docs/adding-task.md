@@ -20,7 +20,8 @@ To add a new task:
 2. [Create a task data getter function](#2-create-task-data-getter)
 3. [Register the function](#3-register-the-function)
 4. [Update your config](#4-update-config)
-5. [Optional: Add custom metrics](#5-optional-custom-metrics)
+5. [Optional: Using input_fields](#5-optional-using-input_fields)
+6. [Optional: Add custom metrics](#6-optional-custom-metrics)
 
 ---
 
@@ -45,6 +46,7 @@ class MyTaskConfig(BaseTaskConfig):
 - Define all task-specific parameters with type hints
 - Provide sensible defaults where appropriate
 - Do NOT duplicate fields that belong in `DataParams` (like `data_root`, `window_width`, `subject_ids`)
+- `BaseTaskConfig` includes an `input_fields` parameter (optional list of column names from your DataFrame to pass as additional model inputs)
 
 ---
 
@@ -86,6 +88,7 @@ def my_task_data_getter(task_config: TaskConfig) -> pd.DataFrame:
 
 **Optional Columns**:
 - `word` (str): Text/label for the event (useful for zero-shot folds)
+- Any columns specified in `input_fields` (will be passed as kwargs to the model)
 - Any other metadata you want to track
 
 ### Minimal Example
@@ -183,7 +186,50 @@ The task-specific parameters are now type-safe and validated at runtime!
 
 ---
 
-## 5. Optional: Custom Metrics
+## 5. Optional: Using input_fields
+
+If your model needs additional inputs beyond neural data, use the `input_fields` parameter to specify which DataFrame columns should be passed to your model as kwargs.
+
+### Example: Passing word IDs to a model
+
+```python
+@dataclass
+class MyTaskConfig(BaseTaskConfig):
+    """Configuration for task requiring word IDs."""
+    input_fields: Optional[list[str]] = field(default_factory=lambda: ["word_id"])
+
+@registry.register_task_data_getter(config_type=MyTaskConfig)
+def my_task(task_config: TaskConfig):
+    config: MyTaskConfig = task_config.task_specific_config
+
+    # Create DataFrame with required columns
+    df = pd.DataFrame({
+        'start': [0.0, 1.0, 2.0],
+        'target': [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+        'word_id': [42, 43, 44]  # This will be passed to model
+    })
+    return df
+```
+
+Your model's forward method should accept these fields as keyword arguments:
+
+```python
+def forward(self, neural_data, word_id=None, **kwargs):
+    # word_id will be a tensor of shape [batch_size]
+    if word_id is not None:
+        # Use word_id in your model
+        embeddings = self.word_embedding(word_id)
+    # ...
+```
+
+**Important**:
+- All fields in `input_fields` must be columns in the returned DataFrame
+- These columns will be converted to tensors and passed as kwargs during training
+- Handle None values in your model if the field might not be provided
+
+---
+
+## 6. Optional: Custom Metrics
 
 Define metrics specific to your task. Add them to the appropriate file in the `metrics/` package based on the metric type:
 

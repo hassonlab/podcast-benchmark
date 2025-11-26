@@ -50,7 +50,7 @@ def mock_config_setter():
 
     def setter(experiment_config, raws, df_word):
         # Modify some config field
-        experiment_config.model_params["modified"] = True
+        experiment_config.model_spec.params["modified"] = True
         return experiment_config
 
     return setter
@@ -193,12 +193,12 @@ class TestConfigSetterRegistry:
         mock_df_word = {"words": ["word1", "word2"]}
 
         # Should modify the config
-        original_params = sample_experiment_config.model_params.copy()
+        original_params = sample_experiment_config.model_spec.params.copy()
         modified_config = setter(sample_experiment_config, mock_raws, mock_df_word)
 
         # Check that modification was made
-        assert "modified" in modified_config.model_params
-        assert modified_config.model_params["modified"] == True
+        assert "modified" in modified_config.model_spec.params
+        assert modified_config.model_spec.params["modified"] == True
 
         # Should return the same config object
         assert modified_config is sample_experiment_config

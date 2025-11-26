@@ -167,10 +167,9 @@ class TestTrainingMatrixTaskDataGetters:
             with open(config_path, "r") as f:
                 config_dict = yaml.safe_load(f)
 
-            # Get task_name from config, default is "word_embedding_decoding_task"
-            config_task_name = config_dict.get(
-                "task_name", "word_embedding_decoding_task"
-            )
+            # Get task_name from config, with new structure it's under task_config
+            task_config = config_dict.get("task_config", {})
+            config_task_name = task_config.get("task_name", "word_embedding_decoding_task")
 
             if config_task_name != expected_task_name:
                 mismatched_tasks.append(

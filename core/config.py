@@ -9,13 +9,17 @@ from abc import ABC
 # Task-Specific Configuration Base Class
 # ============================================================================
 
+
 @dataclass
 class BaseTaskConfig(ABC):
     """Base class for all task-specific configurations.
 
     Each task should define its own config dataclass in its task file that inherits from this.
     """
-    pass
+
+    # An optional list of inputs which will be passed into the decoder model as additional inputs as
+    # kwargs. All fields must be present in the DataFrame returned by the task data getter.
+    input_fields: Optional[list[str]] = None
 
 
 @dataclass
@@ -43,6 +47,9 @@ class DataParams:
     # A user defined configuration for their specific models preprocessor function.  Can provide either a single value or a
     # list of parameters to apply in order. Should align with desired function in preprocessing_fn_name.
     preprocessor_params: Optional[dict | list[dict]] = None
+    # The name of the column in the DataFrame returned by the task data getter that specifies the word for each
+    # example. Optional if your task does not involve words.
+    word_column: Optional[str] = None
 
 
 @dataclass
@@ -115,6 +122,7 @@ class TrainingParams:
 @dataclass
 class TaskConfig:
     """Configuration for a specific task, including data params and task-specific config."""
+
     task_name: str
     data_params: DataParams
     task_specific_config: BaseTaskConfig
@@ -149,15 +157,18 @@ class ModelSpec:
             }
         )
     """
+
     constructor_name: str
     params: Dict[str, Any] = field(default_factory=dict)
-    sub_models: Dict[str, 'ModelSpec'] = field(default_factory=dict)
+    sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
 
 
 @dataclass
 class ExperimentConfig:
     # Model specification with support for nested sub-models
-    model_spec: ModelSpec = field(default_factory=lambda: ModelSpec(constructor_name=""))
+    model_spec: ModelSpec = field(
+        default_factory=lambda: ModelSpec(constructor_name="")
+    )
     # Config setter function name. Must be registered using @registry.register_config_setter(). Can provide a list of names to apply multiple setters in order.
     config_setter_name: Optional[str | list[str]] = None
     # Task configuration including task name, data params, and task-specific config

@@ -215,6 +215,15 @@ task_config:
     negative_margin_s: 0.75
 ```
 
+**Example with input_fields** (pass additional DataFrame columns to model):
+```yaml
+task_config:
+  task_name: my_custom_task
+  task_specific_config:
+    input_fields: [word_id, position]  # Columns from DataFrame passed as model kwargs
+    # ... other task-specific params
+```
+
 ---
 
 ## Output Configuration

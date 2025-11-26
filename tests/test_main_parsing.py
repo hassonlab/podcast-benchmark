@@ -148,24 +148,20 @@ class TestNestedAttributeHandling:
     def test_get_nested_value_dataclass(self, sample_experiment_config):
         """Test getting nested values from dataclass."""
         assert (
-            get_nested_value(sample_experiment_config, "model_constructor_name")
+            get_nested_value(sample_experiment_config, "model_spec.constructor_name")
             == "test_model"
         )
         assert (
             get_nested_value(sample_experiment_config, "training_params.batch_size")
             == 32
         )
-        assert (
-            get_nested_value(sample_experiment_config, "data_params.embedding_type")
-            == "gpt-2xl"
-        )
-        assert get_nested_value(sample_experiment_config, "model_params.param2") == 42
+        assert get_nested_value(sample_experiment_config, "model_spec.params.param2") == 42
 
     def test_get_nested_value_mixed(self, sample_experiment_config):
         """Test getting nested values from mixed dict/dataclass structure."""
-        # model_params is a dict inside a dataclass
+        # model_spec.params is a dict inside a dataclass
         assert (
-            get_nested_value(sample_experiment_config, "model_params.param1")
+            get_nested_value(sample_experiment_config, "model_spec.params.param1")
             == "value1"
         )
 
@@ -190,9 +186,9 @@ class TestNestedAttributeHandling:
 
     def test_set_nested_attr_mixed(self, sample_experiment_config):
         """Test setting nested attributes in mixed dict/dataclass."""
-        set_nested_attr(sample_experiment_config, "model_params.new_param", "new_value")
+        set_nested_attr(sample_experiment_config, "model_spec.params.new_param", "new_value")
 
-        assert sample_experiment_config.model_params["new_param"] == "new_value"
+        assert sample_experiment_config.model_spec.params["new_param"] == "new_value"
 
     def test_set_nested_attr_create_path(self):
         """Test setting nested attributes creates intermediate dictionaries."""
@@ -231,36 +227,31 @@ class TestApplyOverrides:
         overrides = {
             "training_params.batch_size": 256,
             "training_params.learning_rate": 0.001,
-            "data_params.embedding_type": "glove",
-            "model_params.new_param": "added_value",
+            "model_spec.params.new_param": "added_value",
         }
 
         modified_config = apply_overrides(sample_experiment_config, overrides)
 
         assert modified_config.training_params.batch_size == 256
         assert modified_config.training_params.learning_rate == 0.001
-        assert modified_config.data_params.embedding_type == "glove"
-        assert modified_config.model_params["new_param"] == "added_value"
+        assert modified_config.model_spec.params["new_param"] == "added_value"
 
         # Original should be unchanged
         assert sample_experiment_config.training_params.batch_size == 32
-        assert sample_experiment_config.data_params.embedding_type == "gpt-2xl"
 
     def test_apply_multiple_overrides(self, sample_experiment_config):
         """Test applying multiple overrides at once."""
         overrides = {
-            "model_constructor_name": "new_model",
+            "model_spec.constructor_name": "new_model",
             "training_params.epochs": 200,
-            "data_params.subject_ids": [5, 6, 7],
-            "model_params.param1": "modified_value",
+            "model_spec.params.param1": "modified_value",
         }
 
         modified_config = apply_overrides(sample_experiment_config, overrides)
 
-        assert modified_config.model_constructor_name == "new_model"
+        assert modified_config.model_spec.constructor_name == "new_model"
         assert modified_config.training_params.epochs == 200
-        assert modified_config.data_params.subject_ids == [5, 6, 7]
-        assert modified_config.model_params["param1"] == "modified_value"
+        assert modified_config.model_spec.params["param1"] == "modified_value"
 
     def test_apply_empty_overrides(self, sample_experiment_config):
         """Test applying empty overrides dictionary."""
@@ -269,8 +260,8 @@ class TestApplyOverrides:
         # Should be identical but different object
         assert modified_config is not sample_experiment_config
         assert (
-            modified_config.model_constructor_name
-            == sample_experiment_config.model_constructor_name
+            modified_config.model_spec.constructor_name
+            == sample_experiment_config.model_spec.constructor_name
         )
         assert (
             modified_config.training_params.batch_size
@@ -288,8 +279,8 @@ class TestApplyOverrides:
         assert type(modified_config.training_params) == type(
             sample_experiment_config.training_params
         )
-        assert type(modified_config.data_params) == type(
-            sample_experiment_config.data_params
+        assert type(modified_config.model_spec) == type(
+            sample_experiment_config.model_spec
         )
 
     def test_override_types_preserved(self, sample_experiment_config):
@@ -297,16 +288,14 @@ class TestApplyOverrides:
         overrides = {
             "training_params.batch_size": 64,  # int
             "training_params.learning_rate": 0.005,  # float
-            "data_params.subject_ids": [1, 2, 3, 4, 5],  # list
-            "model_params.config": {"nested": True},  # dict
+            "model_spec.params.config": {"nested": True},  # dict
         }
 
         modified_config = apply_overrides(sample_experiment_config, overrides)
 
         assert isinstance(modified_config.training_params.batch_size, int)
         assert isinstance(modified_config.training_params.learning_rate, float)
-        assert isinstance(modified_config.data_params.subject_ids, list)
-        assert isinstance(modified_config.model_params["config"], dict)
+        assert isinstance(modified_config.model_spec.params["config"], dict)
 
 
 class TestLoadConfigWithOverrides:
@@ -315,9 +304,9 @@ class TestLoadConfigWithOverrides:
     def test_load_config_with_overrides(self, temp_config_file):
         """Test loading config file and applying overrides."""
         overrides = {
-            "model_constructor_name": "overridden_model",
+            "model_spec.constructor_name": "overridden_model",
             "training_params.batch_size": 256,
-            "model_params.new_param": "added",
+            "model_spec.params.new_param": "added",
         }
 
         config = load_config_with_overrides(temp_config_file, overrides)
@@ -325,15 +314,14 @@ class TestLoadConfigWithOverrides:
         # Should have original values from file
         assert config.config_setter_name == "test_setter"
         assert config.trial_name == "temp_test"
-        assert config.data_params.embedding_type == "gpt-2xl"
 
         # Should have overridden values
-        assert config.model_constructor_name == "overridden_model"
+        assert config.model_spec.constructor_name == "overridden_model"
         assert config.training_params.batch_size == 256
-        assert config.model_params["new_param"] == "added"
+        assert config.model_spec.params["new_param"] == "added"
 
         # Non-overridden values should remain from file
-        assert config.model_params["hidden_dim"] == 256
+        assert config.model_spec.params["hidden_dim"] == 256
         assert config.training_params.learning_rate == 0.001
 
     def test_load_config_no_overrides(self, temp_config_file):
@@ -341,29 +329,26 @@ class TestLoadConfigWithOverrides:
         config = load_config_with_overrides(temp_config_file, {})
 
         # Should match file contents exactly
-        assert config.model_constructor_name == "test_model"
+        assert config.model_spec.constructor_name == "test_model"
         assert config.config_setter_name == "test_setter"
-        assert config.model_params["hidden_dim"] == 256
+        assert config.model_spec.params["hidden_dim"] == 256
         assert config.training_params.batch_size == 64
         assert config.trial_name == "temp_test"
 
     def test_complex_override_scenarios(self, temp_config_file):
         """Test complex override scenarios with various data types."""
         overrides = {
-            "model_params.layer_sizes": [512, 256, 128],
+            "model_spec.params.layer_sizes": [512, 256, 128],
             "training_params.metrics": ["mse", "cosine_sim", "nll_embedding"],
-            "data_params.preprocessor_params": {"new_param": True, "value": 3.14},
-            "format_fields": ["model_params.hidden_dim", "training_params.batch_size"],
+            "format_fields": ["model_spec.params.hidden_dim", "training_params.batch_size"],
         }
 
         config = load_config_with_overrides(temp_config_file, overrides)
 
-        assert config.model_params["layer_sizes"] == [512, 256, 128]
+        assert config.model_spec.params["layer_sizes"] == [512, 256, 128]
         assert config.training_params.metrics == ["mse", "cosine_sim", "nll_embedding"]
-        assert config.data_params.preprocessor_params["new_param"] == True
-        assert config.data_params.preprocessor_params["value"] == 3.14
         assert config.format_fields == [
-            "model_params.hidden_dim",
+            "model_spec.params.hidden_dim",
             "training_params.batch_size",
         ]
 
@@ -373,12 +358,11 @@ class TestArgumentParsingIntegration:
 
     def test_realistic_command_line_scenario(self, temp_config_file):
         """Test a realistic command-line override scenario."""
-        # Simulate args like: python main.py --config file.yml --model_params.lr=0.01 --training_params.epochs=100
+        # Simulate args like: python main.py --config file.yml --model_spec.params.lr=0.01 --training_params.epochs=100
         unknown_args = [
-            "--model_params.learning_rate=0.01",
+            "--model_spec.params.learning_rate=0.01",
             "--training_params.epochs=100",
             "--training_params.batch_size=128",
-            "--data_params.subject_ids=[1,2,3,4]",
             "--trial_name=command_line_test",
         ]
 
@@ -386,15 +370,14 @@ class TestArgumentParsingIntegration:
         config = load_config_with_overrides(temp_config_file, overrides)
 
         # Should combine file config with command-line overrides
-        assert config.model_constructor_name == "test_model"  # from file
-        assert config.model_params["learning_rate"] == 0.01  # from command line
+        assert config.model_spec.constructor_name == "test_model"  # from file
+        assert config.model_spec.params["learning_rate"] == 0.01  # from command line
         assert (
             config.training_params.epochs == 100
         )  # from command line (overrides file's 20)
         assert (
             config.training_params.batch_size == 128
         )  # from command line (overrides file's 64)
-        assert config.data_params.subject_ids == [1, 2, 3, 4]  # from command line
         assert config.trial_name == "command_line_test"  # from command line
 
     def test_override_precedence(self, temp_config_file):

@@ -23,7 +23,8 @@ from tqdm import tqdm
 import mne
 
 from utils import data_utils
-from core.config import TrainingParams, DataParams, ModelSpec
+from utils.dataset import NeuralDictDataset
+from core.config import TrainingParams, TaskConfig, ModelSpec
 from utils.fold_utils import get_sequential_folds, get_zero_shot_folds
 from utils.model_utils import build_model_from_spec
 import metrics
@@ -319,11 +320,12 @@ def should_update_gradient_accumulation(
 
 
 def train_decoding_model(
-    X: np.ndarray,
-    Y: np.ndarray,
-    selected_words: list[str],
+    neural_data: torch.Tensor,
+    Y: torch.Tensor,
+    data_df: pd.DataFrame,
     model_spec: ModelSpec,
     task_name: str,
+    task_config: TaskConfig,
     lag: int,
     training_params: TrainingParams,
     checkpoint_dir: str,
@@ -331,17 +333,9 @@ def train_decoding_model(
     write_to_tensorboard: bool = False,
     tensorboard_dir: str = "event_logs",
 ):
-    # 1. Prepare device & output dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # 2. Convert to tensors if needed
-    if isinstance(X, np.ndarray):
-        X = torch.tensor(X, dtype=torch.float32)
-    if isinstance(Y, np.ndarray):
-        Y = torch.tensor(Y, dtype=torch.float32)
-
-    # 2.5. Shuffle targets if requested (sanity check to verify model is working)
     if training_params.shuffle_targets:
         print(
             "WARNING: Shuffling targets for sanity check. Model should perform poorly."
@@ -356,7 +350,8 @@ def train_decoding_model(
         fold_indices = get_sequential_folds(X, num_folds=training_params.n_folds)
     elif training_params.fold_type == "zero_shot_folds":
         fold_indices = get_zero_shot_folds(
-            selected_words, num_folds=training_params.n_folds
+            data_df[task_config.data_params.word_column].values,
+            num_folds=training_params.n_folds,
         )
     else:
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
@@ -439,11 +434,12 @@ def train_decoding_model(
         if is_train:
             optimizer.zero_grad()
 
-        for i, (Xb, yb) in enumerate(loader):
-            Xb, yb = Xb.to(device), yb.to(device)
+        for i, (neural_data, inputs_dict, yb) in enumerate(loader):
+            inputs_dict = {k: v.to(device) for k, v in inputs_dict.items()}
+            yb = yb.to(device)
 
             if is_train:
-                out = model(Xb)
+                out = model(neural_data, **inputs_dict)
                 loss = compute_loss(out, yb, training_params, all_fns)
                 # Normalize loss to account for gradient accumulation
                 loss = loss / grad_steps
@@ -454,7 +450,7 @@ def train_decoding_model(
                     optimizer.zero_grad()
             else:
                 with torch.no_grad():
-                    out = model(Xb)
+                    out = model(neural_data, **inputs_dict)
                     loss = compute_loss(out, yb, training_params, all_fns)
 
             # Compute all metrics for this batch using the helper function
@@ -518,10 +514,23 @@ def train_decoding_model(
             Y_test_norm = Y[te_idx]
 
         # DataLoaders
+        extra_train_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, tr_idx
+        )
+        extra_val_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, va_idx
+        )
+        extra_test_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, te_idx
+        )
         datasets = {
-            "train": TensorDataset(X[tr_idx], Y_train_norm),
-            "val": TensorDataset(X[va_idx], Y_val_norm),
-            "test": TensorDataset(X[te_idx], Y_test_norm),
+            "train": NeuralDictDataset(
+                neural_data[tr_idx], extra_train_inputs, Y_train_norm
+            ),
+            "val": NeuralDictDataset(neural_data[va_idx], extra_val_inputs, Y_val_norm),
+            "test": NeuralDictDataset(
+                neural_data[te_idx], extra_test_inputs, Y_test_norm
+            ),
         }
         loaders = {
             phase: DataLoader(
@@ -813,12 +822,13 @@ def run_training_over_lags(
     model_spec: ModelSpec,
     task_name: str,
     training_params: TrainingParams,
-    data_params: DataParams,
+    task_config: TaskConfig,
     output_dir="results/",
     checkpoint_dir="checkpoints/",
     write_to_tensorboard=False,
     tensorboard_dir="event_log",
 ):
+    data_params = task_config.data_params
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -845,7 +855,7 @@ def run_training_over_lags(
         print("=" * 60)
 
         # TODO: Support lazy-loading for larger datasets on future tasks.
-        X, Y, selected_words = data_utils.get_data(
+        neural_data, targets, data_df = data_utils.get_data(
             lag,
             raws,
             task_df,
@@ -855,18 +865,18 @@ def run_training_over_lags(
             word_column=data_params.word_column,
         )
 
-        X_tensor = torch.FloatTensor(X)
+        neural_tensor = torch.FloatTensor(neural_data)
         # Handle case where Y contains arrays (e.g., word embeddings)
-        if Y.dtype == object:
-            Y = np.stack(Y)
-        Y_tensor = torch.FloatTensor(Y)
+        if targets.dtype == object:
+            targets = np.stack(targets)
+        targets_tensor = torch.FloatTensor(targets)
 
-        print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
+        print(f"neural_tensor shape: {neural_tensor.shape}")
 
         models, histories, cv_results = train_decoding_model(
-            X_tensor,
-            Y_tensor,
-            selected_words,
+            neural_tensor,
+            targets_tensor,
+            data_df,
             model_spec,
             task_name,
             lag,
