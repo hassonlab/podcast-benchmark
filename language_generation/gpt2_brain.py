@@ -94,6 +94,56 @@ class GPT2Brain(nn.Module):
             brain_sep_embeddings[:, 1:2, :],
         )  # first_sep, last_sep
 
+    def _get_target_predictions(
+        self, outputs, all_attention_mask, target_attention_mask
+    ):
+        """
+        Extract predictions for target tokens only, maintaining batch structure.
+
+        Similar to playground.py's get_target_preds, but returns padded predictions
+        [batch, max_target_tokens, vocab_size] instead of flattened.
+
+        Args:
+            outputs: Model output with logits [batch, seq_len, vocab_size]
+            all_attention_mask: Attention mask for full sequence [batch, seq_len]
+            target_attention_mask: Attention mask for target tokens [batch, max_target_tokens]
+
+        Returns:
+            target_logits: Padded logits for target tokens [batch, max_target_tokens, vocab_size]
+        """
+        # Shift logits and mask to align predictions with next token
+        logits = outputs.logits[:, :-1, :]  # [batch, seq_len-1, vocab_size]
+        all_attention_mask = all_attention_mask[:, 1:]  # [batch, seq_len-1]
+
+        batch_size = logits.shape[0]
+        max_target_tokens = target_attention_mask.shape[1]
+        vocab_size = logits.shape[2]
+
+        # Create output tensor for target predictions
+        target_logits = torch.zeros(
+            batch_size, max_target_tokens, vocab_size, device=self.device
+        )
+
+        # Extract target tokens for each sample in the batch
+        target_mask_sum = torch.sum(target_attention_mask, dim=1).int()
+        all_mask_sum = torch.sum(all_attention_mask, dim=1).int()
+
+        for batch_id in range(batch_size):
+            num_target_tokens = target_mask_sum[batch_id].item()
+            if num_target_tokens == 0:
+                continue
+
+            # Target tokens are at the end of the valid sequence
+            start_idx = all_mask_sum[batch_id] - num_target_tokens
+            end_idx = all_mask_sum[batch_id]
+
+            # Extract target predictions and place in output
+            target_logits[batch_id, :num_target_tokens] = logits[
+                batch_id, start_idx:end_idx
+            ]
+
+        return target_logits
+
     def _convert_to_embeddings(self, neural_data, input_ids, attention_mask):
         """
         Convert neural data and input_ids to combined embedding sequence.
@@ -153,7 +203,14 @@ class GPT2Brain(nn.Module):
 
         return prompt_embeddings, prompt_attention_mask
 
-    def forward(self, neural_data, input_ids, attention_mask):
+    def forward(
+        self,
+        neural_data,
+        all_input_ids,
+        all_attention_mask,
+        target_attention_mask=None,
+        return_all_preds=True,
+    ):
         """
         Forward pass through the model.
 
@@ -161,20 +218,37 @@ class GPT2Brain(nn.Module):
             neural_data: [batch_size, num_channels, num_timepoints]
             input_ids: [batch_size, seq_len]
             attention_mask: [batch_size, seq_len]
+            target_attention_mask: [batch_size, max_target_tokens] - Required if return_all_preds=False
+            return_all_preds: If True, returns predictions for all tokens (default).
+                            If False, returns only predictions for target tokens.
 
         Returns:
-            output: Model output with logits [batch_size, brain_prompt_len + seq_len, vocab_size]
-            updated_attention_mask: [batch_size, brain_prompt_len + seq_len]
+            If return_all_preds=True:
+                output: Model output with logits [batch_size, brain_prompt_len + seq_len, vocab_size]
+                updated_attention_mask: [batch_size, brain_prompt_len + seq_len]
+            If return_all_preds=False:
+                target_logits: Predictions for target tokens [batch_size, max_target_tokens, vocab_size]
         """
+        if not return_all_preds and target_attention_mask is None:
+            raise ValueError(
+                "target_attention_mask must be provided when return_all_preds=False"
+            )
+
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
-            neural_data, input_ids, attention_mask
+            neural_data, all_input_ids, all_attention_mask
         )
 
         output = self.lm_model(
             inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
         )
 
-        return output, prompt_attention_mask
+        if return_all_preds:
+            return output, prompt_attention_mask
+        else:
+            target_logits = self._get_target_predictions(
+                output, prompt_attention_mask, target_attention_mask
+            )
+            return target_logits
 
     def generate(
         self,

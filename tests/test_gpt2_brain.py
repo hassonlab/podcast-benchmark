@@ -701,3 +701,123 @@ class TestGPT2BrainCheckpointing:
         assert model2 is not None
         assert hasattr(model2, "encoder_model")
         assert hasattr(model2, "lm_model")
+
+
+class TestGPT2BrainTargetPredictions:
+    """Test target prediction extraction functionality (return_all_preds=False parameter)"""
+
+    def test_forward_with_return_all_preds_false_requires_target_mask(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test that return_all_preds=False requires target_attention_mask"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            device="cpu",
+            freeze_lm=True,
+        )
+
+        # Should raise error without target_attention_mask
+        with pytest.raises(ValueError, match="target_attention_mask must be provided"):
+            model.forward(
+                neural_data=sample_batch["neural_data"],
+                input_ids=sample_batch["input_ids"],
+                attention_mask=sample_batch["attention_mask"],
+                return_all_preds=False,
+            )
+
+    def test_forward_returns_target_preds_padded(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test that return_all_preds=False returns padded target predictions"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            device="cpu",
+            freeze_lm=True,
+        )
+
+        batch_size = sample_batch["neural_data"].shape[0]
+        max_target_tokens = 3
+        target_attention_mask = torch.zeros(batch_size, max_target_tokens)
+        target_attention_mask[0, :2] = 1  # First sample: 2 target tokens
+        target_attention_mask[1, :1] = 1  # Second sample: 1 target token
+
+        target_preds = model.forward(
+            neural_data=sample_batch["neural_data"],
+            input_ids=sample_batch["input_ids"],
+            attention_mask=sample_batch["attention_mask"],
+            target_attention_mask=target_attention_mask,
+            return_all_preds=False,
+        )
+
+        vocab_size = len(model.tokenizer)
+
+        # Should return padded predictions maintaining batch structure
+        assert target_preds.shape == (batch_size, max_target_tokens, vocab_size)
+        assert target_preds.ndim == 3
+
+    def test_empty_target_mask(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test handling of empty target mask (no target tokens)"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            device="cpu",
+            freeze_lm=True,
+        )
+
+        batch_size = sample_batch["neural_data"].shape[0]
+        max_target_tokens = 3
+        target_attention_mask = torch.zeros(batch_size, max_target_tokens)
+
+        target_preds = model.forward(
+            neural_data=sample_batch["neural_data"],
+            input_ids=sample_batch["input_ids"],
+            attention_mask=sample_batch["attention_mask"],
+            target_attention_mask=target_attention_mask,
+            return_all_preds=False,
+        )
+
+        vocab_size = len(model.tokenizer)
+        # Should still return padded structure even with no valid targets
+        assert target_preds.shape == (batch_size, max_target_tokens, vocab_size)
+
+    def test_full_target_mask(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test with all target tokens valid (no padding)"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            device="cpu",
+            freeze_lm=True,
+        )
+
+        batch_size = sample_batch["neural_data"].shape[0]
+        max_target_tokens = 4
+        target_attention_mask = torch.ones(batch_size, max_target_tokens)
+
+        target_preds = model.forward(
+            neural_data=sample_batch["neural_data"],
+            input_ids=sample_batch["input_ids"],
+            attention_mask=sample_batch["attention_mask"],
+            target_attention_mask=target_attention_mask,
+            return_all_preds=False,
+        )
+
+        vocab_size = len(model.tokenizer)
+        assert target_preds.shape == (batch_size, max_target_tokens, vocab_size)

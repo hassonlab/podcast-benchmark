@@ -145,12 +145,12 @@ def calculate_auc_roc(
     Calculate AUC-ROC score with frequency-based filtering.
 
     Args:
-        predictions: Array of shape [num_samples, num_vocab] where each row is a
+        predictions: Tensor or array of shape [num_samples, num_vocab] where each row is a
                     probability distribution over the vocabulary
-        groundtruth: Array of shape [num_samples] containing class predictions
-        train_frequencies: Array of shape [num_vocab] containing the number of appearances
+        groundtruth: Tensor or array of shape [num_samples] containing class predictions
+        train_frequencies: Tensor or array of shape [num_vocab] containing the number of appearances
                     of each vocab item in train set.
-        test_frequencies: Array of shape [num_vocab] containing the number of appearances
+        test_frequencies: Tensor or array of shape [num_vocab] containing the number of appearances
                     of each vocab item in test set.
         min_train_freq: Minimum number of occurences in train set to include class.
         min_test_freq: Minimum number of occurences in test set to include class.
@@ -160,6 +160,18 @@ def calculate_auc_roc(
                the minimum frequency threshold. 0th is unwieghted, 1st is weighted by train frequency,
                2nd is weighted by test frequency.
     """
+    import torch
+
+    # Convert torch tensors to numpy arrays
+    if isinstance(predictions, torch.Tensor):
+        predictions = predictions.detach().cpu().numpy()
+    if isinstance(groundtruth, torch.Tensor):
+        groundtruth = groundtruth.detach().cpu().numpy()
+    if isinstance(train_frequencies, torch.Tensor):
+        train_frequencies = train_frequencies.detach().cpu().numpy()
+    if isinstance(test_frequencies, torch.Tensor):
+        test_frequencies = test_frequencies.detach().cpu().numpy()
+
     # Ensure frequencies are always arrays for consistent handling
     train_frequencies = np.atleast_1d(train_frequencies)
     test_frequencies = np.atleast_1d(test_frequencies)
@@ -203,20 +215,28 @@ def calculate_auc_roc(
     return avg_auc, train_weighted_auc, test_weighted_auc
 
 
-def top_k_accuracy(predictions: np.ndarray, ground_truth: np.ndarray, k: int) -> float:
+def top_k_accuracy(predictions, ground_truth, k: int) -> float:
     """
     Calculate top-k accuracy for multiclass classification.
 
     Args:
-        predictions: Array of shape [num_samples, num_classes] where each row
+        predictions: Tensor or array of shape [num_samples, num_classes] where each row
                     contains prediction scores/probabilities for each class
-        ground_truth: Array of shape [num_samples] containing the true class
+        ground_truth: Tensor or array of shape [num_samples] containing the true class
                      indices for each sample
         k: Number of top predictions to consider
 
     Returns:
         float: Top-k accuracy as a fraction between 0 and 1
     """
+    import torch
+
+    # Convert torch tensors to numpy arrays
+    if isinstance(predictions, torch.Tensor):
+        predictions = predictions.detach().cpu().numpy()
+    if isinstance(ground_truth, torch.Tensor):
+        ground_truth = ground_truth.detach().cpu().numpy()
+
     if len(predictions) == 0:
         return 0.0
 
