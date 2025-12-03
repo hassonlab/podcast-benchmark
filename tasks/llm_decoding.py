@@ -39,6 +39,7 @@ def llm_decoding_config_setter(
     )
     experiment_config.task_config.task_specific_config.tokenizer = tokenizer
     experiment_config.model_spec.params["lm_model"] = gpt2_model
+    experiment_config.model_spec.params["tokenizer"] = tokenizer
 
     return experiment_config
 

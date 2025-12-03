@@ -434,7 +434,7 @@ class GPT2Brain(nn.Module):
         return model
 
 
-@registry.register_model_constructor()
+@registry.register_model_constructor("gpt2_brain")
 def gpt2_brain_model_constructor(model_params):
     """Construct GPT2Brain model from model_spec."""
     lm_model = model_params["lm_model"]

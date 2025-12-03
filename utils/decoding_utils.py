@@ -621,7 +621,11 @@ def train_decoding_model(
             if should_update_best(cur, best_val, training_params.smaller_is_better):
                 best_val = cur
                 best_epoch = epoch
-                torch.save(model.state_dict(), model_path)
+                # Use model's save_checkpoint method if available, otherwise save state_dict
+                if hasattr(model, 'save_checkpoint') and callable(getattr(model, 'save_checkpoint')):
+                    model.save_checkpoint(model_path)
+                else:
+                    torch.save(model.state_dict(), model_path)
                 patience = 0
             else:
                 patience += 1
