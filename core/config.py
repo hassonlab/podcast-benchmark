@@ -20,6 +20,9 @@ class BaseTaskConfig(ABC):
     # An optional list of inputs which will be passed into the decoder model as additional inputs as
     # kwargs. All fields must be present in the DataFrame returned by the task data getter.
     input_fields: Optional[list[str]] = None
+    # An optional list of config setter names which are specific to your task.
+    # These will be applied in order before any file configured config setters.
+    required_config_setter_names: Optional[list[str]] = None
 
 
 @dataclass
@@ -123,9 +126,11 @@ class TrainingParams:
 class TaskConfig:
     """Configuration for a specific task, including data params and task-specific config."""
 
-    task_name: str
-    data_params: DataParams
-    task_specific_config: BaseTaskConfig
+    task_name: str = "word_embedding_decoding_task"
+    data_params: DataParams = field(default_factory=lambda: DataParams())
+    task_specific_config: BaseTaskConfig = field(
+        default_factory=lambda: BaseTaskConfig()
+    )
 
 
 @dataclass
@@ -173,7 +178,7 @@ class ExperimentConfig:
     config_setter_name: Optional[str | list[str]] = None
     # Task configuration including task name, data params, and task-specific config
     # Note: task_specific_config will be set based on the task_name at runtime
-    task_config: Optional[TaskConfig] = None
+    task_config: TaskConfig = field(default_factory=lambda: TaskConfig())
     # Parameters for training.
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
     # Name for trial. Will be used for separating results in storage. Can use format strings such as

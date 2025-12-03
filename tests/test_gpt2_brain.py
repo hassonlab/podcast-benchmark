@@ -217,7 +217,6 @@ class TestGPT2BrainConstruction:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -239,7 +238,6 @@ class TestGPT2BrainConstruction:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -259,7 +257,6 @@ class TestGPT2BrainConstruction:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -293,7 +290,6 @@ class TestGPT2BrainConstruction:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -302,7 +298,9 @@ class TestGPT2BrainConstruction:
         neural_data = torch.randn(batch_size, 64, 100)
 
         # Include brain tokens in the input_ids to ensure they're used
-        brain_token_ids_tensor = torch.tensor([model.brain_token_ids], dtype=torch.long).repeat(batch_size, 1)
+        brain_token_ids_tensor = torch.tensor(
+            [model.brain_token_ids], dtype=torch.long
+        ).repeat(batch_size, 1)
         regular_tokens = torch.randint(0, 1000, (batch_size, 8))
         input_ids = torch.cat([brain_token_ids_tensor, regular_tokens], dim=1)
         attention_mask = torch.ones(batch_size, input_ids.shape[1])
@@ -354,14 +352,13 @@ class TestGPT2BrainForwardSingleEmbed:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
         output, updated_attention_mask = model(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=sample_batch["attention_mask"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
         )
 
         batch_size, seq_len = sample_batch["input_ids"].shape
@@ -385,7 +382,6 @@ class TestGPT2BrainForwardSingleEmbed:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -396,8 +392,8 @@ class TestGPT2BrainForwardSingleEmbed:
 
         output, updated_attention_mask = model(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=attention_mask,
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=attention_mask,
         )
 
         # First 3 positions should be attended to (brain prompt: <brain/>, embed, </brain>)
@@ -420,14 +416,13 @@ class TestGPT2BrainForwardMultiEmbed:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_multi,
-            device="cpu",
             freeze_lm=True,
         )
 
         output, updated_attention_mask = model(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=sample_batch["attention_mask"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
         )
 
         batch_size, seq_len = sample_batch["input_ids"].shape
@@ -452,7 +447,6 @@ class TestGPT2BrainForwardMultiEmbed:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_multi,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -463,8 +457,8 @@ class TestGPT2BrainForwardMultiEmbed:
 
         output, updated_attention_mask = model(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=attention_mask,
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=attention_mask,
         )
 
         num_neural_tokens = 3  # From mock_encoder_multi
@@ -492,7 +486,6 @@ class TestGPT2BrainGeneration:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
         model.eval()
@@ -525,7 +518,6 @@ class TestGPT2BrainGeneration:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_multi,
-            device="cpu",
             freeze_lm=True,
         )
         model.eval()
@@ -558,7 +550,6 @@ class TestGPT2BrainGeneration:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
         model.eval()
@@ -593,7 +584,6 @@ class TestGPT2BrainCheckpointing:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -628,7 +618,6 @@ class TestGPT2BrainCheckpointing:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
         checkpoint_path = tmp_path / "test_checkpoint.pt"
@@ -649,7 +638,6 @@ class TestGPT2BrainCheckpointing:
             lm_model=new_gpt2_model,
             tokenizer=new_tokenizer,
             encoder_model=new_encoder,
-            device="cpu",
             freeze_lm=True,
         )
         model2.load_checkpoint(str(checkpoint_path))
@@ -678,7 +666,6 @@ class TestGPT2BrainCheckpointing:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
         checkpoint_path = tmp_path / "test_checkpoint.pt"
@@ -694,7 +681,6 @@ class TestGPT2BrainCheckpointing:
             lm_model=new_gpt2_model,
             tokenizer=new_tokenizer,
             encoder_model=new_encoder,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -716,7 +702,6 @@ class TestGPT2BrainTargetPredictions:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -724,8 +709,8 @@ class TestGPT2BrainTargetPredictions:
         with pytest.raises(ValueError, match="target_attention_mask must be provided"):
             model.forward(
                 neural_data=sample_batch["neural_data"],
-                input_ids=sample_batch["input_ids"],
-                attention_mask=sample_batch["attention_mask"],
+                all_input_ids=sample_batch["input_ids"],
+                all_attention_mask=sample_batch["attention_mask"],
                 return_all_preds=False,
             )
 
@@ -739,7 +724,6 @@ class TestGPT2BrainTargetPredictions:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -751,8 +735,8 @@ class TestGPT2BrainTargetPredictions:
 
         target_preds = model.forward(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=sample_batch["attention_mask"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
             target_attention_mask=target_attention_mask,
             return_all_preds=False,
         )
@@ -773,7 +757,6 @@ class TestGPT2BrainTargetPredictions:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -783,8 +766,8 @@ class TestGPT2BrainTargetPredictions:
 
         target_preds = model.forward(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=sample_batch["attention_mask"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
             target_attention_mask=target_attention_mask,
             return_all_preds=False,
         )
@@ -803,7 +786,6 @@ class TestGPT2BrainTargetPredictions:
             lm_model=mock_gpt2_model,
             tokenizer=mock_tokenizer,
             encoder_model=mock_encoder_single,
-            device="cpu",
             freeze_lm=True,
         )
 
@@ -813,8 +795,8 @@ class TestGPT2BrainTargetPredictions:
 
         target_preds = model.forward(
             neural_data=sample_batch["neural_data"],
-            input_ids=sample_batch["input_ids"],
-            attention_mask=sample_batch["attention_mask"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
             target_attention_mask=target_attention_mask,
             return_all_preds=False,
         )

@@ -12,7 +12,7 @@ from core import registry
 from core.config import TaskConfig, DataParams, dict_to_config
 from utils.config_utils import (
     parse_known_args,
-    load_config_with_overrides,
+    load_experiment_config,
     get_nested_value,
 )
 
@@ -49,53 +49,13 @@ def set_seed(seed=42, cudnn_deterministic=False):
 
 def main():
     args, overrides = parse_known_args()
-    experiment_config = load_config_with_overrides(args.config, overrides)
+    experiment_config = load_experiment_config(args.config, overrides)
 
     os.environ["PYTHONHASHSEED"] = str(experiment_config.training_params.random_seed)
     set_seed(
         experiment_config.training_params.random_seed,
         experiment_config.training_params.cudnn_deterministic,
     )
-
-    # Build TaskConfig if not already set
-    if experiment_config.task_config is None:
-        raise ValueError("task_config must be set in experiment configuration")
-
-    # Instantiate TaskConfig from dict if needed
-    if isinstance(experiment_config.task_config, dict):
-        task_config_dict = experiment_config.task_config
-        task_name = task_config_dict["task_name"]
-        task_info = registry.task_registry[task_name]
-
-        # Instantiate DataParams
-        data_params = dict_to_config(task_config_dict["data_params"], DataParams)
-
-        # Instantiate task-specific config
-        config_class = task_info["config_type"]
-        task_specific_config = config_class(**task_config_dict["task_specific_config"])
-
-        # Create TaskConfig
-        experiment_config.task_config = TaskConfig(
-            task_name=task_name,
-            data_params=data_params,
-            task_specific_config=task_specific_config,
-        )
-
-    # Overwrite subject id's and set per-subject electrodes based on file if provided.
-    if experiment_config.task_config.data_params.electrode_file_path:
-        subject_id_map = data_utils.read_subject_mapping(
-            "data/participants.tsv", delimiter="\t"
-        )
-        subject_electrode_map = data_utils.read_electrode_file(
-            experiment_config.task_config.data_params.electrode_file_path,
-            subject_mapping=subject_id_map,
-        )
-        experiment_config.task_config.data_params.subject_ids = list(
-            subject_electrode_map.keys()
-        )
-        experiment_config.task_config.data_params.per_subject_electrodes = (
-            subject_electrode_map
-        )
 
     task_name = experiment_config.task_config.task_name
     task_info = registry.task_registry[task_name]
@@ -105,12 +65,7 @@ def main():
     task_getter = task_info["getter"]
     task_df = task_getter(experiment_config.task_config)
 
-    # Allow user defined function to alter config if necessary for their model.
     if experiment_config.config_setter_name:
-        if not isinstance(experiment_config.config_setter_name, list):
-            experiment_config.config_setter_name = [
-                experiment_config.config_setter_name
-            ]
         for config_setter_name in experiment_config.config_setter_name:
             config_setter_fn = registry.config_setter_registry[config_setter_name]
             experiment_config = config_setter_fn(experiment_config, raws, task_df)

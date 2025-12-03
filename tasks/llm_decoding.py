@@ -1,32 +1,46 @@
-import os
-import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Any
 
 import pandas as pd
-from sklearn.decomposition import PCA
-from gensim.models import KeyedVectors
-import h5py
 import numpy as np
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
 from core import registry
+from language_generation.gpt2_brain import load_gpt2_model_and_tokenizer
 
 
 @dataclass
 class LlmDecodingConfig(BaseTaskConfig):
     """Configuration for llm_decoding_task."""
 
-    input_fields: list[str] = [
-        "all_input_ids",
-        "all_attention_mask",
-        "target_attention_mask",
-    ]
+    input_fields: list[str] = field(
+        default_factory=lambda: [
+            "all_input_ids",
+            "all_attention_mask",
+            "target_attention_mask",
+        ]
+    )
     max_context: int = 32
     max_target_tokens: int = 16
     tokenizer: Optional[Any] = None  # Will be set programmatically
     transcript_path: str = "data/stimuli/podcast_transcript.csv"
     prepend_space: bool = True
+    model_name: str = "gpt2"
+    cache_dir: str = "./model_cache"
+
+
+@registry.register_config_setter()
+def llm_decoding_config_setter(
+    experiment_config: ExperimentConfig, _raws, _task_df
+) -> ExperimentConfig:
+    # Load tokenizer and model into config.
+    tokenizer, gpt2_model = load_gpt2_model_and_tokenizer(
+        cache_dir=experiment_config.task_config.task_specific_config.cache_dir,
+    )
+    experiment_config.task_config.task_specific_config.tokenizer = tokenizer
+    experiment_config.model_spec.params["lm_model"] = gpt2_model
+
+    return experiment_config
 
 
 @registry.register_task_data_getter(config_type=LlmDecodingConfig)

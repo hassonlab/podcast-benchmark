@@ -1,6 +1,20 @@
 import torch
 import torch.nn as nn
 
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+
+from core import registry
+
+
+def load_gpt2_model_and_tokenizer(
+    cache_dir: str,
+    model_name: str = "gpt2",
+):
+    """Load GPT-2 model and tokenizer."""
+    tokenizer = GPT2TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
+    model = GPT2LMHeadModel.from_pretrained(model_name, cache_dir=cache_dir)
+    return model, tokenizer
+
 
 class GPT2Brain(nn.Module):
     """
@@ -15,9 +29,7 @@ class GPT2Brain(nn.Module):
     - [batch_size, num_tokens, embedding_dim]: Multiple embeddings per sample
     """
 
-    def __init__(
-        self, lm_model, tokenizer, encoder_model, device="cpu", freeze_lm=True
-    ):
+    def __init__(self, lm_model, tokenizer, encoder_model, freeze_lm=True):
         """
         Initialize GPT2Brain model.
 
@@ -27,7 +39,6 @@ class GPT2Brain(nn.Module):
             encoder_model: Neural encoder that transforms brain data.
                           Input: [batch_size, num_channels, num_timepoints]
                           Output: [batch_size, embedding_dim] or [batch_size, num_tokens, embedding_dim]
-            device: Device to run model on ('cpu', 'cuda', etc.)
             freeze_lm: Whether to freeze the language model weights (default: True)
         """
         super().__init__()
@@ -35,10 +46,9 @@ class GPT2Brain(nn.Module):
         self.lm_model = lm_model
         self.tokenizer = tokenizer
         self.encoder_model = encoder_model
-        self.device = device
 
-        self.lm_model = self.lm_model.to(device)
-        self.encoder_model = self.encoder_model.to(device)
+        self.lm_model = self.lm_model
+        self.encoder_model = self.encoder_model
 
         # Add brain separator tokens to tokenizer
         brain_tokens = ["<brain/>", "</brain>"]
@@ -78,11 +88,9 @@ class GPT2Brain(nn.Module):
 
             self.lm_model.transformer.wte.weight.register_hook(zero_non_brain_gradients)
 
-    def _get_brain_separator_embeddings(self, batch_size):
+    def _get_brain_separator_embeddings(self, batch_size, device):
         """Get embeddings for brain separator tokens."""
-        brain_token_ids = torch.tensor(
-            self.brain_token_ids, device=self.device
-        ).unsqueeze(0)
+        brain_token_ids = torch.tensor(self.brain_token_ids, device=device).unsqueeze(0)
         brain_token_ids = brain_token_ids.expand(batch_size, 2)  # [batch, 2]
 
         brain_sep_embeddings = self.lm_model.transformer.wte(
@@ -111,6 +119,7 @@ class GPT2Brain(nn.Module):
         Returns:
             target_logits: Padded logits for target tokens [batch, max_target_tokens, vocab_size]
         """
+        device = outputs.logits.device
         # Shift logits and mask to align predictions with next token
         logits = outputs.logits[:, :-1, :]  # [batch, seq_len-1, vocab_size]
         all_attention_mask = all_attention_mask[:, 1:]  # [batch, seq_len-1]
@@ -121,7 +130,7 @@ class GPT2Brain(nn.Module):
 
         # Create output tensor for target predictions
         target_logits = torch.zeros(
-            batch_size, max_target_tokens, vocab_size, device=self.device
+            batch_size, max_target_tokens, vocab_size, device=device
         )
 
         # Extract target tokens for each sample in the batch
@@ -157,6 +166,7 @@ class GPT2Brain(nn.Module):
             prompt_embeddings: [batch_size, brain_prompt_len + seq_len, hidden_size]
             prompt_attention_mask: [batch_size, brain_prompt_len + seq_len]
         """
+        device = input_ids.device
         batch_size = neural_data.shape[0]
 
         neural_embedding = self.encoder_model(
@@ -172,7 +182,7 @@ class GPT2Brain(nn.Module):
         )  # [batch, seq_len, hidden_size]
 
         first_sep_embedding, last_sep_embedding = self._get_brain_separator_embeddings(
-            batch_size
+            batch_size, device
         )
 
         # Concatenate: [<brain/>, neural_embeds, </brain>, input_embeds]
@@ -189,14 +199,12 @@ class GPT2Brain(nn.Module):
         # Create attention mask for brain prompt (always attended to)
         num_neural_tokens = neural_embedding.shape[1]
         brain_prompt_len = num_neural_tokens + 2  # <brain/> + tokens + </brain>
-        brain_attention_mask = torch.ones(
-            batch_size, brain_prompt_len, device=self.device
-        )
+        brain_attention_mask = torch.ones(batch_size, brain_prompt_len, device=device)
 
         prompt_attention_mask = torch.cat(
             [
                 brain_attention_mask,  # [batch, brain_prompt_len]
-                attention_mask.to(self.device),  # [batch, seq_len]
+                attention_mask.to(device),  # [batch, seq_len]
             ],
             dim=1,
         )
@@ -284,6 +292,7 @@ class GPT2Brain(nn.Module):
         Returns:
             generated_ids: [batch_size, seq_len + num_new_tokens] - text token IDs only
         """
+        device = input_ids.device
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
             neural_data, input_ids, attention_mask
         )
@@ -312,7 +321,7 @@ class GPT2Brain(nn.Module):
 
         # Concatenate original input_ids with newly generated tokens
         # generated_tokens contains only the new tokens generated by the model
-        full_sequence = torch.cat([input_ids.to(self.device), generated_tokens], dim=1)
+        full_sequence = torch.cat([input_ids.to(device), generated_tokens], dim=1)
 
         return full_sequence
 
@@ -381,11 +390,11 @@ class GPT2Brain(nn.Module):
         Args:
             path: Filepath to load checkpoint from
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location="cpu")
 
         self.encoder_model.load_state_dict(checkpoint["encoder_model"])
 
-        brain_token_embeddings = checkpoint["brain_token_embeddings"].to(self.device)
+        brain_token_embeddings = checkpoint["brain_token_embeddings"]
         with torch.no_grad():
             for i, token_id in enumerate(self.brain_token_ids):
                 self.lm_model.transformer.wte.weight[token_id] = brain_token_embeddings[
@@ -399,7 +408,6 @@ class GPT2Brain(nn.Module):
         lm_model,
         tokenizer,
         encoder_model,
-        device="cpu",
         freeze_lm=True,
     ):
         """
@@ -410,7 +418,6 @@ class GPT2Brain(nn.Module):
             lm_model: Pretrained GPT2LMHeadModel
             tokenizer: GPT2TokenizerFast tokenizer
             encoder_model: Neural encoder model
-            device: Device to run model on
             freeze_lm: Whether to freeze language model weights
 
         Returns:
@@ -420,9 +427,26 @@ class GPT2Brain(nn.Module):
             lm_model=lm_model,
             tokenizer=tokenizer,
             encoder_model=encoder_model,
-            device=device,
             freeze_lm=freeze_lm,
         )
         model.load_checkpoint(checkpoint_path)
 
         return model
+
+
+@registry.register_model_constructor()
+def gpt2_brain_model_constructor(model_params):
+    """Construct GPT2Brain model from model_spec."""
+    lm_model = model_params["lm_model"]
+    tokenizer = model_params["tokenizer"]
+    encoder_model = model_params["encoder_model"]
+    freeze_lm = model_params.get("freeze_lm", True)
+
+    model = GPT2Brain(
+        lm_model=lm_model,
+        tokenizer=tokenizer,
+        encoder_model=encoder_model,
+        freeze_lm=freeze_lm,
+    )
+
+    return model

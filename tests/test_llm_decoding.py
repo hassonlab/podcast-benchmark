@@ -6,7 +6,6 @@ offset_mapping are identical to the actual tokens in encoding_all, avoiding
 tokenization inconsistencies that would occur with separate tokenization.
 """
 
-import pytest
 import pandas as pd
 import numpy as np
 import tempfile
@@ -39,8 +38,15 @@ class MockTokenizer:
         }
         self.reverse_vocab = {v: k for k, v in self.vocab.items()}
 
-    def __call__(self, texts, max_length=None, padding=None,
-                 return_offsets_mapping=False, return_tensors=None, truncation=None):
+    def __call__(
+        self,
+        texts,
+        max_length=None,
+        padding=None,
+        return_offsets_mapping=False,
+        return_tensors=None,
+        truncation=None,
+    ):
         """Simulate tokenizer behavior with offset mapping."""
         if isinstance(texts, str):
             texts = [texts]
@@ -100,12 +106,14 @@ class TestLLMDecodingTokenAlignment:
     def create_temp_transcript(self, words_data):
         """Create a temporary transcript CSV file."""
         df = pd.DataFrame(words_data)
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
         df.to_csv(temp_file.name, index=False)
         temp_file.close()
         return temp_file.name
 
-    def create_task_config(self, tokenizer, transcript_path, max_context=8, max_target_tokens=4):
+    def create_task_config(
+        self, tokenizer, transcript_path, max_context=8, max_target_tokens=4
+    ):
         """Helper to create a TaskConfig with proper structure."""
         return TaskConfig(
             task_name="llm_decoding",
@@ -115,16 +123,16 @@ class TestLLMDecodingTokenAlignment:
                 max_target_tokens=max_target_tokens,
                 tokenizer=tokenizer,
                 transcript_path=transcript_path,
-                prepend_space=True
-            )
+                prepend_space=True,
+            ),
         )
 
     def test_target_tokens_match_all_encoding_single_token_words(self):
         """Test that target tokens exactly match tokens from encoding_all for single-token words."""
         words_data = {
-            'word': ['the', 'cat', 'sat'],
-            'start': [0.0, 0.5, 1.0],
-            'end': [0.3, 0.8, 1.3]
+            "word": ["the", "cat", "sat"],
+            "start": [0.0, 0.5, 1.0],
+            "end": [0.3, 0.8, 1.3],
         }
 
         transcript_path = self.create_temp_transcript(words_data)
@@ -137,21 +145,24 @@ class TestLLMDecodingTokenAlignment:
 
             # For each sample, verify target tokens appear in all_input_ids
             for idx in range(len(result_df)):
-                all_ids = result_df.iloc[idx]['all_input_ids']
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                all_ids = result_df.iloc[idx]["all_input_ids"]
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Get actual target tokens (non-padding)
                 actual_target = [t for t, m in zip(target_ids, target_mask) if m == 1]
 
                 # Verify target tokens exist in all_input_ids
-                assert len(actual_target) > 0, f"No target tokens found for sample {idx}"
+                assert (
+                    len(actual_target) > 0
+                ), f"No target tokens found for sample {idx}"
 
                 # Find target tokens in all_input_ids
                 all_ids_list = list(all_ids)
                 for token in actual_target:
-                    assert token in all_ids_list, \
-                        f"Target token {token} not found in all_input_ids for sample {idx}"
+                    assert (
+                        token in all_ids_list
+                    ), f"Target token {token} not found in all_input_ids for sample {idx}"
 
         finally:
             os.unlink(transcript_path)
@@ -159,9 +170,9 @@ class TestLLMDecodingTokenAlignment:
     def test_target_tokens_position_in_all_encoding(self):
         """Test that target tokens appear after context tokens in encoding_all."""
         words_data = {
-            'word': ['the', 'cat', 'sat', 'on'],
-            'start': [0.0, 0.5, 1.0, 1.5],
-            'end': [0.3, 0.8, 1.3, 1.8]
+            "word": ["the", "cat", "sat", "on"],
+            "start": [0.0, 0.5, 1.0, 1.5],
+            "end": [0.3, 0.8, 1.3, 1.8],
         }
 
         transcript_path = self.create_temp_transcript(words_data)
@@ -174,10 +185,10 @@ class TestLLMDecodingTokenAlignment:
 
             # Check sample where we have context (not the first word)
             for idx in range(1, len(result_df)):
-                prev_ids = result_df.iloc[idx]['prev_input_ids']
-                all_ids = result_df.iloc[idx]['all_input_ids']
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                prev_ids = result_df.iloc[idx]["prev_input_ids"]
+                all_ids = result_df.iloc[idx]["all_input_ids"]
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Get actual target tokens (non-padding)
                 actual_target = [t for t, m in zip(target_ids, target_mask) if m == 1]
@@ -202,9 +213,9 @@ class TestLLMDecodingTokenAlignment:
         # not from a separate tokenization of the target word alone
 
         words_data = {
-            'word': ['cat', 'dog', 'fox'],
-            'start': [0.0, 0.5, 1.0],
-            'end': [0.3, 0.8, 1.3]
+            "word": ["cat", "dog", "fox"],
+            "start": [0.0, 0.5, 1.0],
+            "end": [0.3, 0.8, 1.3],
         }
 
         transcript_path = self.create_temp_transcript(words_data)
@@ -217,10 +228,10 @@ class TestLLMDecodingTokenAlignment:
 
             # Manually verify that target extraction uses offsets correctly
             for idx in range(len(result_df)):
-                word = result_df.iloc[idx]['word']
-                all_ids = result_df.iloc[idx]['all_input_ids']
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                word = result_df.iloc[idx]["word"]
+                all_ids = result_df.iloc[idx]["all_input_ids"]
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Get actual target tokens
                 actual_target = [t for t, m in zip(target_ids, target_mask) if m == 1]
@@ -228,8 +239,9 @@ class TestLLMDecodingTokenAlignment:
                 # All target tokens should exist in all_ids
                 all_ids_list = list(all_ids)
                 for token in actual_target:
-                    assert token in all_ids_list, \
-                        f"Token {token} for word '{word}' not in all_input_ids"
+                    assert (
+                        token in all_ids_list
+                    ), f"Token {token} for word '{word}' not in all_input_ids"
 
         finally:
             os.unlink(transcript_path)
@@ -237,9 +249,9 @@ class TestLLMDecodingTokenAlignment:
     def test_target_mask_consistency(self):
         """Test that target_attention_mask correctly indicates valid tokens."""
         words_data = {
-            'word': ['the', 'quick', 'brown'],
-            'start': [0.0, 0.5, 1.0],
-            'end': [0.3, 0.8, 1.3]
+            "word": ["the", "quick", "brown"],
+            "start": [0.0, 0.5, 1.0],
+            "end": [0.3, 0.8, 1.3],
         }
 
         transcript_path = self.create_temp_transcript(words_data)
@@ -251,8 +263,8 @@ class TestLLMDecodingTokenAlignment:
             result_df = llm_decoding_task(config)
 
             for idx in range(len(result_df)):
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Verify mask length equals target_ids length
                 assert len(target_ids) == len(target_mask)
@@ -263,18 +275,16 @@ class TestLLMDecodingTokenAlignment:
                         assert mask_val == 0, "Padding token should have mask value 0"
 
                 # Verify at least one non-padding token exists
-                assert sum(target_mask) > 0, "Should have at least one valid target token"
+                assert (
+                    sum(target_mask) > 0
+                ), "Should have at least one valid target token"
 
         finally:
             os.unlink(transcript_path)
 
     def test_max_target_tokens_truncation(self):
         """Test that target tokens are properly truncated to max_target_tokens."""
-        words_data = {
-            'word': ['cat', 'dog'],
-            'start': [0.0, 0.5],
-            'end': [0.3, 0.8]
-        }
+        words_data = {"word": ["cat", "dog"], "start": [0.0, 0.5], "end": [0.3, 0.8]}
 
         transcript_path = self.create_temp_transcript(words_data)
 
@@ -282,13 +292,15 @@ class TestLLMDecodingTokenAlignment:
             tokenizer = MockTokenizer()
             max_target_tokens = 2
 
-            config = self.create_task_config(tokenizer, transcript_path, max_target_tokens=max_target_tokens)
+            config = self.create_task_config(
+                tokenizer, transcript_path, max_target_tokens=max_target_tokens
+            )
 
             result_df = llm_decoding_task(config)
 
             for idx in range(len(result_df)):
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Verify length doesn't exceed max_target_tokens
                 assert len(target_ids) == max_target_tokens
@@ -299,11 +311,7 @@ class TestLLMDecodingTokenAlignment:
 
     def test_max_target_tokens_padding(self):
         """Test that target tokens are properly padded when shorter than max_target_tokens."""
-        words_data = {
-            'word': ['a', 'cat'],
-            'start': [0.0, 0.5],
-            'end': [0.3, 0.8]
-        }
+        words_data = {"word": ["a", "cat"], "start": [0.0, 0.5], "end": [0.3, 0.8]}
 
         transcript_path = self.create_temp_transcript(words_data)
 
@@ -311,20 +319,22 @@ class TestLLMDecodingTokenAlignment:
             tokenizer = MockTokenizer()
             max_target_tokens = 10  # Much larger than needed
 
-            config = self.create_task_config(tokenizer, transcript_path, max_target_tokens=max_target_tokens)
+            config = self.create_task_config(
+                tokenizer, transcript_path, max_target_tokens=max_target_tokens
+            )
 
             result_df = llm_decoding_task(config)
 
             for idx in range(len(result_df)):
-                target_ids = result_df.iloc[idx]['target_input_ids']
-                target_mask = result_df.iloc[idx]['target_attention_mask']
+                target_ids = result_df.iloc[idx]["target"]
+                target_mask = result_df.iloc[idx]["target_attention_mask"]
 
                 # Verify length is exactly max_target_tokens
                 assert len(target_ids) == max_target_tokens
                 assert len(target_mask) == max_target_tokens
 
                 # Count padding tokens
-                padding_count = sum(1 for t in target_ids if t == 0)
+                padding_count = sum(1 for t in target_ids if t == -100)
                 assert padding_count > 0, "Should have padding for short words"
 
                 # Verify padding tokens have mask value 0
@@ -339,9 +349,9 @@ class TestLLMDecodingTokenAlignment:
         """Test that offset mapping correctly identifies target token boundaries."""
         # This is a more detailed test of the core fix
         words_data = {
-            'word': ['the', 'cat', 'sat'],
-            'start': [0.0, 0.5, 1.0],
-            'end': [0.3, 0.8, 1.3]
+            "word": ["the", "cat", "sat"],
+            "start": [0.0, 0.5, 1.0],
+            "end": [0.3, 0.8, 1.3],
         }
 
         transcript_path = self.create_temp_transcript(words_data)
@@ -354,7 +364,7 @@ class TestLLMDecodingTokenAlignment:
             context_windows = []
             targets = []
 
-            all_words = ['the', 'cat', 'sat']
+            all_words = ["the", "cat", "sat"]
             for i, word in enumerate(all_words):
                 min_idx = max(0, i - 8)
                 context = " ".join(all_words[min_idx:i])
@@ -369,25 +379,22 @@ class TestLLMDecodingTokenAlignment:
                 target_end_char = target_start_char + len(target)
 
                 # Verify our offset calculation is correct
-                assert full_text[target_start_char:target_end_char] == target, \
-                    f"Offset calculation incorrect for '{target}'"
+                assert (
+                    full_text[target_start_char:target_end_char] == target
+                ), f"Offset calculation incorrect for '{target}'"
 
             # Now run the actual function
             result_df = llm_decoding_task(config)
 
             # Verify we got results
-            assert len(result_df) == len(words_data['word'])
+            assert len(result_df) == len(words_data["word"])
 
         finally:
             os.unlink(transcript_path)
 
     def test_empty_context_first_word(self):
         """Test that first word with empty context is handled correctly."""
-        words_data = {
-            'word': ['the', 'cat'],
-            'start': [0.0, 0.5],
-            'end': [0.3, 0.8]
-        }
+        words_data = {"word": ["the", "cat"], "start": [0.0, 0.5], "end": [0.3, 0.8]}
 
         transcript_path = self.create_temp_transcript(words_data)
 
@@ -398,12 +405,14 @@ class TestLLMDecodingTokenAlignment:
             result_df = llm_decoding_task(config)
 
             # First word should have empty/minimal context
-            first_prev_ids = result_df.iloc[0]['prev_input_ids']
-            first_target_ids = result_df.iloc[0]['target_input_ids']
-            first_target_mask = result_df.iloc[0]['target_attention_mask']
+            first_prev_ids = result_df.iloc[0]["prev_input_ids"]
+            first_target_ids = result_df.iloc[0]["target"]
+            first_target_mask = result_df.iloc[0]["target_attention_mask"]
 
             # Should still have valid target tokens
-            actual_target = [t for t, m in zip(first_target_ids, first_target_mask) if m == 1]
+            actual_target = [
+                t for t, m in zip(first_target_ids, first_target_mask) if m == 1
+            ]
             assert len(actual_target) > 0, "First word should have target tokens"
 
         finally:

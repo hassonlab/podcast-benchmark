@@ -3,13 +3,16 @@ Configuration utilities for argument parsing and config overrides.
 
 This module contains the testable configuration logic extracted from main.py.
 """
+
 import argparse
 from dataclasses import is_dataclass
 import yaml
 from typing import Any, Union
 from copy import deepcopy
 
-from core.config import ExperimentConfig, dict_to_config
+from core.config import ExperimentConfig, TaskConfig, DataParams, dict_to_config
+from core import registry
+from utils import data_utils
 
 
 def parse_known_args():
@@ -33,7 +36,9 @@ def parse_override_args(unknown_args):
             key, val = arg[2:].split("=", 1)
             # Skip malformed args with empty keys or values
             if key and val:
-                overrides[key] = yaml.safe_load(val)  # preserve types like int, float, bool
+                overrides[key] = yaml.safe_load(
+                    val
+                )  # preserve types like int, float, bool
     return overrides
 
 
@@ -87,16 +92,76 @@ def apply_overrides(config, overrides):
     return config
 
 
-def load_config(config_path) -> ExperimentConfig:
-    """Load config from YAML file."""
-    with open(config_path, "r") as f:
-        experiment_config = yaml.safe_load(f)
-    return dict_to_config(experiment_config, ExperimentConfig)
-
-
-def load_config_with_overrides(config_path: str, overrides: dict):
-    """Load config from YAML file and apply command-line overrides."""
+def load_experiment_config(
+    config_path: str, overrides: dict, subject_mapping_file="data/participants.tsv"
+) -> ExperimentConfig:
+    """Load experiment config from file and apply overrides. Ensures correct task config is loaded."""
+    # Load raw config and apply overrides, but keep task_config as dict
     with open(config_path, "r") as f:
         raw_cfg = yaml.safe_load(f)
-    base_config = dict_to_config(raw_cfg, ExperimentConfig)
-    return apply_overrides(base_config, overrides)
+
+    # Apply overrides to raw dict first
+    raw_cfg = apply_overrides(raw_cfg, overrides)
+
+    # Keep task_config as dict for now
+    task_config_dict = raw_cfg.pop("task_config", {})
+
+    # Convert everything except task_config to ExperimentConfig
+    experiment_config = dict_to_config(raw_cfg, ExperimentConfig)
+
+    # Now handle task_config separately
+    if isinstance(task_config_dict, dict) and task_config_dict:
+        task_name = task_config_dict["task_name"]
+        task_info = registry.task_registry[task_name]
+
+        # Instantiate DataParams
+        data_params = dict_to_config(task_config_dict["data_params"], DataParams)
+
+        # Instantiate task-specific config
+        config_class = task_info["config_type"]
+        task_specific_config = dict_to_config(
+            task_config_dict["task_specific_config"], config_class
+        )
+
+        # Create TaskConfig
+        experiment_config.task_config = TaskConfig(
+            task_name=task_name,
+            data_params=data_params,
+            task_specific_config=task_specific_config,
+        )
+
+    # Overwrite subject id's and set per-subject electrodes based on file if provided.
+    if experiment_config.task_config.data_params.electrode_file_path:
+        subject_id_map = data_utils.read_subject_mapping(
+            subject_mapping_file, delimiter="\t"
+        )
+        subject_electrode_map = data_utils.read_electrode_file(
+            experiment_config.task_config.data_params.electrode_file_path,
+            subject_mapping=subject_id_map,
+        )
+        experiment_config.task_config.data_params.subject_ids = list(
+            subject_electrode_map.keys()
+        )
+        experiment_config.task_config.data_params.per_subject_electrodes = (
+            subject_electrode_map
+        )
+
+    # Allow user defined function to alter config if necessary for their model.
+    task_specific_config_setters = (
+        experiment_config.task_config.task_specific_config.required_config_setter_names
+    )
+    if experiment_config.config_setter_name or task_specific_config_setters:
+        if experiment_config.config_setter_name and not isinstance(
+            experiment_config.config_setter_name, list
+        ):
+            experiment_config.config_setter_name = [
+                experiment_config.config_setter_name
+            ]
+        if task_specific_config_setters:
+            if experiment_config.config_setter_name is None:
+                experiment_config.config_setter_name = []
+            experiment_config.config_setter_name = (
+                task_specific_config_setters + experiment_config.config_setter_name
+            )
+
+    return experiment_config

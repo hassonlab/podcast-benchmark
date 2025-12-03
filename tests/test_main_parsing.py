@@ -11,7 +11,7 @@ from utils.config_utils import (
     apply_overrides,
     set_nested_attr,
     get_nested_value,
-    load_config_with_overrides,
+    load_experiment_config,
 )
 
 
@@ -298,96 +298,216 @@ class TestApplyOverrides:
         assert isinstance(modified_config.model_spec.params["config"], dict)
 
 
-class TestLoadConfigWithOverrides:
-    """Test loading config from file with overrides applied."""
+class TestLoadExperimentConfig:
+    """Test load_experiment_config function for loading and processing complete experiment configs."""
 
-    def test_load_config_with_overrides(self, temp_config_file):
-        """Test loading config file and applying overrides."""
+    def test_load_task_specific_config(self, temp_task_config_file, mock_task_registry):
+        """Test that task-specific config is correctly loaded and instantiated."""
+        overrides = {}
+
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        # Verify task config was converted from dict to TaskConfig
+        from core.config import TaskConfig
+        assert isinstance(config.task_config, TaskConfig)
+        assert config.task_config.task_name == "test_task"
+        assert config.task_config.data_params.window_width == 0.5
+        assert config.task_config.data_params.subject_ids == [1, 2, 3]
+
+        # Verify task-specific config was instantiated correctly
+        from tests.conftest import TestTaskConfig
+        assert isinstance(config.task_config.task_specific_config, TestTaskConfig)
+        assert config.task_config.task_specific_config.test_param == "test_value"
+        assert config.task_config.task_specific_config.input_fields == ["field1", "field2"]
+
+    def test_electrode_file_overrides_per_subject_electrodes(
+        self, temp_task_config_with_electrode_file, mock_task_registry,
+        temp_electrode_file, temp_subject_mapping
+    ):
+        """Test that electrode_file_path correctly overrides per_subject_electrodes."""
+        overrides = {}
+
+        config = load_experiment_config(
+            temp_task_config_with_electrode_file,
+            overrides,
+            subject_mapping_file=temp_subject_mapping
+        )
+
+        # Verify subject_ids were set from electrode file
+        assert set(config.task_config.data_params.subject_ids) == {5, 12}
+
+        # Verify per_subject_electrodes was populated correctly
+        assert config.task_config.data_params.per_subject_electrodes is not None
+        assert 5 in config.task_config.data_params.per_subject_electrodes
+        assert 12 in config.task_config.data_params.per_subject_electrodes
+        assert config.task_config.data_params.per_subject_electrodes[5] == ["A1", "A2", "B1"]
+        assert config.task_config.data_params.per_subject_electrodes[12] == ["C1", "C2"]
+
+    def test_config_setter_name_with_required_setters(self, temp_task_config_file, mock_task_registry):
+        """Test that config_setter_name correctly combines with required_config_setter_names."""
+        overrides = {"config_setter_name": "user_setter"}
+
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        # Verify that required_config_setter_names are prepended to config_setter_name
+        assert isinstance(config.config_setter_name, list)
+        assert config.config_setter_name == ["required_setter1", "required_setter2", "user_setter"]
+
+    def test_config_setter_name_list_with_required_setters(self, temp_task_config_file, mock_task_registry):
+        """Test that config_setter_name list correctly combines with required_config_setter_names."""
+        overrides = {"config_setter_name": ["user_setter1", "user_setter2"]}
+
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        # Verify that required_config_setter_names are prepended to config_setter_name list
+        assert isinstance(config.config_setter_name, list)
+        assert config.config_setter_name == ["required_setter1", "required_setter2", "user_setter1", "user_setter2"]
+
+    def test_config_setter_name_only_required(self, temp_task_config_file_no_setter, mock_task_registry):
+        """Test that required_config_setter_names work when no config_setter_name is provided."""
+        overrides = {}
+
+        config = load_experiment_config(temp_task_config_file_no_setter, overrides)
+
+        # Verify only required setters are present
+        assert isinstance(config.config_setter_name, list)
+        assert config.config_setter_name == ["required_setter1", "required_setter2"]
+
+    def test_config_setter_name_no_required(self, temp_task_config_file_no_required_setters, mock_task_registry):
+        """Test that config_setter_name works when no required_config_setter_names are provided."""
+        overrides = {"config_setter_name": "user_setter"}
+
+        config = load_experiment_config(temp_task_config_file_no_required_setters, overrides)
+
+        # Verify only user setter is present as a list
+        assert isinstance(config.config_setter_name, list)
+        assert config.config_setter_name == ["user_setter"]
+
+    def test_no_config_setters(self, temp_task_config_file_no_setters_at_all, mock_task_registry):
+        """Test that config loads correctly when no config setters are provided at all."""
+        overrides = {}
+
+        config = load_experiment_config(temp_task_config_file_no_setters_at_all, overrides)
+
+        # Verify config_setter_name remains None
+        assert config.config_setter_name is None
+
+    def test_overrides_applied_before_task_config_loading(self, temp_task_config_file, mock_task_registry):
+        """Test that overrides are applied before task config is instantiated."""
         overrides = {
-            "model_spec.constructor_name": "overridden_model",
-            "training_params.batch_size": 256,
-            "model_spec.params.new_param": "added",
+            "task_config.data_params.window_width": 1.5,
+            "task_config.task_specific_config.test_param": "overridden_value"
         }
 
-        config = load_config_with_overrides(temp_config_file, overrides)
+        config = load_experiment_config(temp_task_config_file, overrides)
 
-        # Should have original values from file
-        assert config.config_setter_name == "test_setter"
-        assert config.trial_name == "temp_test"
-
-        # Should have overridden values
-        assert config.model_spec.constructor_name == "overridden_model"
-        assert config.training_params.batch_size == 256
-        assert config.model_spec.params["new_param"] == "added"
-
-        # Non-overridden values should remain from file
-        assert config.model_spec.params["hidden_dim"] == 256
-        assert config.training_params.learning_rate == 0.001
-
-    def test_load_config_no_overrides(self, temp_config_file):
-        """Test loading config file without overrides."""
-        config = load_config_with_overrides(temp_config_file, {})
-
-        # Should match file contents exactly
-        assert config.model_spec.constructor_name == "test_model"
-        assert config.config_setter_name == "test_setter"
-        assert config.model_spec.params["hidden_dim"] == 256
-        assert config.training_params.batch_size == 64
-        assert config.trial_name == "temp_test"
-
-    def test_complex_override_scenarios(self, temp_config_file):
-        """Test complex override scenarios with various data types."""
-        overrides = {
-            "model_spec.params.layer_sizes": [512, 256, 128],
-            "training_params.metrics": ["mse", "cosine_sim", "nll_embedding"],
-            "format_fields": ["model_spec.params.hidden_dim", "training_params.batch_size"],
-        }
-
-        config = load_config_with_overrides(temp_config_file, overrides)
-
-        assert config.model_spec.params["layer_sizes"] == [512, 256, 128]
-        assert config.training_params.metrics == ["mse", "cosine_sim", "nll_embedding"]
-        assert config.format_fields == [
-            "model_spec.params.hidden_dim",
-            "training_params.batch_size",
-        ]
+        # Verify overrides were applied
+        assert config.task_config.data_params.window_width == 1.5
+        assert config.task_config.task_specific_config.test_param == "overridden_value"
 
 
-class TestArgumentParsingIntegration:
-    """Test integration with argparse-style argument parsing."""
+class TestExperimentConfigCLIIntegration:
+    """Test integration of load_experiment_config with CLI-style argument parsing."""
 
-    def test_realistic_command_line_scenario(self, temp_config_file):
-        """Test a realistic command-line override scenario."""
+    def test_realistic_command_line_scenario(self, temp_task_config_file, mock_task_registry):
+        """Test a realistic command-line override scenario with task config."""
         # Simulate args like: python main.py --config file.yml --model_spec.params.lr=0.01 --training_params.epochs=100
         unknown_args = [
             "--model_spec.params.learning_rate=0.01",
             "--training_params.epochs=100",
             "--training_params.batch_size=128",
             "--trial_name=command_line_test",
+            "--task_config.data_params.window_width=1.0",
         ]
 
         overrides = parse_override_args(unknown_args)
-        config = load_config_with_overrides(temp_config_file, overrides)
+        config = load_experiment_config(temp_task_config_file, overrides)
 
-        # Should combine file config with command-line overrides
-        assert config.model_spec.constructor_name == "test_model"  # from file
-        assert config.model_spec.params["learning_rate"] == 0.01  # from command line
-        assert (
-            config.training_params.epochs == 100
-        )  # from command line (overrides file's 20)
-        assert (
-            config.training_params.batch_size == 128
-        )  # from command line (overrides file's 64)
-        assert config.trial_name == "command_line_test"  # from command line
+        # Should have overridden values from command line
+        assert config.model_spec.params["learning_rate"] == 0.01
+        assert config.training_params.epochs == 100
+        assert config.training_params.batch_size == 128
+        assert config.trial_name == "command_line_test"
+        assert config.task_config.data_params.window_width == 1.0
 
-    def test_override_precedence(self, temp_config_file):
+        # Should still have original values from file for non-overridden fields
+        assert config.model_spec.constructor_name == "test_model"
+        assert config.model_spec.params["hidden_dim"] == 256
+        assert config.training_params.learning_rate == 0.001
+        assert config.task_config.task_name == "test_task"
+
+    def test_override_precedence(self, temp_task_config_file, mock_task_registry):
         """Test that command-line overrides take precedence over file values."""
-        # Both file and command line specify batch_size
-        overrides = {"training_params.batch_size": 999}
+        # Both file and command line specify batch_size and window_width
+        overrides = {
+            "training_params.batch_size": 999,
+            "task_config.data_params.window_width": 2.5,
+        }
 
-        config = load_config_with_overrides(temp_config_file, overrides)
+        config = load_experiment_config(temp_task_config_file, overrides)
 
         # Command line should win
         assert config.training_params.batch_size == 999
+        assert config.task_config.data_params.window_width == 2.5
         # Other file values should remain
         assert config.training_params.learning_rate == 0.001
+        assert config.task_config.data_params.subject_ids == [1, 2, 3]
+
+    def test_override_task_specific_config_fields(self, temp_task_config_file, mock_task_registry):
+        """Test overriding fields in task-specific config via CLI."""
+        unknown_args = [
+            "--task_config.task_specific_config.test_param=cli_override",
+            "--task_config.task_specific_config.input_fields=[field3,field4,field5]",
+        ]
+
+        overrides = parse_override_args(unknown_args)
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        # Verify task-specific config overrides were applied
+        assert config.task_config.task_specific_config.test_param == "cli_override"
+        assert config.task_config.task_specific_config.input_fields == ["field3", "field4", "field5"]
+
+    def test_override_with_complex_types(self, temp_task_config_file, mock_task_registry):
+        """Test CLI overrides with complex data types (lists, dicts)."""
+        unknown_args = [
+            "--model_spec.params.layer_sizes=[512,256,128]",
+            "--training_params.metrics=[mse,cosine_sim,nll_embedding]",
+            "--task_config.data_params.subject_ids=[5,6,7,8,9]",
+        ]
+
+        overrides = parse_override_args(unknown_args)
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        assert config.model_spec.params["layer_sizes"] == [512, 256, 128]
+        assert config.training_params.metrics == ["mse", "cosine_sim", "nll_embedding"]
+        assert config.task_config.data_params.subject_ids == [5, 6, 7, 8, 9]
+
+    def test_override_config_setter_name_via_cli(self, temp_task_config_file, mock_task_registry):
+        """Test overriding config_setter_name via CLI arguments."""
+        unknown_args = ["--config_setter_name=cli_setter"]
+
+        overrides = parse_override_args(unknown_args)
+        config = load_experiment_config(temp_task_config_file, overrides)
+
+        # Should have required setters prepended to CLI-provided setter
+        assert config.config_setter_name == ["required_setter1", "required_setter2", "cli_setter"]
+
+    def test_multiple_override_sources(self, temp_task_config_file, mock_task_registry):
+        """Test combining overrides from multiple sources (simulating mixed CLI args)."""
+        # First set of args
+        args_batch1 = ["--training_params.batch_size=64", "--model_spec.params.dropout=0.3"]
+        overrides1 = parse_override_args(args_batch1)
+
+        # Second set of args (simulating user adding more)
+        args_batch2 = ["--task_config.data_params.window_width=0.75"]
+        overrides2 = parse_override_args(args_batch2)
+
+        # Combine overrides
+        combined_overrides = {**overrides1, **overrides2}
+
+        config = load_experiment_config(temp_task_config_file, combined_overrides)
+
+        # All overrides should be applied
+        assert config.training_params.batch_size == 64
+        assert config.model_spec.params["dropout"] == 0.3
+        assert config.task_config.data_params.window_width == 0.75

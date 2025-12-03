@@ -99,14 +99,13 @@ def compute_word_embedding_task_metrics(
 
     # Measure performance based on each individual word occurrence
     occurence_scores, _, _ = compute_class_scores(distances)
-    occurence_scores_np = occurence_scores.cpu().numpy()
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
         results[f"test_occurence_top_{k_val}"] = top_k_accuracy(
-            occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
+            occurence_scores, torch.arange(occurence_scores.shape[0], device=device), k_val
         )
     results["test_occurence_perplexity"] = perplexity(
-        occurence_scores_np, np.arange(occurence_scores_np.shape[0])
+        occurence_scores, torch.arange(occurence_scores.shape[0], device=device)
     )
 
     # Group by words for an easier task.
@@ -116,26 +115,29 @@ def compute_word_embedding_task_metrics(
     position_to_id = np.array(position_to_id)
 
     word_scores, _, test_class_idxs = compute_class_scores(
-        distances, torch.from_numpy(position_to_id[test_index])
+        distances, torch.from_numpy(position_to_id[test_index]).to(device)
     )
     # Get a mapping from over-all class index -> test class index.
+    test_class_idxs_np = test_class_idxs.cpu().numpy()
     class_to_test_idxs = np.empty(np.max(position_to_id) + 1, dtype=int)
-    class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
+    class_to_test_idxs[test_class_idxs_np] = np.arange(len(test_class_idxs_np))
 
-    word_scores_np = word_scores.cpu().numpy()
     train_frequencies = np.bincount(
         position_to_id[train_index], minlength=np.max(position_to_id) + 1
     )
     # Limit train frequencies to only those in the test set.
-    train_frequencies = train_frequencies[test_class_idxs]
+    train_frequencies = train_frequencies[test_class_idxs_np]
 
     test_frequencies = np.bincount(
         position_to_id[test_index], minlength=np.max(position_to_id) + 1
     )
-    test_frequencies = test_frequencies[test_class_idxs]
+    test_frequencies = test_frequencies[test_class_idxs_np]
 
     # Translate to vocab of word ID's.
     test_word_ids = class_to_test_idxs[position_to_id[test_index]]
+
+    # For calculate_auc_roc, pass numpy arrays (it converts internally anyway)
+    word_scores_np = word_scores.cpu().numpy()
     avg_auc, train_weighted_auc, test_weighted_auc = calculate_auc_roc(
         word_scores_np,
         test_word_ids,
@@ -148,11 +150,13 @@ def compute_word_embedding_task_metrics(
     results["test_word_train_weighted_auc_roc"] = train_weighted_auc
     results["test_word_test_weighted_auc_roc"] = test_weighted_auc
 
+    # For top_k_accuracy and perplexity, use torch tensors
+    test_word_ids_tensor = torch.from_numpy(test_word_ids).to(device)
     for k_val in top_k_thresholds:
         results[f"test_word_top_{k_val}"] = top_k_accuracy(
-            word_scores_np, test_word_ids, k_val
+            word_scores, test_word_ids_tensor, k_val
         )
-    results["test_word_perplexity"] = perplexity(word_scores_np, test_word_ids)
+    results["test_word_perplexity"] = perplexity(word_scores, test_word_ids_tensor)
 
     return results
 
