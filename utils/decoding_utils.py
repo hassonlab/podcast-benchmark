@@ -679,11 +679,11 @@ def train_decoding_model(
             # TODO: figure out how we want to generalize evaluation inference vs training inference better.
             # Key focus on preserve_ensemble argument.
             results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
-                X[te_idx],
+                neural_data[te_idx],
                 Y[te_idx],
                 model,
                 device,
-                selected_words,
+                data_df[task_config.data_params.word_column],
                 te_idx,
                 tr_idx,
                 training_params.top_k_thresholds,
