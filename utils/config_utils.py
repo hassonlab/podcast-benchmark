@@ -120,7 +120,7 @@ def load_experiment_config(
         # Instantiate task-specific config
         config_class = task_info["config_type"]
         task_specific_config = dict_to_config(
-            task_config_dict["task_specific_config"], config_class
+            task_config_dict.get("task_specific_config", {}), config_class
         )
 
         # Create TaskConfig
