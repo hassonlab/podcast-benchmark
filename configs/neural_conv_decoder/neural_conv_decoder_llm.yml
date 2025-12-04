@@ -30,7 +30,7 @@ model_spec:
     freeze_lm: true
   sub_models:
     encoder_model:
-      constructor_name: neural_conv_encoder
+      constructor_name: ensemble_pitom_model
       params:
         conv_filters: 128
         dropout: 0.2
