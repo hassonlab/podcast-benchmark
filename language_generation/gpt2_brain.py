@@ -445,8 +445,9 @@ class GPT2Brain(nn.Module):
 @registry.register_model_constructor("gpt2_brain")
 def gpt2_brain_model_constructor(model_params):
     """Construct GPT2Brain model from model_spec."""
-    lm_model = model_params["lm_model"]
-    tokenizer = model_params["tokenizer"]
+    lm_model, tokenizer = (
+        load_gpt2_model_and_tokenizer(cache_dir=model_params.get("cache_dir", None)),
+    )
     encoder_model = model_params["encoder_model"]
     freeze_lm = model_params.get("freeze_lm", True)
 

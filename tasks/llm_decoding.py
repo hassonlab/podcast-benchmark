@@ -3,11 +3,11 @@ from typing import Optional, Any
 
 import pandas as pd
 import numpy as np
-import torch
 
-from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
+from core.config import BaseTaskConfig, TaskConfig
 from core import registry
 from language_generation.gpt2_brain import load_gpt2_model_and_tokenizer
+from models.shared_config_setters import set_model_spec_fields
 
 
 @dataclass
@@ -35,24 +35,27 @@ class LlmDecodingConfig(BaseTaskConfig):
 
 @registry.register_config_setter()
 def llm_decoding_config_setter(
-    experiment_config: ExperimentConfig, _raws, _task_df
-) -> ExperimentConfig:
-    # Load tokenizer and model into config.
-    gpt2_model, tokenizer = load_gpt2_model_and_tokenizer(
-        cache_dir=experiment_config.task_config.task_specific_config.cache_dir,
-    )
-    experiment_config.task_config.task_specific_config.tokenizer = tokenizer
-    experiment_config.model_spec.params["lm_model"] = gpt2_model
-    experiment_config.model_spec.params["tokenizer"] = tokenizer
-
+    experiment_config: TaskConfig, _raws, _task_df
+) -> TaskConfig:
+    """Config setter for llm_decoding task."""
+    if not set_model_spec_fields(
+        experiment_config.model_spec,
+        {"cache_dir": experiment_config.task_specific_config.cache_dir},
+        ["gpt2_brain"],
+    ):
+        raise ValueError(
+            "Could not set cache_dir for gpt2_brain in llm_decoding_config_setter."
+        )
     return experiment_config
 
 
 @registry.register_task_data_getter(config_type=LlmDecodingConfig)
 def llm_decoding_task(task_config: TaskConfig):
-    """Task for LLM decoding (incomplete implementation)."""
+    """Task for LLM decoding."""
     config: LlmDecodingConfig = task_config.task_specific_config
-    tokenizer = config.tokenizer
+    _, tokenizer = load_gpt2_model_and_tokenizer(
+        cache_dir=task_config.task_specific_config.cache_dir,
+    )
     max_context = config.max_context
     max_target_tokens = config.max_target_tokens
 
