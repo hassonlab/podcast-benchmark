@@ -2,23 +2,22 @@
 
 import pytest
 from core.config import ModelSpec
-from models.shared_config_setters import _set_model_spec_input_channels
+from models.shared_config_setters import set_model_spec_fields
 
 
 def test_set_input_channels_override_when_constructor_names_is_none():
     """Test that it correctly overrides the parameter value when model_spec_constructor_names is None."""
     # Create a simple ModelSpec
     model_spec = ModelSpec(
-        constructor_name="test_model",
-        params={"input_channels": 10, "output_dim": 5}
+        constructor_name="test_model", params={"input_channels": 10, "output_dim": 5}
     )
 
     # Call the function with model_spec_constructor_names=None
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         model_spec,
-        num_electrodes,
-        model_spec_constructor_names=None
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=None,
     )
 
     # Assert that the value was set
@@ -32,26 +31,26 @@ def test_set_input_channels_sets_correct_modelspec_when_constructor_names_specif
     # Create a nested ModelSpec structure
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128}
+        params={"input_channels": 10, "embedding_dim": 128},
     )
 
     decoder_spec = ModelSpec(
         constructor_name="decoder_model",
-        params={"input_channels": 10, "output_dim": 50}
+        params={"input_channels": 10, "output_dim": 50},
     )
 
     parent_spec = ModelSpec(
         constructor_name="parent_model",
         params={"num_classes": 10},
-        sub_models={"encoder": encoder_spec, "decoder": decoder_spec}
+        sub_models={"encoder": encoder_spec, "decoder": decoder_spec},
     )
 
     # Set input_channels only for the encoder_model
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         parent_spec,
-        num_electrodes,
-        model_spec_constructor_names=["encoder_model"]
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=["encoder_model"],
     )
 
     # Assert that the value was set
@@ -69,26 +68,26 @@ def test_set_input_channels_sets_multiple_matching_constructors():
     # Create a nested ModelSpec structure with multiple models with the same constructor name
     encoder1_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128}
+        params={"input_channels": 10, "embedding_dim": 128},
     )
 
     encoder2_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 20, "embedding_dim": 256}
+        params={"input_channels": 20, "embedding_dim": 256},
     )
 
     parent_spec = ModelSpec(
         constructor_name="parent_model",
         params={"num_classes": 10},
-        sub_models={"encoder1": encoder1_spec, "encoder2": encoder2_spec}
+        sub_models={"encoder1": encoder1_spec, "encoder2": encoder2_spec},
     )
 
     # Set input_channels for all encoder_model instances
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         parent_spec,
-        num_electrodes,
-        model_spec_constructor_names=["encoder_model"]
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=["encoder_model"],
     )
 
     # Assert that the value was set
@@ -103,27 +102,27 @@ def test_set_input_channels_searches_nested_submodels():
     # Create a deeply nested ModelSpec structure
     innermost_spec = ModelSpec(
         constructor_name="inner_encoder",
-        params={"input_channels": 10, "embedding_dim": 64}
+        params={"input_channels": 10, "embedding_dim": 64},
     )
 
     middle_spec = ModelSpec(
         constructor_name="middle_model",
         params={"hidden_dim": 128},
-        sub_models={"encoder": innermost_spec}
+        sub_models={"encoder": innermost_spec},
     )
 
     parent_spec = ModelSpec(
         constructor_name="parent_model",
         params={"num_classes": 10},
-        sub_models={"middle": middle_spec}
+        sub_models={"middle": middle_spec},
     )
 
     # Set input_channels for the deeply nested inner_encoder
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         parent_spec,
-        num_electrodes,
-        model_spec_constructor_names=["inner_encoder"]
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=["inner_encoder"],
     )
 
     # Assert that the value was set
@@ -137,21 +136,21 @@ def test_set_input_channels_raises_error_when_constructor_not_found():
     # Create a simple ModelSpec
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128}
+        params={"input_channels": 10, "embedding_dim": 128},
     )
 
     parent_spec = ModelSpec(
         constructor_name="parent_model",
         params={"num_classes": 10},
-        sub_models={"encoder": encoder_spec}
+        sub_models={"encoder": encoder_spec},
     )
 
     # Try to set input_channels for a non-existent constructor name
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         parent_spec,
-        num_electrodes,
-        model_spec_constructor_names=["non_existent_model"]
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=["non_existent_model"],
     )
 
     # Assert that the value was not set (returns False)
@@ -163,17 +162,17 @@ def test_set_input_channels_handles_multiple_constructor_names():
     # Create a nested ModelSpec structure
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128}
+        params={"input_channels": 10, "embedding_dim": 128},
     )
 
     decoder_spec = ModelSpec(
         constructor_name="decoder_model",
-        params={"input_channels": 10, "output_dim": 50}
+        params={"input_channels": 10, "output_dim": 50},
     )
 
     classifier_spec = ModelSpec(
         constructor_name="classifier_model",
-        params={"input_dim": 128, "num_classes": 10}
+        params={"input_dim": 128, "num_classes": 10},
     )
 
     parent_spec = ModelSpec(
@@ -182,16 +181,16 @@ def test_set_input_channels_handles_multiple_constructor_names():
         sub_models={
             "encoder": encoder_spec,
             "decoder": decoder_spec,
-            "classifier": classifier_spec
-        }
+            "classifier": classifier_spec,
+        },
     )
 
     # Set input_channels for both encoder and decoder
     num_electrodes = 64
-    value_set = _set_model_spec_input_channels(
+    value_set = set_model_spec_fields(
         parent_spec,
-        num_electrodes,
-        model_spec_constructor_names=["encoder_model", "decoder_model"]
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names=["encoder_model", "decoder_model"],
     )
 
     # Assert that the value was set
