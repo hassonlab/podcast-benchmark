@@ -20,6 +20,9 @@ class LlmDecodingConfig(BaseTaskConfig):
             "target_attention_mask",
         ]
     )
+    required_config_setter_names: list[str] = field(
+        default_factory=lambda: ["llm_decoding_config_setter"]
+    )
     max_context: int = 32
     max_target_tokens: int = 16
     tokenizer: Optional[Any] = None  # Will be set programmatically
