@@ -38,7 +38,7 @@ def llm_decoding_config_setter(
     experiment_config: ExperimentConfig, _raws, _task_df
 ) -> ExperimentConfig:
     # Load tokenizer and model into config.
-    tokenizer, gpt2_model = load_gpt2_model_and_tokenizer(
+    gpt2_model, tokenizer = load_gpt2_model_and_tokenizer(
         cache_dir=experiment_config.task_config.task_specific_config.cache_dir,
     )
     experiment_config.task_config.task_specific_config.tokenizer = tokenizer
@@ -79,8 +79,6 @@ def llm_decoding_task(task_config: TaskConfig):
         word_end = word_start + len(word)
         target_bounds.append((word_start, word_end))
         current_char_pos = word_end
-
-    context_windows = torch.tensor(context_windows)
 
     encoding_prev = tokenizer(
         context_windows,
