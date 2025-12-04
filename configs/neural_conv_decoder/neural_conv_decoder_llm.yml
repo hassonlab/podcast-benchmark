@@ -1,0 +1,38 @@
+config_setter_name: neural_conv
+task_config:
+  task_name: llm_decoding_task
+  data_params:
+    data_root: data
+    window_width: 0.625
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 16
+training_params:
+  batch_size: 16
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  early_stopping_patience: 15
+  n_folds: 5
+  min_lag: 0
+  max_lag: 400
+  lag_step_size: 100
+  losses:
+  - cross_entropy
+  metrics:
+  - perplexity
+  early_stopping_metric: cross_entropy
+  smaller_is_better: true
+trial_name: llm_decoding
+model_spec:
+  constructor_name: gpt2_brain
+  params:
+    freeze_lm: true
+  sub_models:
+    encoder_model:
+      constructor_name: neural_conv_encoder
+      params:
+        conv_filters: 128
+        dropout: 0.2
+        num_models: 1
+        embedding_dim: 768
