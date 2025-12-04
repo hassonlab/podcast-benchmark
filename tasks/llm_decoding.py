@@ -3,6 +3,7 @@ from typing import Optional, Any
 
 import pandas as pd
 import numpy as np
+import torch
 
 from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
 from core import registry
@@ -78,6 +79,8 @@ def llm_decoding_task(task_config: TaskConfig):
         word_end = word_start + len(word)
         target_bounds.append((word_start, word_end))
         current_char_pos = word_end
+
+    context_windows = torch.tensor(context_windows)
 
     encoding_prev = tokenizer(
         context_windows,

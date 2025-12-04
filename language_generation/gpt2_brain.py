@@ -11,8 +11,12 @@ def load_gpt2_model_and_tokenizer(
     model_name: str = "gpt2",
 ):
     """Load GPT-2 model and tokenizer."""
-    tokenizer = GPT2TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
-    model = GPT2LMHeadModel.from_pretrained(model_name, cache_dir=cache_dir)
+    tokenizer = GPT2TokenizerFast.from_pretrained(
+        model_name, cache_dir=cache_dir, local_files_only=True
+    )
+    model = GPT2LMHeadModel.from_pretrained(
+        model_name, cache_dir=cache_dir, local_files_only=True
+    )
     return model, tokenizer
 
 
