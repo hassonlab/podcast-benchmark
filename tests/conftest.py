@@ -301,3 +301,48 @@ trial_name: test_no_setters
     # Cleanup
     if os.path.exists(temp_path):
         os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_nested_model_config_file():
+    """Create a config file with nested model specs (sub_models)."""
+    config_content = """
+model_spec:
+  constructor_name: gpt2_brain
+  params:
+    lm_model: gpt2
+    freeze_lm: true
+  sub_models:
+    encoder_model:
+      constructor_name: pitom_model
+      params:
+        input_channels: 64
+        output_dim: 768
+      sub_models: {}
+config_setter_name: null
+task_config:
+  task_name: test_task
+  data_params:
+    window_width: 0.5
+    subject_ids: [1, 2, 3]
+  task_specific_config:
+    test_param: test_value
+    required_config_setter_names: null
+training_params:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 20
+  loss_name: mse
+  metrics: [cosine_sim]
+trial_name: test_nested_models
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(config_content)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)

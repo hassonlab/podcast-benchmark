@@ -197,6 +197,8 @@ class ExperimentConfig:
 
 def dict_to_config(d: dict, config_class):
     """Recursively convert a dict d to an instance of config_class."""
+    import typing
+
     init_kwargs = {}
     for field_info in fields(config_class):
         field_name = field_info.name
@@ -204,9 +206,28 @@ def dict_to_config(d: dict, config_class):
         if field_name not in d:
             continue
         field_value = d[field_name]
+
         # Handle nested dataclasses
         if is_dataclass(field_type) and isinstance(field_value, dict):
             init_kwargs[field_name] = dict_to_config(field_value, field_type)
+        # Handle Dict[str, ModelSpec] for sub_models
+        elif typing.get_origin(field_type) is dict and isinstance(field_value, dict):
+            type_args = typing.get_args(field_type)
+            if len(type_args) == 2:
+                value_type = type_args[1]
+                # Resolve ForwardRef if needed
+                if isinstance(value_type, typing.ForwardRef):
+                    value_type = ModelSpec
+                # Recursively convert dict values to the specified type
+                if is_dataclass(value_type):
+                    init_kwargs[field_name] = {
+                        k: dict_to_config(v, value_type) if isinstance(v, dict) else v
+                        for k, v in field_value.items()
+                    }
+                else:
+                    init_kwargs[field_name] = field_value
+            else:
+                init_kwargs[field_name] = field_value
         else:
             init_kwargs[field_name] = field_value
 

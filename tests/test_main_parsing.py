@@ -405,6 +405,29 @@ class TestLoadExperimentConfig:
         assert config.task_config.data_params.window_width == 1.5
         assert config.task_config.task_specific_config.test_param == "overridden_value"
 
+    def test_nested_model_specs_correctly_set(self, temp_nested_model_config_file, mock_task_registry):
+        """Test that nested model specs can be correctly set via overrides."""
+        # Test overriding nested model spec parameters
+        overrides = {
+            "model_spec.sub_models.encoder_model.params.input_channels": 128,
+            "model_spec.sub_models.encoder_model.params.output_dim": 1024,
+            "model_spec.params.freeze_lm": False,
+        }
+
+        config = load_experiment_config(temp_nested_model_config_file, overrides)
+
+        # Verify top-level model spec
+        assert config.model_spec.constructor_name == "gpt2_brain"
+        assert config.model_spec.params["lm_model"] == "gpt2"
+        assert config.model_spec.params["freeze_lm"] == False  # Overridden
+
+        # Verify nested sub_model spec
+        assert "encoder_model" in config.model_spec.sub_models
+        encoder_spec = config.model_spec.sub_models["encoder_model"]
+        assert encoder_spec.constructor_name == "pitom_model"
+        assert encoder_spec.params["input_channels"] == 128  # Overridden
+        assert encoder_spec.params["output_dim"] == 1024  # Overridden
+
 
 class TestExperimentConfigCLIIntegration:
     """Test integration of load_experiment_config with CLI-style argument parsing."""
