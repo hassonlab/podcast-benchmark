@@ -17,6 +17,10 @@ def load_gpt2_model_and_tokenizer(
     model = GPT2LMHeadModel.from_pretrained(
         model_name, cache_dir=cache_dir, local_files_only=True
     )
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = tokenizer.eos_token_id
     return model, tokenizer
 
 
