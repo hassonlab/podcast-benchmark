@@ -4,7 +4,7 @@ from typing import Optional, Any
 import pandas as pd
 import numpy as np
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
 from core import registry
 from language_generation.gpt2_brain import load_gpt2_model_and_tokenizer
 from models.shared_config_setters import set_model_spec_fields
@@ -35,12 +35,12 @@ class LlmDecodingConfig(BaseTaskConfig):
 
 @registry.register_config_setter()
 def llm_decoding_config_setter(
-    experiment_config: TaskConfig, _raws, _task_df
-) -> TaskConfig:
+    experiment_config: ExperimentConfig, _raws, _task_df
+) -> ExperimentConfig:
     """Config setter for llm_decoding task."""
     if not set_model_spec_fields(
         experiment_config.model_spec,
-        {"cache_dir": experiment_config.task_specific_config.cache_dir},
+        {"cache_dir": experiment_config.task_config.task_specific_config.cache_dir},
         ["gpt2_brain"],
     ):
         raise ValueError(
