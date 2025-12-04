@@ -12,9 +12,10 @@ def set_input_channels(
     model_spec_constructor_names: Optional[list[str]] = None,
 ) -> ExperimentConfig:
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
-    set_input_channels = _set_model_spec_input_channels(
+    set_input_channels = set_model_spec_fields(
         experiment_config.model_spec,
-        num_electrodes,
+        {"input_channels": num_electrodes},
+        model_spec_constructor_names,
     )
     if not set_input_channels:
         raise ValueError(
@@ -23,23 +24,23 @@ def set_input_channels(
     return experiment_config
 
 
-def _set_model_spec_input_channels(
+def set_model_spec_fields(
     model_spec: ModelSpec,
-    num_electrodes: int,
+    dict_update: dict,
     model_spec_constructor_names: Optional[list[str]] = None,
 ):
     if model_spec_constructor_names is None:
         value_set = True
-        model_spec.params["input_channels"] = num_electrodes
+        model_spec.params.update(dict_update)
     else:
         value_set = False
         for sub_model_spec in model_spec.sub_models.values():
             if sub_model_spec.constructor_name in model_spec_constructor_names:
-                sub_model_spec.params["input_channels"] = num_electrodes
+                sub_model_spec.params.update(dict_update)
                 value_set = True
         for sub_model_spec in model_spec.sub_models.values():
-            value_set |= _set_model_spec_input_channels(
-                sub_model_spec, num_electrodes, model_spec_constructor_names
+            value_set |= set_model_spec_fields(
+                sub_model_spec, dict_update, model_spec_constructor_names
             )
 
     return value_set
