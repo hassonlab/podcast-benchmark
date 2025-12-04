@@ -60,15 +60,15 @@ def main():
     task_name = experiment_config.task_config.task_name
     task_info = registry.task_registry[task_name]
 
-    # Load all data.
-    raws = data_utils.load_raws(experiment_config.task_config.data_params)
-    task_getter = task_info["getter"]
-    task_df = task_getter(experiment_config.task_config)
-
     if experiment_config.config_setter_name:
         for config_setter_name in experiment_config.config_setter_name:
             config_setter_fn = registry.config_setter_registry[config_setter_name]
             experiment_config = config_setter_fn(experiment_config, raws, task_df)
+
+    # Load all data.
+    raws = data_utils.load_raws(experiment_config.task_config.data_params)
+    task_getter = task_info["getter"]
+    task_df = task_getter(experiment_config.task_config)
 
     # User defined preprocessing function.
     preprocessing_fns = None
