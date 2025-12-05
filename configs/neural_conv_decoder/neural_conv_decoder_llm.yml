@@ -29,11 +29,13 @@ model_spec:
   constructor_name: gpt2_brain
   params:
     freeze_lm: true
+    encoder_forward_kwargs:
+      preserve_ensemble: true
   sub_models:
     encoder_model:
       constructor_name: ensemble_pitom_model
       params:
         conv_filters: 128
         dropout: 0.2
-        num_models: 1
+        num_models: 10
         embedding_dim: 768

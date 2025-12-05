@@ -37,7 +37,14 @@ class GPT2Brain(nn.Module):
     - [batch_size, num_tokens, embedding_dim]: Multiple embeddings per sample
     """
 
-    def __init__(self, lm_model, tokenizer, encoder_model, freeze_lm=True):
+    def __init__(
+        self,
+        lm_model,
+        tokenizer,
+        encoder_model,
+        freeze_lm=True,
+        encoder_forward_kwargs={},
+    ):
         """
         Initialize GPT2Brain model.
 
@@ -48,6 +55,7 @@ class GPT2Brain(nn.Module):
                           Input: [batch_size, num_channels, num_timepoints]
                           Output: [batch_size, embedding_dim] or [batch_size, num_tokens, embedding_dim]
             freeze_lm: Whether to freeze the language model weights (default: True)
+            encoder_forward_kwargs: Additional kwargs to pass to encoder_model during forward
         """
         super().__init__()
 
@@ -57,6 +65,8 @@ class GPT2Brain(nn.Module):
 
         self.lm_model = self.lm_model
         self.encoder_model = self.encoder_model
+
+        self.encoder_forward_kwargs = encoder_forward_kwargs
 
         # Add brain separator tokens to tokenizer
         brain_tokens = ["<brain/>", "</brain>"]
@@ -178,7 +188,7 @@ class GPT2Brain(nn.Module):
         batch_size = neural_data.shape[0]
 
         neural_embedding = self.encoder_model(
-            neural_data
+            neural_data, **self.encoder_forward_kwargs
         )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
 
         if neural_embedding.ndim == 2:
@@ -456,6 +466,7 @@ def gpt2_brain_model_constructor(model_params):
         tokenizer=tokenizer,
         encoder_model=encoder_model,
         freeze_lm=freeze_lm,
+        encoder_forward_kwargs=model_params.get("encoder_forward_kwargs", {}),
     )
 
     return model
