@@ -437,6 +437,7 @@ def train_decoding_model(
             optimizer.zero_grad()
 
         for i, (neural_data, inputs_dict, yb) in enumerate(loader):
+            neural_data = neural_data.to(device)
             inputs_dict = {k: v.to(device) for k, v in inputs_dict.items()}
             yb = yb.to(device)
 
