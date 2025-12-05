@@ -196,6 +196,7 @@ elif [ "$INSTALL_DEV" = true ]; then
     DEPS="[dev]"
     echo "Installing with development dependencies..."
 else
+    DEPS="[tensorboard]"
     echo "Installing base dependencies only..."
 fi
 
