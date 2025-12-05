@@ -622,7 +622,9 @@ def train_decoding_model(
                 best_val = cur
                 best_epoch = epoch
                 # Use model's save_checkpoint method if available, otherwise save state_dict
-                if hasattr(model, 'save_checkpoint') and callable(getattr(model, 'save_checkpoint')):
+                if hasattr(model, "save_checkpoint") and callable(
+                    getattr(model, "save_checkpoint")
+                ):
                     model.save_checkpoint(model_path)
                 else:
                     torch.save(model.state_dict(), model_path)
@@ -824,7 +826,6 @@ def run_training_over_lags(
             data_params.window_width,
             preprocessing_fns,
             data_params.preprocessor_params,
-            word_column=data_params.word_column,
         )
 
         neural_tensor = torch.FloatTensor(neural_data)
