@@ -646,7 +646,13 @@ def train_decoding_model(
         history["num_epochs"] = best_epoch + 1
 
         # load best and eval on test set
-        model.load_state_dict(torch.load(model_path))
+        # Use model's load_checkpoint method if available, otherwise save state_dict
+        if hasattr(model, "load_checkpoint") and callable(
+            getattr(model, "load_checkpoint")
+        ):
+            model.load_checkpoint(model_path)
+        else:
+            model.load_state_dict(torch.load(model_path))
         test_mets = run_epoch(model, loaders["test"])
 
         # record into cv_results
