@@ -1571,3 +1571,57 @@ class TestCrossEntropy:
         # Should be higher than perfect predictions due to the uniform (bad) predictions
         # but not as high as all-uniform (log(vocab_size))
         assert 0.0 < ce < np.log(vocab_size)
+
+    def test_sequence_prediction_shape(self):
+        """Test cross_entropy with sequence prediction (batch, seq_len, vocab_size)."""
+        batch_size = 16
+        seq_len = 16
+        vocab_size = 50259
+
+        # Create predictions: shape [batch, seq_len, vocab_size]
+        predictions = torch.randn(batch_size, seq_len, vocab_size, dtype=torch.float32)
+        ground_truth = torch.randint(0, vocab_size, (batch_size, seq_len), dtype=torch.long)
+
+        # Should not raise an error
+        ce = cross_entropy_metric(predictions, ground_truth)
+
+        # Should return a valid scalar
+        assert not np.isnan(ce)
+        assert not np.isinf(ce)
+        assert ce > 0
+
+    def test_sequence_prediction_with_padding(self):
+        """Test cross_entropy with sequence prediction and -100 padding."""
+        batch_size = 4
+        seq_len = 8
+        vocab_size = 100
+
+        # Create predictions
+        predictions = torch.randn(batch_size, seq_len, vocab_size, dtype=torch.float32)
+        ground_truth = torch.randint(0, vocab_size, (batch_size, seq_len), dtype=torch.long)
+
+        # Add some padding tokens (-100)
+        ground_truth[0, 5:] = -100  # Last 3 tokens of sequence 0 are padding
+        ground_truth[1, 6:] = -100  # Last 2 tokens of sequence 1 are padding
+        ground_truth[3, 7:] = -100  # Last 1 token of sequence 3 is padding
+
+        ce = cross_entropy_metric(predictions, ground_truth)
+
+        # Should not raise an error and should be finite
+        assert not np.isnan(ce)
+        assert not np.isinf(ce)
+        assert ce > 0
+
+    def test_sequence_prediction_all_padding(self):
+        """Test cross_entropy when entire sequence is padded."""
+        batch_size = 2
+        seq_len = 5
+        vocab_size = 50
+
+        predictions = torch.randn(batch_size, seq_len, vocab_size, dtype=torch.float32)
+        ground_truth = torch.full((batch_size, seq_len), -100, dtype=torch.long)
+
+        ce = cross_entropy_metric(predictions, ground_truth)
+
+        # When all tokens are ignored, should return nan or inf
+        assert np.isnan(ce) or np.isinf(ce)

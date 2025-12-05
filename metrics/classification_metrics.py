@@ -67,8 +67,19 @@ def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> 
     """
     Cross-entropy loss for multi-class classification, expects raw logits.
     Groundtruth should contain class indices (not one-hot).
+
+    Handles both standard classification (batch, num_classes) and sequence prediction
+    (batch, seq_len, num_classes) by automatically reshaping.
+
+    Supports -100 as ignore_index for padding tokens.
     """
-    return F.cross_entropy(predicted, groundtruth.long())
+    # Handle sequence prediction case: reshape (batch, seq_len, num_classes) -> (batch*seq_len, num_classes)
+    if predicted.ndim == 3:
+        batch_size, seq_len, num_classes = predicted.shape
+        predicted = predicted.reshape(batch_size * seq_len, num_classes)
+        groundtruth = groundtruth.reshape(batch_size * seq_len)
+
+    return F.cross_entropy(predicted, groundtruth.long(), ignore_index=-100)
 
 @register_metric("weighted_cross_entropy")
 def weighted_cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> torch.Tensor:
