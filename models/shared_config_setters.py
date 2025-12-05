@@ -34,10 +34,9 @@ def set_model_spec_fields(
         model_spec.params.update(dict_update)
     else:
         value_set = False
-        for sub_model_spec in model_spec.sub_models.values():
-            if sub_model_spec.constructor_name in model_spec_constructor_names:
-                sub_model_spec.params.update(dict_update)
-                value_set = True
+        if model_spec.constructor_name in model_spec_constructor_names:
+            model_spec.params.update(dict_update)
+            value_set = True
         for sub_model_spec in model_spec.sub_models.values():
             value_set |= set_model_spec_fields(
                 sub_model_spec, dict_update, model_spec_constructor_names

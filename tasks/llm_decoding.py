@@ -26,7 +26,6 @@ class LlmDecodingConfig(BaseTaskConfig):
     )
     max_context: int = 32
     max_target_tokens: int = 16
-    tokenizer: Optional[Any] = None  # Will be set programmatically
     transcript_path: str = "data/stimuli/podcast_transcript.csv"
     prepend_space: bool = True
     model_name: str = "gpt2"
