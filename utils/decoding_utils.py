@@ -667,15 +667,18 @@ def train_decoding_model(
             log_metrics_to_tensorboard(writer, test_mets, "model", "test", fold)
 
             # Log baseline metrics
-            log_metrics_to_tensorboard(
-                writer, logistic_baseline_metrics, "logistic_regression", None, fold
-            )
-            log_metrics_to_tensorboard(
-                writer, linear_baseline_metrics, "linear_regression", None, fold
-            )
-            log_metrics_to_tensorboard(
-                writer, ridge_baseline_metrics, "ridge_regression", None, fold
-            )
+            if training_params.logistic_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, logistic_baseline_metrics, "logistic_regression", None, fold
+                )
+            if training_params.linear_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, linear_baseline_metrics, "linear_regression", None, fold
+                )
+            if training_params.ridge_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, ridge_baseline_metrics, "ridge_regression", None, fold
+                )
 
             writer.close()
 
