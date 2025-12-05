@@ -827,6 +827,20 @@ class TestDfColumnsToTensors:
         assert isinstance(result["values"], torch.Tensor)
         assert torch.equal(result["values"], torch.tensor([1, 2, 3, 4, 5]))
 
+    def test_empty_column_names_returns_empty_dict(self):
+        """Test converting a single numeric column to tensor."""
+        df = pd.DataFrame({"values": [1, 2, 3, 4, 5]})
+        result = df_columns_to_tensors(df, [])
+
+        assert result == {}
+
+    def test_none_column_names_returns_empty_dict(self):
+        """Test converting a single numeric column to tensor."""
+        df = pd.DataFrame({"values": [1, 2, 3, 4, 5]})
+        result = df_columns_to_tensors(df, None)
+
+        assert result == {}
+
     def test_multiple_numeric_columns(self):
         """Test converting multiple numeric columns to tensors."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0], "c": [7, 8, 9]})
@@ -893,15 +907,17 @@ class TestDfColumnsToTensors:
     def test_multidimensional_arrays(self):
         """Test converting columns containing multi-dimensional arrays."""
         # Create DataFrame with columns containing arrays
-        df = pd.DataFrame({
-            "vectors": [
-                np.array([1, 2, 3]),
-                np.array([4, 5, 6]),
-                np.array([7, 8, 9]),
-                np.array([10, 11, 12])
-            ],
-            "scalars": [1, 2, 3, 4]
-        })
+        df = pd.DataFrame(
+            {
+                "vectors": [
+                    np.array([1, 2, 3]),
+                    np.array([4, 5, 6]),
+                    np.array([7, 8, 9]),
+                    np.array([10, 11, 12]),
+                ],
+                "scalars": [1, 2, 3, 4],
+            }
+        )
 
         result = df_columns_to_tensors(df, ["vectors", "scalars"])
 
@@ -915,13 +931,15 @@ class TestDfColumnsToTensors:
 
     def test_multidimensional_arrays_with_fold_indices(self):
         """Test multi-dimensional arrays with fold indices."""
-        df = pd.DataFrame({
-            "vectors": [
-                np.array([1, 2, 3]),
-                np.array([4, 5, 6]),
-                np.array([7, 8, 9]),
-            ]
-        })
+        df = pd.DataFrame(
+            {
+                "vectors": [
+                    np.array([1, 2, 3]),
+                    np.array([4, 5, 6]),
+                    np.array([7, 8, 9]),
+                ]
+            }
+        )
 
         fold_indices = np.array([0, 2])
         result = df_columns_to_tensors(df, ["vectors"], fold_indices=fold_indices)

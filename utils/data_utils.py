@@ -252,7 +252,9 @@ def get_data(
 
 
 def df_columns_to_tensors(
-    df: pd.DataFrame, column_names: list[str], fold_indices: Optional[np.ndarray] = None
+    df: pd.DataFrame,
+    column_names: Optional[list[str]],
+    fold_indices: Optional[np.ndarray] = None,
 ) -> dict[str, torch.Tensor]:
     """
     Convert specified DataFrame columns to PyTorch tensors.
@@ -278,6 +280,9 @@ def df_columns_to_tensors(
         >>> print(result)
         {'a': tensor([1, 3])}
     """
+    if column_names is None:
+        return {}
+
     result = {}
     for col_name in column_names:
         column_data = df[col_name].values
