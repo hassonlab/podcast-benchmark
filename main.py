@@ -134,7 +134,7 @@ def main():
         model_spec,
         experiment_config.task_config.task_name,
         training_params=experiment_config.training_params,
-        task_params=experiment_config.task_config,
+        task_config=experiment_config.task_config,
         output_dir=output_dir,
         checkpoint_dir=checkpoint_dir,
         tensorboard_dir=tensorboard_dir,
