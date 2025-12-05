@@ -842,6 +842,7 @@ def run_training_over_lags(
             data_df,
             model_spec,
             task_name,
+            task_config,
             lag,
             training_params=training_params,
             checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
