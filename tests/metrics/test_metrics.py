@@ -1324,6 +1324,27 @@ class TestPerplexity:
         # but not as high as all-uniform
         assert 1.0 < ppl < vocab_size
 
+    def test_3d_sequence_equivalence(self):
+        """Test that 3D sequence input produces same result as manually reshaped 2D input."""
+        batch_size = 3
+        seq_len = 4
+        vocab_size = 10
+
+        # Create test data
+        predictions_3d = torch.randn(batch_size, seq_len, vocab_size, dtype=torch.float32)
+        ground_truth_2d = torch.randint(0, vocab_size, (batch_size, seq_len), dtype=torch.long)
+
+        # Compute perplexity with 3D input
+        ppl_3d = perplexity(predictions_3d, ground_truth_2d)
+
+        # Manually reshape and compute with 2D input
+        predictions_2d = predictions_3d.reshape(batch_size * seq_len, vocab_size)
+        ground_truth_1d = ground_truth_2d.reshape(batch_size * seq_len)
+        ppl_2d = perplexity(predictions_2d, ground_truth_1d)
+
+        # Results should be identical
+        assert abs(ppl_3d - ppl_2d) < 1e-5
+
 
 class TestCrossEntropy:
     """Test cross_entropy_metric function for LLM evaluation."""
@@ -1625,3 +1646,24 @@ class TestCrossEntropy:
 
         # When all tokens are ignored, should return nan or inf
         assert np.isnan(ce) or np.isinf(ce)
+
+    def test_3d_sequence_equivalence(self):
+        """Test that 3D sequence input produces same result as manually reshaped 2D input."""
+        batch_size = 3
+        seq_len = 4
+        vocab_size = 10
+
+        # Create test data
+        predictions_3d = torch.randn(batch_size, seq_len, vocab_size, dtype=torch.float32)
+        ground_truth_2d = torch.randint(0, vocab_size, (batch_size, seq_len), dtype=torch.long)
+
+        # Compute cross entropy with 3D input
+        ce_3d = cross_entropy_metric(predictions_3d, ground_truth_2d)
+
+        # Manually reshape and compute with 2D input
+        predictions_2d = predictions_3d.reshape(batch_size * seq_len, vocab_size)
+        ground_truth_1d = ground_truth_2d.reshape(batch_size * seq_len)
+        ce_2d = cross_entropy_metric(predictions_2d, ground_truth_1d)
+
+        # Results should be identical
+        assert abs(ce_3d - ce_2d) < 1e-5

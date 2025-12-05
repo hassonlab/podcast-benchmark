@@ -402,9 +402,14 @@ def perplexity(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
     Perplexity = exp(cross_entropy) where cross_entropy is the average negative
     log-likelihood of the true labels.
 
+    Handles both standard classification (batch, num_classes) and sequence prediction
+    (batch, seq_len, num_classes) by automatically reshaping.
+
+    Supports -100 as ignore_index for padding tokens.
+
     Args:
-        predictions: Tensor of shape [num_samples, num_classes] containing raw logits
-        ground_truth: Tensor of shape [num_samples] containing the true class
+        predictions: Tensor of shape [num_samples, num_classes] or [batch, seq_len, num_classes] containing raw logits
+        ground_truth: Tensor of shape [num_samples] or [batch, seq_len] containing the true class
                      indices for each sample
 
     Returns:
@@ -413,8 +418,14 @@ def perplexity(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
     if len(predictions) == 0:
         return float("inf")
 
+    # Handle sequence prediction case: reshape (batch, seq_len, num_classes) -> (batch*seq_len, num_classes)
+    if predictions.ndim == 3:
+        batch_size, seq_len, num_classes = predictions.shape
+        predictions = predictions.reshape(batch_size * seq_len, num_classes)
+        ground_truth = ground_truth.reshape(batch_size * seq_len)
+
     # Calculate cross-entropy using PyTorch's implementation (expects raw logits)
-    cross_entropy = F.cross_entropy(predictions, ground_truth.long())
+    cross_entropy = F.cross_entropy(predictions, ground_truth.long(), ignore_index=-100)
 
     # Perplexity = exp(cross_entropy)
     return torch.exp(cross_entropy).item()
