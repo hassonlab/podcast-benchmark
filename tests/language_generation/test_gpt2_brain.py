@@ -306,7 +306,7 @@ class TestGPT2BrainConstruction:
         attention_mask = torch.ones(batch_size, input_ids.shape[1])
 
         # Forward pass
-        output, _ = model(neural_data, input_ids, attention_mask)
+        output, _ = model(neural_data, input_ids, attention_mask, return_all_preds=True)
 
         # Create a dummy loss and compute gradients
         loss = output.logits.sum()
@@ -359,6 +359,7 @@ class TestGPT2BrainForwardSingleEmbed:
             neural_data=sample_batch["neural_data"],
             all_input_ids=sample_batch["input_ids"],
             all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
         )
 
         batch_size, seq_len = sample_batch["input_ids"].shape
@@ -394,6 +395,7 @@ class TestGPT2BrainForwardSingleEmbed:
             neural_data=sample_batch["neural_data"],
             all_input_ids=sample_batch["input_ids"],
             all_attention_mask=attention_mask,
+            return_all_preds=True,
         )
 
         # First 3 positions should be attended to (brain prompt: <brain/>, embed, </brain>)
@@ -423,6 +425,7 @@ class TestGPT2BrainForwardMultiEmbed:
             neural_data=sample_batch["neural_data"],
             all_input_ids=sample_batch["input_ids"],
             all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
         )
 
         batch_size, seq_len = sample_batch["input_ids"].shape
@@ -459,6 +462,7 @@ class TestGPT2BrainForwardMultiEmbed:
             neural_data=sample_batch["neural_data"],
             all_input_ids=sample_batch["input_ids"],
             all_attention_mask=attention_mask,
+            return_all_preds=True,
         )
 
         num_neural_tokens = 3  # From mock_encoder_multi
@@ -803,3 +807,362 @@ class TestGPT2BrainTargetPredictions:
 
         vocab_size = len(model.tokenizer)
         assert target_preds.shape == (batch_size, max_target_tokens, vocab_size)
+
+
+class TestGPT2BrainNoBrainEncoder:
+    """Test GPT2Brain with no_brain_encoder flag"""
+
+    def test_instantiation_no_brain_encoder(
+        self, mock_gpt2_model, mock_tokenizer
+    ):
+        """Test that model can be instantiated without encoder when no_brain_encoder=True"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+        )
+
+        assert model is not None
+        assert not hasattr(model, "encoder_model")
+        assert model.no_brain_encoder is True
+
+    def test_brain_tokens_added_with_no_brain_encoder(
+        self, mock_gpt2_model, mock_tokenizer
+    ):
+        """Test that brain tokens are still added when no_brain_encoder=True"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+        )
+
+        # Brain tokens should still be added by default
+        assert "<brain/>" in model.tokenizer.get_vocab()
+        assert "</brain>" in model.tokenizer.get_vocab()
+        assert hasattr(model, "brain_token_ids")
+
+    def test_forward_no_brain_encoder_single_embed(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test forward pass with no_brain_encoder produces embeddings with only separator tokens"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+        )
+
+        output, updated_attention_mask = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        vocab_size = len(model.tokenizer)
+
+        # Output should have shape [batch, seq_len + 2, vocab_size]
+        # Only 2 separator tokens, no neural embeddings
+        expected_seq_len = seq_len + 2  # <brain/> + </brain>
+        assert output.logits.shape == (batch_size, expected_seq_len, vocab_size)
+        assert updated_attention_mask.shape == (batch_size, expected_seq_len)
+
+    def test_embeddings_structure_no_brain_encoder(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test that embeddings contain separator tokens but no neural embeddings"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+        )
+
+        prompt_embeddings, prompt_attention_mask = model._convert_to_embeddings(
+            sample_batch["neural_data"],
+            sample_batch["input_ids"],
+            sample_batch["attention_mask"],
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        hidden_size = model.lm_model.hidden_size
+
+        # Should have: <brain/> + </brain> + input_ids
+        expected_len = 2 + seq_len
+        assert prompt_embeddings.shape == (batch_size, expected_len, hidden_size)
+        assert prompt_attention_mask.shape == (batch_size, expected_len)
+
+        # First 2 positions should be brain separator tokens (all ones in attention)
+        assert (prompt_attention_mask[:, :2] == 1).all()
+
+
+class TestGPT2BrainNoBrainTokenInjection:
+    """Test GPT2Brain with no_brain_token_injection flag"""
+
+    def test_instantiation_no_brain_token_injection(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Test that model can be instantiated with no_brain_token_injection=True"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        original_vocab_size = len(mock_tokenizer)
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+            no_brain_token_injection=True,
+        )
+
+        assert model is not None
+        assert model.no_brain_token_injection is True
+        assert not hasattr(model, "brain_token_ids")
+
+        # Tokenizer vocab should not have grown (no brain tokens added)
+        assert len(model.tokenizer) == original_vocab_size
+
+    def test_no_brain_tokens_added(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Test that brain tokens are not added when no_brain_token_injection=True"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+            no_brain_token_injection=True,
+        )
+
+        # Brain tokens should NOT be in vocabulary
+        assert "<brain/>" not in model.tokenizer.get_vocab()
+        assert "</brain>" not in model.tokenizer.get_vocab()
+
+    def test_forward_no_brain_token_injection_single_embed(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test forward pass with no_brain_token_injection produces embeddings without separator tokens"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+            no_brain_token_injection=True,
+        )
+
+        output, updated_attention_mask = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        vocab_size = len(model.tokenizer)
+
+        # Output should have shape [batch, seq_len + 1, vocab_size]
+        # 1 neural embedding, no separator tokens
+        expected_seq_len = seq_len + 1  # neural_embed only
+        assert output.logits.shape == (batch_size, expected_seq_len, vocab_size)
+        assert updated_attention_mask.shape == (batch_size, expected_seq_len)
+
+    def test_forward_no_brain_token_injection_multi_embed(
+        self, mock_encoder_multi, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test forward pass with no_brain_token_injection and multiple embeddings"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_multi,
+            freeze_lm=True,
+            no_brain_token_injection=True,
+        )
+
+        output, updated_attention_mask = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        vocab_size = len(model.tokenizer)
+        num_neural_tokens = 3  # From mock_encoder_multi
+
+        # Output should have shape [batch, seq_len + num_neural_tokens, vocab_size]
+        # Only neural embeddings, no separator tokens
+        expected_seq_len = seq_len + num_neural_tokens
+        assert output.logits.shape == (batch_size, expected_seq_len, vocab_size)
+        assert updated_attention_mask.shape == (batch_size, expected_seq_len)
+
+    def test_embeddings_structure_no_brain_token_injection(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test that embeddings contain neural embeddings but no separator tokens"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+            no_brain_token_injection=True,
+        )
+
+        prompt_embeddings, prompt_attention_mask = model._convert_to_embeddings(
+            sample_batch["neural_data"],
+            sample_batch["input_ids"],
+            sample_batch["attention_mask"],
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        hidden_size = model.lm_model.hidden_size
+
+        # Should have: neural_embed + input_ids (no separators)
+        expected_len = 1 + seq_len
+        assert prompt_embeddings.shape == (batch_size, expected_len, hidden_size)
+        assert prompt_attention_mask.shape == (batch_size, expected_len)
+
+
+class TestGPT2BrainCombinedFlags:
+    """Test GPT2Brain with both no_brain_encoder and no_brain_token_injection flags"""
+
+    def test_both_flags_enabled(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test model with both no_brain_encoder and no_brain_token_injection enabled"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        original_vocab_size = len(mock_tokenizer)
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+            no_brain_token_injection=True,
+        )
+
+        assert model is not None
+        assert model.no_brain_encoder is True
+        assert model.no_brain_token_injection is True
+        assert not hasattr(model, "encoder_model")
+        assert not hasattr(model, "brain_token_ids")
+
+        # Tokenizer vocab should not have grown
+        assert len(model.tokenizer) == original_vocab_size
+
+    def test_forward_both_flags_no_brain_data(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test forward pass with both flags produces embeddings with only input tokens"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+            no_brain_token_injection=True,
+        )
+
+        output, updated_attention_mask = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_all_preds=True,
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        vocab_size = len(model.tokenizer)
+
+        # Output should have shape [batch, seq_len, vocab_size]
+        # No brain embeddings or separator tokens, just input tokens
+        assert output.logits.shape == (batch_size, seq_len, vocab_size)
+        assert updated_attention_mask.shape == (batch_size, seq_len)
+
+    def test_embeddings_both_flags_vanilla_behavior(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test that embeddings with both flags behave like vanilla GPT2"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+            no_brain_token_injection=True,
+        )
+
+        prompt_embeddings, prompt_attention_mask = model._convert_to_embeddings(
+            sample_batch["neural_data"],
+            sample_batch["input_ids"],
+            sample_batch["attention_mask"],
+        )
+
+        batch_size, seq_len = sample_batch["input_ids"].shape
+        hidden_size = model.lm_model.hidden_size
+
+        # Should have only input_ids embeddings (no brain data at all)
+        assert prompt_embeddings.shape == (batch_size, seq_len, hidden_size)
+        assert prompt_attention_mask.shape == (batch_size, seq_len)
+
+        # Attention mask should match original input attention mask
+        assert torch.equal(prompt_attention_mask, sample_batch["attention_mask"])
+
+    def test_generate_both_flags(
+        self, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        """Test generation with both flags works like vanilla GPT2"""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=None,
+            freeze_lm=True,
+            no_brain_encoder=True,
+            no_brain_token_injection=True,
+        )
+        model.eval()
+
+        with torch.no_grad():
+            generated_ids = model.generate(
+                neural_data=sample_batch["neural_data"],
+                input_ids=sample_batch["input_ids"],
+                attention_mask=sample_batch["attention_mask"],
+                max_new_tokens=5,
+                do_sample=False,
+            )
+
+        batch_size, original_seq_len = sample_batch["input_ids"].shape
+
+        # Generated sequences should contain original input + new tokens
+        # No brain data involved, behaves like vanilla GPT2
+        assert generated_ids.shape[0] == batch_size
+        assert generated_ids.shape[1] == original_seq_len + 5

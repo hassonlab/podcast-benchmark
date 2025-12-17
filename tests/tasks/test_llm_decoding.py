@@ -112,7 +112,7 @@ class TestLLMDecodingTokenAlignment:
         return temp_file.name
 
     def create_task_config(
-        self, tokenizer, transcript_path, max_context=8, max_target_tokens=4
+        self, transcript_path, max_context=8, max_target_tokens=4
     ):
         """Helper to create a TaskConfig with proper structure."""
         return TaskConfig(
@@ -121,7 +121,6 @@ class TestLLMDecodingTokenAlignment:
             task_specific_config=LlmDecodingConfig(
                 max_context=max_context,
                 max_target_tokens=max_target_tokens,
-                tokenizer=tokenizer,
                 transcript_path=transcript_path,
                 prepend_space=True,
             ),
@@ -139,9 +138,9 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             # For each sample, verify target tokens appear in all_input_ids
             for idx in range(len(result_df)):
@@ -179,9 +178,9 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             # Check sample where we have context (not the first word)
             for idx in range(1, len(result_df)):
@@ -222,9 +221,9 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             # Manually verify that target extraction uses offsets correctly
             for idx in range(len(result_df)):
@@ -258,9 +257,9 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             for idx in range(len(result_df)):
                 target_ids = result_df.iloc[idx]["target"]
@@ -293,10 +292,10 @@ class TestLLMDecodingTokenAlignment:
             max_target_tokens = 2
 
             config = self.create_task_config(
-                tokenizer, transcript_path, max_target_tokens=max_target_tokens
+                transcript_path, max_target_tokens=max_target_tokens
             )
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             for idx in range(len(result_df)):
                 target_ids = result_df.iloc[idx]["target"]
@@ -320,10 +319,10 @@ class TestLLMDecodingTokenAlignment:
             max_target_tokens = 10  # Much larger than needed
 
             config = self.create_task_config(
-                tokenizer, transcript_path, max_target_tokens=max_target_tokens
+                transcript_path, max_target_tokens=max_target_tokens
             )
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             for idx in range(len(result_df)):
                 target_ids = result_df.iloc[idx]["target"]
@@ -358,7 +357,7 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
             # Manually verify the logic
             context_windows = []
@@ -384,7 +383,7 @@ class TestLLMDecodingTokenAlignment:
                 ), f"Offset calculation incorrect for '{target}'"
 
             # Now run the actual function
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             # Verify we got results
             assert len(result_df) == len(words_data["word"])
@@ -400,9 +399,9 @@ class TestLLMDecodingTokenAlignment:
 
         try:
             tokenizer = MockTokenizer()
-            config = self.create_task_config(tokenizer, transcript_path)
+            config = self.create_task_config(transcript_path)
 
-            result_df = llm_decoding_task(config)
+            result_df = llm_decoding_task(config, tokenizer=tokenizer)
 
             # First word should have empty/minimal context
             first_prev_ids = result_df.iloc[0]["prev_input_ids"]

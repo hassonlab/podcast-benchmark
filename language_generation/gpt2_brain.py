@@ -44,6 +44,8 @@ class GPT2Brain(nn.Module):
         encoder_model,
         freeze_lm=True,
         encoder_forward_kwargs={},
+        no_brain_encoder=False,
+        no_brain_token_injection=False,
     ):
         """
         Initialize GPT2Brain model.
@@ -56,29 +58,33 @@ class GPT2Brain(nn.Module):
                           Output: [batch_size, embedding_dim] or [batch_size, num_tokens, embedding_dim]
             freeze_lm: Whether to freeze the language model weights (default: True)
             encoder_forward_kwargs: Additional kwargs to pass to encoder_model during forward
+            no_brain_encoder: If True, bypass the encoder and do not provide brain embeddings.
+            no_brain_token_injection: If True, do not inject brain separator tokens.
         """
         super().__init__()
 
+        self.no_brain_encoder = no_brain_encoder
+        self.no_brain_token_injection = no_brain_token_injection
+
         self.lm_model = lm_model
         self.tokenizer = tokenizer
-        self.encoder_model = encoder_model
-
-        self.lm_model = self.lm_model
-        self.encoder_model = self.encoder_model
+        if not self.no_brain_encoder:
+            self.encoder_model = encoder_model
 
         self.encoder_forward_kwargs = encoder_forward_kwargs
 
         # Add brain separator tokens to tokenizer
-        brain_tokens = ["<brain/>", "</brain>"]
-        self.tokenizer.add_tokens(brain_tokens)
+        if not self.no_brain_token_injection:
+            brain_tokens = ["<brain/>", "</brain>"]
+            self.tokenizer.add_tokens(brain_tokens)
 
-        # Resize model embeddings to accommodate new tokens
-        self.lm_model.resize_token_embeddings(len(self.tokenizer))
+            # Resize model embeddings to accommodate new tokens
+            self.lm_model.resize_token_embeddings(len(self.tokenizer))
 
-        self.brain_token_ids = [
-            self.tokenizer.convert_tokens_to_ids("<brain/>"),
-            self.tokenizer.convert_tokens_to_ids("</brain>"),
-        ]
+            self.brain_token_ids = [
+                self.tokenizer.convert_tokens_to_ids("<brain/>"),
+                self.tokenizer.convert_tokens_to_ids("</brain>"),
+            ]
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -187,45 +193,53 @@ class GPT2Brain(nn.Module):
         device = input_ids.device
         batch_size = neural_data.shape[0]
 
-        neural_embedding = self.encoder_model(
-            neural_data, **self.encoder_forward_kwargs
-        )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
+        all_tokens = []
+        num_neural_tokens = 0
 
-        if neural_embedding.ndim == 2:
-            # Single embedding: [batch, embed_dim] -> [batch, 1, embed_dim]
-            neural_embedding = neural_embedding.unsqueeze(1)
+        if not self.no_brain_encoder:
+            neural_embedding = self.encoder_model(
+                neural_data, **self.encoder_forward_kwargs
+            )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
+
+            if neural_embedding.ndim == 2:
+                # Single embedding: [batch, embed_dim] -> [batch, 1, embed_dim]
+                neural_embedding = neural_embedding.unsqueeze(1)
+
+            num_neural_tokens = neural_embedding.shape[1]
+            all_tokens.append(neural_embedding)
+
+        if not self.no_brain_token_injection:
+            first_sep_embedding, last_sep_embedding = (
+                self._get_brain_separator_embeddings(batch_size, device)
+            )
+            all_tokens = [first_sep_embedding] + all_tokens + [last_sep_embedding]
 
         input_embeddings = self.lm_model.transformer.wte(
             input_ids
         )  # [batch, seq_len, hidden_size]
-
-        first_sep_embedding, last_sep_embedding = self._get_brain_separator_embeddings(
-            batch_size, device
-        )
+        all_tokens.append(input_embeddings)
 
         # Concatenate: [<brain/>, neural_embeds, </brain>, input_embeds]
         prompt_embeddings = torch.cat(
-            [
-                first_sep_embedding,  # [batch, 1, hidden_size]
-                neural_embedding,  # [batch, num_tokens, hidden_size]
-                last_sep_embedding,  # [batch, 1, hidden_size]
-                input_embeddings,  # [batch, seq_len, hidden_size]
-            ],
+            all_tokens,
             dim=1,
         )
 
         # Create attention mask for brain prompt (always attended to)
-        num_neural_tokens = neural_embedding.shape[1]
-        brain_prompt_len = num_neural_tokens + 2  # <brain/> + tokens + </brain>
-        brain_attention_mask = torch.ones(batch_size, brain_prompt_len, device=device)
+        brain_prompt_len = num_neural_tokens + (0 if self.no_brain_token_injection else 2)  # neural_tokens + optional separators
 
-        prompt_attention_mask = torch.cat(
-            [
-                brain_attention_mask,  # [batch, brain_prompt_len]
-                attention_mask.to(device),  # [batch, seq_len]
-            ],
-            dim=1,
-        )
+        if brain_prompt_len > 0:
+            brain_attention_mask = torch.ones(batch_size, brain_prompt_len, device=device)
+            prompt_attention_mask = torch.cat(
+                [
+                    brain_attention_mask,  # [batch, brain_prompt_len]
+                    attention_mask.to(device),  # [batch, seq_len]
+                ],
+                dim=1,
+            )
+        else:
+            # No brain data at all, just use input attention mask
+            prompt_attention_mask = attention_mask.to(device)
 
         return prompt_embeddings, prompt_attention_mask
 
@@ -467,6 +481,8 @@ def gpt2_brain_model_constructor(model_params):
         encoder_model=encoder_model,
         freeze_lm=freeze_lm,
         encoder_forward_kwargs=model_params.get("encoder_forward_kwargs", {}),
+        no_brain_encoder=model_params.get("no_brain_encoder", False),
+        no_brain_token_injection=model_params.get("no_brain_token_injection", False),
     )
 
     return model

@@ -49,12 +49,13 @@ def llm_decoding_config_setter(
 
 
 @registry.register_task_data_getter(config_type=LlmDecodingConfig)
-def llm_decoding_task(task_config: TaskConfig):
+def llm_decoding_task(task_config: TaskConfig, tokenizer=None):
     """Task for LLM decoding."""
     config: LlmDecodingConfig = task_config.task_specific_config
-    _, tokenizer = load_gpt2_model_and_tokenizer(
-        cache_dir=task_config.task_specific_config.cache_dir,
-    )
+    if tokenizer is None:
+        _, tokenizer = load_gpt2_model_and_tokenizer(
+            cache_dir=task_config.task_specific_config.cache_dir,
+        )
     max_context = config.max_context
     max_target_tokens = config.max_target_tokens
 
