@@ -226,10 +226,14 @@ class GPT2Brain(nn.Module):
         )
 
         # Create attention mask for brain prompt (always attended to)
-        brain_prompt_len = num_neural_tokens + (0 if self.no_brain_token_injection else 2)  # neural_tokens + optional separators
+        brain_prompt_len = num_neural_tokens + (
+            0 if self.no_brain_token_injection else 2
+        )  # neural_tokens + optional separators
 
         if brain_prompt_len > 0:
-            brain_attention_mask = torch.ones(batch_size, brain_prompt_len, device=device)
+            brain_attention_mask = torch.ones(
+                batch_size, brain_prompt_len, device=device
+            )
             prompt_attention_mask = torch.cat(
                 [
                     brain_attention_mask,  # [batch, brain_prompt_len]
@@ -400,7 +404,9 @@ class GPT2Brain(nn.Module):
             path: Filepath to save checkpoint
         """
         checkpoint = {
-            "encoder_model": self.encoder_model.state_dict(),
+            "encoder_model": (
+                self.encoder_model.state_dict() if not self.no_brain_encoder else None
+            ),
             "brain_token_embeddings": self.lm_model.transformer.wte.weight[
                 self.brain_token_ids
             ]
@@ -424,7 +430,8 @@ class GPT2Brain(nn.Module):
         """
         checkpoint = torch.load(path, map_location="cpu")
 
-        self.encoder_model.load_state_dict(checkpoint["encoder_model"])
+        if not self.no_brain_encoder:
+            self.encoder_model.load_state_dict(checkpoint["encoder_model"])
 
         brain_token_embeddings = checkpoint["brain_token_embeddings"]
         with torch.no_grad():
@@ -472,7 +479,7 @@ def gpt2_brain_model_constructor(model_params):
     lm_model, tokenizer = load_gpt2_model_and_tokenizer(
         cache_dir=model_params.get("cache_dir", None)
     )
-    encoder_model = model_params["encoder_model"]
+    encoder_model = model_params.get("encoder_model", None)
     freeze_lm = model_params.get("freeze_lm", True)
 
     model = GPT2Brain(
