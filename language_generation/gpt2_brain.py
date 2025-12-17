@@ -97,20 +97,23 @@ class GPT2Brain(nn.Module):
 
             # Enable gradients for the entire embedding layer
             # (we can't set requires_grad on a view/subset of embeddings)
-            self.lm_model.transformer.wte.weight.requires_grad = True
+            if not self.no_brain_token_injection:
+                self.lm_model.transformer.wte.weight.requires_grad = True
 
-            # Register backward hook to zero gradients for all embeddings
-            # except brain token embeddings
-            def zero_non_brain_gradients(grad):
-                """Zero out gradients for all embeddings except brain tokens."""
-                # Create a mask that's 1 for brain tokens, 0 for everything else
-                mask = torch.zeros_like(grad)
-                for token_id in self.brain_token_ids:
-                    mask[token_id] = 1.0
-                # Zero gradients for non-brain tokens
-                return grad * mask
+                # Register backward hook to zero gradients for all embeddings
+                # except brain token embeddings
+                def zero_non_brain_gradients(grad):
+                    """Zero out gradients for all embeddings except brain tokens."""
+                    # Create a mask that's 1 for brain tokens, 0 for everything else
+                    mask = torch.zeros_like(grad)
+                    for token_id in self.brain_token_ids:
+                        mask[token_id] = 1.0
+                    # Zero gradients for non-brain tokens
+                    return grad * mask
 
-            self.lm_model.transformer.wte.weight.register_hook(zero_non_brain_gradients)
+                self.lm_model.transformer.wte.weight.register_hook(
+                    zero_non_brain_gradients
+                )
 
     def _get_brain_separator_embeddings(self, batch_size, device):
         """Get embeddings for brain separator tokens."""
@@ -407,12 +410,16 @@ class GPT2Brain(nn.Module):
             "encoder_model": (
                 self.encoder_model.state_dict() if not self.no_brain_encoder else None
             ),
-            "brain_token_embeddings": self.lm_model.transformer.wte.weight[
-                self.brain_token_ids
-            ]
-            .detach()
-            .cpu(),
-            "brain_token_ids": self.brain_token_ids,
+            "brain_token_embeddings": (
+                self.lm_model.transformer.wte.weight[self.brain_token_ids]
+                .detach()
+                .cpu()
+                if not self.no_brain_token_injection
+                else None
+            ),
+            "brain_token_ids": (
+                self.brain_token_ids if not self.no_brain_token_injection else None
+            ),
         }
 
         torch.save(checkpoint, path)
@@ -433,12 +440,13 @@ class GPT2Brain(nn.Module):
         if not self.no_brain_encoder:
             self.encoder_model.load_state_dict(checkpoint["encoder_model"])
 
-        brain_token_embeddings = checkpoint["brain_token_embeddings"]
-        with torch.no_grad():
-            for i, token_id in enumerate(self.brain_token_ids):
-                self.lm_model.transformer.wte.weight[token_id] = brain_token_embeddings[
-                    i
-                ]
+        if not self.no_brain_token_injection:
+            brain_token_embeddings = checkpoint["brain_token_embeddings"]
+            with torch.no_grad():
+                for i, token_id in enumerate(self.brain_token_ids):
+                    self.lm_model.transformer.wte.weight[token_id] = (
+                        brain_token_embeddings[i]
+                    )
 
     @classmethod
     def from_checkpoint(

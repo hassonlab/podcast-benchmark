@@ -1,13 +1,7 @@
-config_setter_name: neural_conv
 task_config:
   task_name: llm_decoding_task
   data_params:
     data_root: data
-    window_width: 0.625
-    subject_ids: [9]
-    preprocessing_fn_name: window_average_neural_data
-    preprocessor_params:
-      num_average_samples: 16
 training_params:
   batch_size: 16
   epochs: 50
