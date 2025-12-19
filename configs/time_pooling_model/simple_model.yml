@@ -8,6 +8,7 @@ tensorboard_dir: event_logs
 
 data_params:
   data_root: data
+  electrode_file_path: processed_data/all_subject_sig.csv
   subject_ids: [1,2,3,4,5,6,7,8,9]
   channel_reg_ex: null
   window_width: 0.2
@@ -24,8 +25,8 @@ data_params:
 
 training_params:
   min_lag: -1000
-  max_lag: 1001
-  lag_step_size: 50
+  max_lag: 1000
+  lag_step_size: 200
   lag: null
   batch_size: 64
   epochs: 50

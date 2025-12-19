@@ -16,14 +16,15 @@ training_params:
   metrics: ["cosine_sim"]
   early_stopping_metric: mse
   n_folds: 5
-  min_lag: -2000
-  max_lag: 1100
+  min_lag: -1000
+  max_lag: 1000
   lag_step_size: 200
   smaller_is_better: true
 data_params:
   # Cross model data_params
   data_root: data
   word_column: word
+  electrode_file_path: processed_data/all_subject_sig.csv
   embedding_type: gpt-2xl
   embedding_layer: 24
   embedding_pca_dim: 50
