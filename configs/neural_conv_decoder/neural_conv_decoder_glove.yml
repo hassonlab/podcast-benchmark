@@ -22,7 +22,7 @@ data_params:
   electrode_file_path: processed_data/all_subject_sig.csv
   embedding_type: glove
   embedding_layer: 24
-  # embedding_pca_dim: 50
+  embedding_pca_dim: 50
   window_width: 0.625
   preprocessing_fn_name: window_average_neural_data
   # neural_conv_decoder specific config
