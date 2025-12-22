@@ -4,152 +4,144 @@ This page summarizes the baseline results for all tasks in the podcast benchmark
 
 ## Overview
 
-Total number of baseline results: 10
+Baseline results for all of our tasks using a simple deep network, trained only on our data.
 
-## Content Noncontent Task
+**Note:** For detailed metrics across all lags, see the `lag_performance.csv` file in each task's results directory linked below.
 
-### content_noncontent_task_sig_elecs_mlp_early_stop_roc
+## Content/Non-Content Classification
 
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml)
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml`
 
-![content_noncontent_task_sig_elecs_mlp_early_stop_roc Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17_lag_performance.png)
+**Detailed Results:** [`baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv`](../baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv)
 
-**Best Performance:**
-
-- **Lag:** 200ms
-- **test_roc_auc_mean:** 0.5900
-
----
-
-## Ensemble Model
-
-### ensemble_model_10_arbitrary
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_arbitrary.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_arbitrary.yml)
-
-![ensemble_model_10_arbitrary Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/ensemble_model_10_arbitrary_2025-12-19-00-17-32_lag_performance.png)
-
-**Best Performance:**
-
-- **Lag:** 400ms
-- **test_word_avg_auc_roc_mean:** 0.5549
-- **test_word_top_5_mean:** 0.0415
-
----
-
-### ensemble_model_10_glove
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_glove.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_glove.yml)
-
-![ensemble_model_10_glove Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/ensemble_model_10_glove_2025-12-19-00-17-41_lag_performance.png)
-
-**Best Performance:**
-
-- **Lag:** 400ms
-- **test_word_avg_auc_roc_mean:** 0.6046
-- **test_word_top_5_mean:** 0.0357
-
----
-
-### ensemble_model_10_gpt2
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml)
-
-![ensemble_model_10_gpt2 Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/ensemble_model_10_gpt2_2025-12-19-00-17-43_lag_performance.png)
-
-**Best Performance:**
-
-- **Lag:** 400ms
-- **test_word_avg_auc_roc_mean:** 0.6057
-- **test_word_top_5_mean:** 0.0254
-
----
-
-## Gpt Surprise
-
-### gpt_surprise
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml)
-
-![gpt_surprise Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/gpt_surprise_2025-12-19-00-18-44_lag_performance.png)
-
-**Best Performance:**
-
-- **Lag:** 400ms
-- **test_corr_mean:** 0.0591
-
----
-
-## Gpt Surprise Multiclass
-
-### gpt_surprise
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml)
-
-![gpt_surprise Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/gpt_surprise_2025-12-19-00-18-43_lag_performance.png)
+![Content/Non-Content Classification](baseline_plots/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17_lag_performance.png)
 
 **Best Performance:**
 
 - **Lag:** 200ms
-- **test_roc_auc_multiclass_mean:** 0.5333
+- **ROC-AUC:** 0.5900
 
 ---
 
-## Pos Task
+## Word Embedding Decoding
 
-### pos_task_sig_elecs_without_other_classes
+### Performance Across Lags
 
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_pos.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_pos.yml)
+![Word Embedding Decoding AUC ROC](baseline_plots/ensemble_models_auc_roc.png)
 
-![pos_task_sig_elecs_without_other_classes Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17_lag_performance.png)
+### Best Performance by Model
+
+#### Arbitrary
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_arbitrary.yml`
+
+**Detailed Results:** [`baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv`](../baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv)
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **AUC-ROC:** 0.5549
+
+#### GloVe
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_glove.yml`
+
+**Detailed Results:** [`baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv`](../baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv)
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **AUC-ROC:** 0.6046
+
+#### GPT-2
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml`
+
+**Detailed Results:** [`baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv`](../baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv)
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **AUC-ROC:** 0.6057
+
+---
+
+## GPT Surprisal (Regression)
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise.yml`
+
+**Detailed Results:** [`baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv`](../baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv)
+
+![GPT Surprisal (Regression)](baseline_plots/gpt_surprise_2025-12-19-00-18-44_lag_performance.png)
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **Correlation:** 0.0591
+
+---
+
+## GPT Surprisal (Multiclass)
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml`
+
+**Detailed Results:** [`baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv`](../baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv)
+
+![GPT Surprisal (Multiclass)](baseline_plots/gpt_surprise_2025-12-19-00-18-43_lag_performance.png)
+
+**Best Performance:**
+
+- **Lag:** 200ms
+- **ROC-AUC (Multiclass):** 0.5333
+
+---
+
+## Part of Speech
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_pos.yml`
+
+**Detailed Results:** [`baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv`](../baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv)
+
+![Part of Speech](baseline_plots/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17_lag_performance.png)
 
 **Best Performance:**
 
 - **Lag:** 600ms
-- **test_roc_auc_multiclass_mean:** 0.5305
+- **ROC-AUC (Multiclass):** 0.5305
 
 ---
 
-## Sentence Onset
+## Sentence Onset Detection
 
-### sentence_onset_lr
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_sentence_onset.yml`
 
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_sentence_onset.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/neural_conv_decoder/neural_conv_decoder_sentence_onset.yml)
+**Detailed Results:** [`baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv`](../baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv)
 
-![sentence_onset_lr Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/sentence_onset_lr_2025-12-19-00-18-44_lag_performance.png)
+![Sentence Onset Detection](baseline_plots/sentence_onset_lr_2025-12-19-00-18-44_lag_performance.png)
 
 **Best Performance:**
 
 - **Lag:** 0ms
-- **test_roc_auc_mean:** 0.8800
+- **ROC-AUC:** 0.8800
 
 ---
 
-## Volume Level
+## Volume Level Prediction
 
-### volume_level_simple
+**Config:** `configs/time_pooling_model/simple_model.yml`
 
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/time_pooling_model/simple_model.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/time_pooling_model/simple_model.yml)
+**Detailed Results:** [`baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv`](../baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv)
 
-![volume_level_simple Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/volume_level_simple_2025-12-19-00-34-56_lag_performance.png)
+![Volume Level Prediction](baseline_plots/volume_level_simple_2025-12-19-00-34-56_lag_performance.png)
 
 **Best Performance:**
 
 - **Lag:** 200ms
-- **test_corr_mean:** 0.4479
+- **Correlation:** 0.4479
 
 ---
 
-### volume_level_torch_ridge
-
-**Config:** [`/Users/zachparis/Documents/projects/podcast-benchmark/configs/time_pooling_model/simple_model.yml`](/Users/zachparis/Documents/projects/podcast-benchmark/configs/time_pooling_model/simple_model.yml)
-
-![volume_level_torch_ridge Performance](/Users/zachparis/Documents/projects/podcast-benchmark/docs/baseline_plots/volume_level_torch_ridge_2025-12-19-00-42-42_lag_performance.png)
-
-**Best Performance:**
-
-- **Lag:** 200ms
-- **test_corr_mean:** 0.4476
-
----
-
+<!--
+This file is manually maintained.
+To regenerate plots only, run: python scripts/generate_baseline_plots.py
+-->

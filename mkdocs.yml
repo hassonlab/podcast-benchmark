@@ -40,6 +40,7 @@ nav:
   - Reference:
       - Task Reference: task-reference.md
       - Registry API: api-reference.md
+      - Baseline Results: baseline-results.md
 
 markdown_extensions:
   - pymdownx.highlight:
