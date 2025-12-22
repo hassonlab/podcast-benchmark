@@ -32,6 +32,38 @@ class LlmDecodingConfig(BaseTaskConfig):
     cache_dir: str = "./model_cache"
 
 
+@dataclass
+class LlmEmbeddingPretrainingConfig(BaseTaskConfig):
+    """Configuration for LLM embedding pre-training task.
+
+    This task trains an encoder to predict the average of token embeddings
+    from GPT-2's embedding layer. The pre-trained encoder can then be loaded
+    into the full GPT2Brain model for token prediction fine-tuning.
+    """
+
+    # No extra input fields needed - encoder predicts embeddings directly
+    input_fields: list[str] = field(default_factory=lambda: [])
+
+    # Config setter will set encoder output_dim to match GPT-2 embedding size
+    required_config_setter_names: list[str] = field(
+        default_factory=lambda: ["llm_embedding_pretraining_config_setter"]
+    )
+
+    # Context and target configuration (should match llm_decoding_task)
+    max_context: int = 32
+    max_target_tokens: int = 16
+    transcript_path: str = "data/stimuli/podcast_transcript.csv"
+    prepend_space: bool = True
+
+    # GPT-2 model configuration
+    model_name: str = "gpt2"  # Options: gpt2, gpt2-medium, gpt2-large, gpt2-xl
+    cache_dir: str = "./model_cache"
+
+    # GPT-2 embedding dimensions by model variant
+    # gpt2: 768, gpt2-medium: 1024, gpt2-large: 1280, gpt2-xl: 1600
+    gpt2_embedding_dim: int = 768
+
+
 @registry.register_config_setter()
 def llm_decoding_config_setter(
     experiment_config: ExperimentConfig, _raws, _task_df
@@ -45,6 +77,39 @@ def llm_decoding_config_setter(
         raise ValueError(
             "Could not set cache_dir for gpt2_brain in llm_decoding_config_setter."
         )
+    return experiment_config
+
+
+@registry.register_config_setter()
+def llm_embedding_pretraining_config_setter(
+    experiment_config: ExperimentConfig, _raws, _task_df
+) -> ExperimentConfig:
+    """Config setter for embedding pre-training task.
+
+    Sets the encoder model's output_dim to match GPT-2's embedding dimension.
+    This ensures the encoder outputs embeddings compatible with GPT-2.
+
+    Args:
+        experiment_config: The experiment configuration to modify
+        _raws: MNE Raw objects (unused)
+        _task_df: Task dataframe (unused)
+
+    Returns:
+        Modified experiment_config with encoder output_dim set
+    """
+    config = experiment_config.task_config.task_specific_config
+
+    # Set output_dim directly on the encoder model (no wrapper needed)
+    if not set_model_spec_fields(
+        experiment_config.model_spec,
+        {"output_dim": config.gpt2_embedding_dim},
+        ["ensemble_pitom_model", "pitom_model"],  # Support different encoder types
+    ):
+        raise ValueError(
+            "Could not set output_dim for encoder in embedding pre-training.\n"
+            f"Make sure model_spec.constructor_name is one of: ensemble_pitom_model, pitom_model"
+        )
+
     return experiment_config
 
 
@@ -145,5 +210,90 @@ def llm_decoding_task(task_config: TaskConfig, tokenizer=None):
             "word": df_word.word,
             "start": df_word.start,
             "end": df_word.end,
+        }
+    )
+
+
+@registry.register_task_data_getter(config_type=LlmEmbeddingPretrainingConfig)
+def llm_embedding_pretraining_task(
+    task_config: TaskConfig, gpt2_model=None, tokenizer=None
+):
+    """Task for LLM embedding pre-training.
+
+    Computes average token embeddings from GPT-2's embedding layer as targets
+    for encoder pre-training. Each word from the transcript is tokenized, and
+    the embeddings of its tokens are averaged to create a single target vector.
+
+    Args:
+        task_config: Task configuration
+        gpt2_model: Optional pre-loaded GPT-2 model (for reuse/testing)
+        tokenizer: Optional pre-loaded tokenizer (for reuse/testing)
+
+    Returns:
+        DataFrame with columns:
+            - target: Average token embedding [embedding_dim]
+            - word: Original word string
+            - start: Word start time in seconds
+            - end: Word end time in seconds
+    """
+    import torch
+
+    config: LlmEmbeddingPretrainingConfig = task_config.task_specific_config
+
+    # Load GPT-2 model and tokenizer if not provided
+    if gpt2_model is None or tokenizer is None:
+        gpt2_model, tokenizer = load_gpt2_model_and_tokenizer(
+            cache_dir=config.cache_dir, model_name=config.model_name
+        )
+
+    # Get embedding layer from GPT-2
+    embedding_layer = gpt2_model.transformer.wte
+
+    # Load transcript data
+    df_word = pd.read_csv(config.transcript_path)
+    stripped_words = df_word.word.str.strip()
+    full_transcript = stripped_words.str.cat(sep=" ")
+    all_words = full_transcript.split()
+
+    # Prepare target words list
+    targets = []
+    for i, word in enumerate(all_words):
+        targets.append(word)
+
+    # Tokenize target words to get their token IDs
+    target_encoding = tokenizer(
+        targets,
+        return_tensors="np",
+        padding=False,  # No padding - handle variable length
+        truncation=True,
+        max_length=config.max_target_tokens,
+    )
+
+    # Compute average embedding for each target word's tokens
+    embedding_targets = []
+    with torch.no_grad():
+        for input_ids in target_encoding["input_ids"]:
+            # Get embeddings for this word's tokens
+            token_ids_tensor = torch.tensor(input_ids).unsqueeze(
+                0
+            )  # [1, num_tokens]
+            token_embeddings = embedding_layer(
+                token_ids_tensor
+            )  # [1, num_tokens, embedding_dim]
+
+            # Average over token dimension
+            avg_embedding = token_embeddings.mean(dim=1).squeeze(0)  # [embedding_dim]
+            embedding_targets.append(avg_embedding.numpy())
+
+    # Stack into array [num_samples, embedding_dim]
+    embedding_targets = np.stack(embedding_targets)
+
+    # Return DataFrame compatible with existing training pipeline
+    return pd.DataFrame(
+        {
+            "target": list(embedding_targets),  # Store as list of arrays
+            "word": targets,
+            "start": df_word.start.values[: len(targets)],
+            "end": df_word.end.values[: len(targets)],
         }
     )

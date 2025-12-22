@@ -147,6 +147,8 @@ class ModelSpec:
         sub_models: Dictionary mapping parameter names to ModelSpec objects.
                    The keys indicate the keyword argument names that will receive
                    the built sub-models when constructing the parent model.
+        checkpoint_path: Optional path to checkpoint for initialization. Supports
+                        dynamic formatting with {lag} and {fold} placeholders.
 
     Example:
         # Nested encoder model inside GPT2Brain
@@ -157,7 +159,8 @@ class ModelSpec:
                 "encoder_model": ModelSpec(
                     constructor_name="pitom_model",
                     params={"input_channels": 64, "output_dim": 768},
-                    sub_models={}
+                    sub_models={},
+                    checkpoint_path="checkpoints/encoder/lag_{lag}/fold_{fold}/best_model.pt"
                 )
             }
         )
@@ -166,6 +169,7 @@ class ModelSpec:
     constructor_name: str
     params: Dict[str, Any] = field(default_factory=dict)
     sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
+    checkpoint_path: Optional[str] = None
 
 
 @dataclass

@@ -583,7 +583,7 @@ def train_decoding_model(
             ridge_regression_results.append(ridge_baseline_metrics)
 
         # Model, optimizer, early‐stop setup
-        model = build_model_from_spec(model_spec).to(device)
+        model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
         optimizer = optim.Adam(
             model.parameters(),
             lr=training_params.learning_rate,
