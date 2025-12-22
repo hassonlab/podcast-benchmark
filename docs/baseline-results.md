@@ -12,7 +12,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml`
 
-**Detailed Results:** [`baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv`](../baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv)
+**Detailed Results:** `baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv`
 
 ![Content/Non-Content Classification](baseline_plots/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17_lag_performance.png)
 
@@ -35,7 +35,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_arbitrary.yml`
 
-**Detailed Results:** [`baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv`](../baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv)
+**Detailed Results:** `baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv`
 
 **Best Performance:**
 
@@ -46,7 +46,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_glove.yml`
 
-**Detailed Results:** [`baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv`](../baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv)
+**Detailed Results:** `baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv`
 
 **Best Performance:**
 
@@ -57,7 +57,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml`
 
-**Detailed Results:** [`baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv`](../baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv)
+**Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv`
 
 **Best Performance:**
 
@@ -70,7 +70,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise.yml`
 
-**Detailed Results:** [`baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv`](../baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv)
+**Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv`
 
 ![GPT Surprisal (Regression)](baseline_plots/gpt_surprise_2025-12-19-00-18-44_lag_performance.png)
 
@@ -85,7 +85,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml`
 
-**Detailed Results:** [`baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv`](../baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv)
+**Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv`
 
 ![GPT Surprisal (Multiclass)](baseline_plots/gpt_surprise_2025-12-19-00-18-43_lag_performance.png)
 
@@ -100,7 +100,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_pos.yml`
 
-**Detailed Results:** [`baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv`](../baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv)
+**Detailed Results:** `baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv`
 
 ![Part of Speech](baseline_plots/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17_lag_performance.png)
 
@@ -115,7 +115,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_sentence_onset.yml`
 
-**Detailed Results:** [`baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv`](../baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv)
+**Detailed Results:** `baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv`
 
 ![Sentence Onset Detection](baseline_plots/sentence_onset_lr_2025-12-19-00-18-44_lag_performance.png)
 
@@ -130,7 +130,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/time_pooling_model/simple_model.yml`
 
-**Detailed Results:** [`baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv`](../baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv)
+**Detailed Results:** `baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv`
 
 ![Volume Level Prediction](baseline_plots/volume_level_simple_2025-12-19-00-34-56_lag_performance.png)
 
