@@ -29,9 +29,7 @@ data_params:
   data_root: data
   window_width: 0.625
   electrode_file_path: processed_data/all_subject_sig.csv
-  subject_ids: [9]
   preprocessing_fn_name: window_average_neural_data
-  # channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   preprocessor_params:
     num_average_samples: 32
   # Task-specific knobs (optional)

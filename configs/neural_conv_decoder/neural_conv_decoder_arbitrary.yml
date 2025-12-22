@@ -21,7 +21,6 @@ data_params:
   embedding_type: arbitrary
   embedding_layer: 24
   word_column: word
-  subject_ids: [9]
   electrode_file_path: processed_data/all_subject_sig.csv
   embedding_pca_dim: 50
   window_width: 0.625

@@ -20,7 +20,6 @@ data_params:
   data_root: data
   word_column: word
   electrode_file_path: processed_data/all_subject_sig.csv
-  subject_ids: [9]
   embedding_type: glove
   embedding_layer: 24
   # embedding_pca_dim: 50

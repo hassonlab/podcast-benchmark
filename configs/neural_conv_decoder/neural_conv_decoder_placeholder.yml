@@ -30,8 +30,6 @@ data_params:
   embedding_pca_dim: 50
   window_width: 1.0
   preprocessing_fn_name: window_average_neural_data
-  subject_ids: [9]
-  channel_reg_ex: ^G([1-9]|[1-5][0-9]|6[0-4])$
   # neural_conv_decoder specific config
   preprocessor_params:
     num_average_samples: 32
