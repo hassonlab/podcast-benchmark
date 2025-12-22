@@ -42,6 +42,8 @@ Training results will be saved to:
 - `models/` - Saved model checkpoints
 - `event_logs/` - TensorBoard logs
 
+See [Baseline Results](baseline-results.md) for performance benchmarks across all tasks.
+
 ## Configuration
 
 To modify data, behavior, or hyperparameters:
@@ -59,4 +61,5 @@ See [Onboarding a New Model](onboarding-model.md) for details on configuration o
 - [Add your own model](onboarding-model.md)
 - [Create a custom task](adding-task.md)
 - [View all available tasks](task-reference.md)
+- [Compare against baseline results](baseline-results.md)
 - [Explore the API](api-reference.md)

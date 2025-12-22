@@ -183,7 +183,7 @@ See the `tasks/` directory for complete examples:
 - `tasks/gpt_surprise.py` - Regression and multiclass classification examples
 - `tasks/volume_level.py` - Audio feature prediction with custom config setter
 
-For detailed documentation on all available tasks and their configuration parameters, see the [Task Reference](task-reference.md)
+For detailed documentation on all available tasks and their configuration parameters, see the [Task Reference](task-reference.md). For baseline performance benchmarks, see [Baseline Results](baseline-results.md)
 
 ---
 
@@ -214,6 +214,7 @@ def my_task(data_params: DataParams):
 ## See Also
 
 - [Task Reference](task-reference.md) - Complete reference for all available tasks
+- [Baseline Results](baseline-results.md) - Performance benchmarks for all tasks
 - [Configuration Guide](configuration.md) - How to configure tasks
 - [API Reference](api-reference.md) - Task data getter API
 - `tasks/` directory - Complete task examples

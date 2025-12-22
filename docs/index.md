@@ -18,7 +18,8 @@ A benchmarking framework for neural decoding from podcast listening data.
 3. [Adding a New Task](adding-task.md) - How to implement custom decoding tasks
 4. [Configuration Guide](configuration.md) - Understanding and configuring experiments
 5. [Task Reference](task-reference.md) - Complete reference for all available tasks
-6. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
+6. [Baseline Results](baseline-results.md) - Performance benchmarks for all tasks
+7. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
 
 ## Overview
 

@@ -8,6 +8,8 @@ Tasks define what you want to decode from neural data. Each task provides a Data
 
 All tasks are located in the `tasks/` directory and must be registered using the `@registry.register_task_data_getter()` decorator.
 
+For performance benchmarks on each task, see [Baseline Results](baseline-results.md).
+
 ---
 
 ## Task List
@@ -374,6 +376,7 @@ data_params:
 
 ## See Also
 
+- [Baseline Results](baseline-results.md): Performance benchmarks for all tasks
 - [Configuration Guide](configuration.md): Full configuration reference
 - [Adding a Task](adding-task.md): Step-by-step guide for implementing tasks
 - [API Reference](api-reference.md): Detailed API documentation
