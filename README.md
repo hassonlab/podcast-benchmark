@@ -14,11 +14,11 @@ Comparing brain → word decoding performance to [previously published results](
 # Setup environment and download data
 ./setup.sh
 
-# Train neural convolutional decoder
-make neural-conv
+# Train word embedding decoding task
+make train-all TASKS=word_embedding_decoding_task
 
-# Train foundation model decoder
-make foundation-model
+# Train all tasks over all models
+make train-all
 ```
 
 ## Features
