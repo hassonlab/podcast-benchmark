@@ -1,13 +1,15 @@
 # Token Fine-tuning Configuration
 # Load pre-trained encoder and train full GPT2Brain model for token prediction
-
+config_setter_name: neural_conv
 task_config:
   task_name: llm_decoding_task
   data_params:
     data_root: data
-    subject_ids: [9]
+    electrode_file_path: processed_data/all_subject_sig.csv
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 32
   task_specific_config:
     max_context: 32
     max_target_tokens: 16
@@ -20,7 +22,7 @@ training_params:
   batch_size: 16
   epochs: 50
   learning_rate: 0.0001  # LOWER learning rate for fine-tuning
-  weight_decay: 0.0001
+  weight_decay: 0.0
   early_stopping_patience: 15
   n_folds: 5
   min_lag: 0
@@ -39,6 +41,8 @@ model_spec:
   constructor_name: gpt2_brain
   params:
     freeze_lm: true
+    encoder_forward_kwargs:
+      preserve_ensemble: true
   sub_models:
     encoder_model:
       constructor_name: ensemble_pitom_model
@@ -46,10 +50,10 @@ model_spec:
         num_models: 10
         conv_filters: 128
         dropout: 0.2
-        # output_dim will be set by config_setter to 768
+        embedding_dim: 768
       # CRITICAL: Checkpoint path with {lag} and {fold} placeholders
       # These will be automatically formatted with current lag/fold during training
-      checkpoint_path: "checkpoints/llm_two_stage/embedding_pretrain/lag_{lag}/best_model_fold{fold}.pt"
+      checkpoint_path: "checkpoints/llm_two_stage/embedding_pretrain/llm_embedding_pretrain_2025-12-22-15-12-35/lag_{lag}/best_model_fold{fold}.pt"
 
 output_dir: results/llm_two_stage/token_finetune
 checkpoint_dir: checkpoints/llm_two_stage/token_finetune

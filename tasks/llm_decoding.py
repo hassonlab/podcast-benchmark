@@ -44,11 +44,6 @@ class LlmEmbeddingPretrainingConfig(BaseTaskConfig):
     # No extra input fields needed - encoder predicts embeddings directly
     input_fields: list[str] = field(default_factory=lambda: [])
 
-    # Config setter will set encoder output_dim to match GPT-2 embedding size
-    required_config_setter_names: list[str] = field(
-        default_factory=lambda: ["llm_embedding_pretraining_config_setter"]
-    )
-
     # Context and target configuration (should match llm_decoding_task)
     max_context: int = 32
     max_target_tokens: int = 16
@@ -58,10 +53,6 @@ class LlmEmbeddingPretrainingConfig(BaseTaskConfig):
     # GPT-2 model configuration
     model_name: str = "gpt2"  # Options: gpt2, gpt2-medium, gpt2-large, gpt2-xl
     cache_dir: str = "./model_cache"
-
-    # GPT-2 embedding dimensions by model variant
-    # gpt2: 768, gpt2-medium: 1024, gpt2-large: 1280, gpt2-xl: 1600
-    gpt2_embedding_dim: int = 768
 
 
 @registry.register_config_setter()
@@ -77,39 +68,6 @@ def llm_decoding_config_setter(
         raise ValueError(
             "Could not set cache_dir for gpt2_brain in llm_decoding_config_setter."
         )
-    return experiment_config
-
-
-@registry.register_config_setter()
-def llm_embedding_pretraining_config_setter(
-    experiment_config: ExperimentConfig, _raws, _task_df
-) -> ExperimentConfig:
-    """Config setter for embedding pre-training task.
-
-    Sets the encoder model's output_dim to match GPT-2's embedding dimension.
-    This ensures the encoder outputs embeddings compatible with GPT-2.
-
-    Args:
-        experiment_config: The experiment configuration to modify
-        _raws: MNE Raw objects (unused)
-        _task_df: Task dataframe (unused)
-
-    Returns:
-        Modified experiment_config with encoder output_dim set
-    """
-    config = experiment_config.task_config.task_specific_config
-
-    # Set output_dim directly on the encoder model (no wrapper needed)
-    if not set_model_spec_fields(
-        experiment_config.model_spec,
-        {"output_dim": config.gpt2_embedding_dim},
-        ["ensemble_pitom_model", "pitom_model"],  # Support different encoder types
-    ):
-        raise ValueError(
-            "Could not set output_dim for encoder in embedding pre-training.\n"
-            f"Make sure model_spec.constructor_name is one of: ensemble_pitom_model, pitom_model"
-        )
-
     return experiment_config
 
 
@@ -274,9 +232,7 @@ def llm_embedding_pretraining_task(
     with torch.no_grad():
         for input_ids in target_encoding["input_ids"]:
             # Get embeddings for this word's tokens
-            token_ids_tensor = torch.tensor(input_ids).unsqueeze(
-                0
-            )  # [1, num_tokens]
+            token_ids_tensor = torch.tensor(input_ids).unsqueeze(0)  # [1, num_tokens]
             token_embeddings = embedding_layer(
                 token_ids_tensor
             )  # [1, num_tokens, embedding_dim]
