@@ -2,6 +2,7 @@ task_config:
   task_name: llm_decoding_task
   data_params:
     data_root: data
+    window_width: 0.625
     electrode_file_path: processed_data/all_subject_sig.csv
 training_params:
   batch_size: 16
