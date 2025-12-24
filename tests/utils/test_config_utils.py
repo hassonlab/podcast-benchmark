@@ -1,14 +1,22 @@
 """
-Tests for command-line parsing and config override functionality from main.py.
+Tests for multi-task configuration functionality in utils/config_utils.py.
 
-Tests argument parsing, config override application, and nested attribute handling.
+Following TDD principles - these tests define the expected behavior
+before implementation.
 """
 
 import pytest
+import tempfile
+import os
+from copy import deepcopy
 
+from core.config import ExperimentConfig, MultiTaskConfig, TaskConfig
 from utils.config_utils import (
+    apply_overrides,  # Reuse existing function for shared params
+    load_multi_task_config,
+    load_config,
+    validate_multi_task_config,
     parse_override_args,
-    apply_overrides,
     set_nested_attr,
     get_nested_value,
     load_experiment_config,
@@ -155,7 +163,9 @@ class TestNestedAttributeHandling:
             get_nested_value(sample_experiment_config, "training_params.batch_size")
             == 32
         )
-        assert get_nested_value(sample_experiment_config, "model_spec.params.param2") == 42
+        assert (
+            get_nested_value(sample_experiment_config, "model_spec.params.param2") == 42
+        )
 
     def test_get_nested_value_mixed(self, sample_experiment_config):
         """Test getting nested values from mixed dict/dataclass structure."""
@@ -186,7 +196,9 @@ class TestNestedAttributeHandling:
 
     def test_set_nested_attr_mixed(self, sample_experiment_config):
         """Test setting nested attributes in mixed dict/dataclass."""
-        set_nested_attr(sample_experiment_config, "model_spec.params.new_param", "new_value")
+        set_nested_attr(
+            sample_experiment_config, "model_spec.params.new_param", "new_value"
+        )
 
         assert sample_experiment_config.model_spec.params["new_param"] == "new_value"
 
@@ -309,6 +321,7 @@ class TestLoadExperimentConfig:
 
         # Verify task config was converted from dict to TaskConfig
         from core.config import TaskConfig
+
         assert isinstance(config.task_config, TaskConfig)
         assert config.task_config.task_name == "test_task"
         assert config.task_config.data_params.window_width == 0.5
@@ -316,13 +329,20 @@ class TestLoadExperimentConfig:
 
         # Verify task-specific config was instantiated correctly
         from tests.conftest import TestTaskConfig
+
         assert isinstance(config.task_config.task_specific_config, TestTaskConfig)
         assert config.task_config.task_specific_config.test_param == "test_value"
-        assert config.task_config.task_specific_config.input_fields == ["field1", "field2"]
+        assert config.task_config.task_specific_config.input_fields == [
+            "field1",
+            "field2",
+        ]
 
     def test_electrode_file_overrides_per_subject_electrodes(
-        self, temp_task_config_with_electrode_file, mock_task_registry,
-        temp_electrode_file, temp_subject_mapping
+        self,
+        temp_task_config_with_electrode_file,
+        mock_task_registry,
+        temp_electrode_file,
+        temp_subject_mapping,
     ):
         """Test that electrode_file_path correctly overrides per_subject_electrodes."""
         overrides = {}
@@ -330,7 +350,7 @@ class TestLoadExperimentConfig:
         config = load_experiment_config(
             temp_task_config_with_electrode_file,
             overrides,
-            subject_mapping_file=temp_subject_mapping
+            subject_mapping_file=temp_subject_mapping,
         )
 
         # Verify subject_ids were set from electrode file
@@ -340,10 +360,16 @@ class TestLoadExperimentConfig:
         assert config.task_config.data_params.per_subject_electrodes is not None
         assert 5 in config.task_config.data_params.per_subject_electrodes
         assert 12 in config.task_config.data_params.per_subject_electrodes
-        assert config.task_config.data_params.per_subject_electrodes[5] == ["A1", "A2", "B1"]
+        assert config.task_config.data_params.per_subject_electrodes[5] == [
+            "A1",
+            "A2",
+            "B1",
+        ]
         assert config.task_config.data_params.per_subject_electrodes[12] == ["C1", "C2"]
 
-    def test_config_setter_name_with_required_setters(self, temp_task_config_file, mock_task_registry):
+    def test_config_setter_name_with_required_setters(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test that config_setter_name correctly combines with required_config_setter_names."""
         overrides = {"config_setter_name": "user_setter"}
 
@@ -351,9 +377,15 @@ class TestLoadExperimentConfig:
 
         # Verify that required_config_setter_names are prepended to config_setter_name
         assert isinstance(config.config_setter_name, list)
-        assert config.config_setter_name == ["required_setter1", "required_setter2", "user_setter"]
+        assert config.config_setter_name == [
+            "required_setter1",
+            "required_setter2",
+            "user_setter",
+        ]
 
-    def test_config_setter_name_list_with_required_setters(self, temp_task_config_file, mock_task_registry):
+    def test_config_setter_name_list_with_required_setters(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test that config_setter_name list correctly combines with required_config_setter_names."""
         overrides = {"config_setter_name": ["user_setter1", "user_setter2"]}
 
@@ -361,9 +393,16 @@ class TestLoadExperimentConfig:
 
         # Verify that required_config_setter_names are prepended to config_setter_name list
         assert isinstance(config.config_setter_name, list)
-        assert config.config_setter_name == ["required_setter1", "required_setter2", "user_setter1", "user_setter2"]
+        assert config.config_setter_name == [
+            "required_setter1",
+            "required_setter2",
+            "user_setter1",
+            "user_setter2",
+        ]
 
-    def test_config_setter_name_only_required(self, temp_task_config_file_no_setter, mock_task_registry):
+    def test_config_setter_name_only_required(
+        self, temp_task_config_file_no_setter, mock_task_registry
+    ):
         """Test that required_config_setter_names work when no config_setter_name is provided."""
         overrides = {}
 
@@ -373,30 +412,40 @@ class TestLoadExperimentConfig:
         assert isinstance(config.config_setter_name, list)
         assert config.config_setter_name == ["required_setter1", "required_setter2"]
 
-    def test_config_setter_name_no_required(self, temp_task_config_file_no_required_setters, mock_task_registry):
+    def test_config_setter_name_no_required(
+        self, temp_task_config_file_no_required_setters, mock_task_registry
+    ):
         """Test that config_setter_name works when no required_config_setter_names are provided."""
         overrides = {"config_setter_name": "user_setter"}
 
-        config = load_experiment_config(temp_task_config_file_no_required_setters, overrides)
+        config = load_experiment_config(
+            temp_task_config_file_no_required_setters, overrides
+        )
 
         # Verify only user setter is present as a list
         assert isinstance(config.config_setter_name, list)
         assert config.config_setter_name == ["user_setter"]
 
-    def test_no_config_setters(self, temp_task_config_file_no_setters_at_all, mock_task_registry):
+    def test_no_config_setters(
+        self, temp_task_config_file_no_setters_at_all, mock_task_registry
+    ):
         """Test that config loads correctly when no config setters are provided at all."""
         overrides = {}
 
-        config = load_experiment_config(temp_task_config_file_no_setters_at_all, overrides)
+        config = load_experiment_config(
+            temp_task_config_file_no_setters_at_all, overrides
+        )
 
         # Verify config_setter_name remains None
         assert config.config_setter_name is None
 
-    def test_overrides_applied_before_task_config_loading(self, temp_task_config_file, mock_task_registry):
+    def test_overrides_applied_before_task_config_loading(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test that overrides are applied before task config is instantiated."""
         overrides = {
             "task_config.data_params.window_width": 1.5,
-            "task_config.task_specific_config.test_param": "overridden_value"
+            "task_config.task_specific_config.test_param": "overridden_value",
         }
 
         config = load_experiment_config(temp_task_config_file, overrides)
@@ -405,7 +454,9 @@ class TestLoadExperimentConfig:
         assert config.task_config.data_params.window_width == 1.5
         assert config.task_config.task_specific_config.test_param == "overridden_value"
 
-    def test_nested_model_specs_correctly_set(self, temp_nested_model_config_file, mock_task_registry):
+    def test_nested_model_specs_correctly_set(
+        self, temp_nested_model_config_file, mock_task_registry
+    ):
         """Test that nested model specs can be correctly set via overrides."""
         # Test overriding nested model spec parameters
         overrides = {
@@ -432,7 +483,9 @@ class TestLoadExperimentConfig:
 class TestExperimentConfigCLIIntegration:
     """Test integration of load_experiment_config with CLI-style argument parsing."""
 
-    def test_realistic_command_line_scenario(self, temp_task_config_file, mock_task_registry):
+    def test_realistic_command_line_scenario(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test a realistic command-line override scenario with task config."""
         # Simulate args like: python main.py --config file.yml --model_spec.params.lr=0.01 --training_params.epochs=100
         unknown_args = [
@@ -476,7 +529,9 @@ class TestExperimentConfigCLIIntegration:
         assert config.training_params.learning_rate == 0.001
         assert config.task_config.data_params.subject_ids == [1, 2, 3]
 
-    def test_override_task_specific_config_fields(self, temp_task_config_file, mock_task_registry):
+    def test_override_task_specific_config_fields(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test overriding fields in task-specific config via CLI."""
         unknown_args = [
             "--task_config.task_specific_config.test_param=cli_override",
@@ -488,9 +543,15 @@ class TestExperimentConfigCLIIntegration:
 
         # Verify task-specific config overrides were applied
         assert config.task_config.task_specific_config.test_param == "cli_override"
-        assert config.task_config.task_specific_config.input_fields == ["field3", "field4", "field5"]
+        assert config.task_config.task_specific_config.input_fields == [
+            "field3",
+            "field4",
+            "field5",
+        ]
 
-    def test_override_with_complex_types(self, temp_task_config_file, mock_task_registry):
+    def test_override_with_complex_types(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test CLI overrides with complex data types (lists, dicts)."""
         unknown_args = [
             "--model_spec.params.layer_sizes=[512,256,128]",
@@ -505,7 +566,9 @@ class TestExperimentConfigCLIIntegration:
         assert config.training_params.metrics == ["mse", "cosine_sim", "nll_embedding"]
         assert config.task_config.data_params.subject_ids == [5, 6, 7, 8, 9]
 
-    def test_override_config_setter_name_via_cli(self, temp_task_config_file, mock_task_registry):
+    def test_override_config_setter_name_via_cli(
+        self, temp_task_config_file, mock_task_registry
+    ):
         """Test overriding config_setter_name via CLI arguments."""
         unknown_args = ["--config_setter_name=cli_setter"]
 
@@ -513,12 +576,19 @@ class TestExperimentConfigCLIIntegration:
         config = load_experiment_config(temp_task_config_file, overrides)
 
         # Should have required setters prepended to CLI-provided setter
-        assert config.config_setter_name == ["required_setter1", "required_setter2", "cli_setter"]
+        assert config.config_setter_name == [
+            "required_setter1",
+            "required_setter2",
+            "cli_setter",
+        ]
 
     def test_multiple_override_sources(self, temp_task_config_file, mock_task_registry):
         """Test combining overrides from multiple sources (simulating mixed CLI args)."""
         # First set of args
-        args_batch1 = ["--training_params.batch_size=64", "--model_spec.params.dropout=0.3"]
+        args_batch1 = [
+            "--training_params.batch_size=64",
+            "--model_spec.params.dropout=0.3",
+        ]
         overrides1 = parse_override_args(args_batch1)
 
         # Second set of args (simulating user adding more)
@@ -534,3 +604,513 @@ class TestExperimentConfigCLIIntegration:
         assert config.training_params.batch_size == 64
         assert config.model_spec.params["dropout"] == 0.3
         assert config.task_config.data_params.window_width == 0.75
+
+
+class TestSharedParamsWithApplyOverrides:
+    """Test that apply_overrides works for shared params use case."""
+
+    def test_apply_overrides_as_shared_params(self, sample_experiment_config):
+        """Test that apply_overrides can be used for shared params."""
+        shared_params = {
+            "training_params.n_folds": 5,
+            "training_params.min_lag": 0,
+            "training_params.max_lag": 400,
+        }
+
+        modified_config = apply_overrides(sample_experiment_config, shared_params)
+
+        assert modified_config.training_params.n_folds == 5
+        assert modified_config.training_params.min_lag == 0
+        assert modified_config.training_params.max_lag == 400
+
+
+class TestLoadMultiTaskConfig:
+    """Test loading multi-task configurations from YAML files."""
+
+    def test_load_basic_multi_task_config(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test loading basic multi-task config with two tasks."""
+        overrides = {}
+
+        multi_config = load_multi_task_config(temp_multi_task_config_file, overrides)
+
+        # Should return MultiTaskConfig
+        assert isinstance(multi_config, MultiTaskConfig)
+
+        # Should have 2 tasks
+        assert len(multi_config.tasks) == 2
+
+        # Each task should be an ExperimentConfig
+        assert all(isinstance(task, ExperimentConfig) for task in multi_config.tasks)
+
+        # Verify first task
+        assert multi_config.tasks[0].trial_name == "task1_pretrain"
+        assert multi_config.tasks[0].training_params.batch_size == 32
+
+        # Verify second task
+        assert multi_config.tasks[1].trial_name == "task2_finetune"
+        assert multi_config.tasks[1].training_params.batch_size == 16
+
+    def test_load_multi_task_with_shared_params(
+        self, temp_multi_task_config_with_shared, mock_task_registry
+    ):
+        """Test that shared_params are loaded and stored in MultiTaskConfig.
+
+        Note: Shared params are NOT applied during load_multi_task_config - they are
+        stored and applied later by main.py when running tasks. This gives main.py
+        control over when shared params are applied (after config setters).
+        """
+        overrides = {}
+
+        multi_config = load_multi_task_config(
+            temp_multi_task_config_with_shared, overrides
+        )
+
+        # Should have shared_params stored
+        assert multi_config.shared_params is not None
+        assert multi_config.shared_params["training_params.n_folds"] == 5
+        assert multi_config.shared_params["training_params.min_lag"] == 0
+        assert multi_config.shared_params["training_params.max_lag"] == 400
+
+        # Shared params should NOT be applied yet - tasks should have original values
+        # Task 1 has batch_size: 32 (not overridden yet)
+        assert multi_config.tasks[0].training_params.batch_size == 32
+        # Task 2 has batch_size: 16 (not overridden yet)
+        assert multi_config.tasks[1].training_params.batch_size == 16
+
+    def test_shared_params_can_be_applied_with_apply_overrides(
+        self, temp_multi_task_config_with_shared, mock_task_registry
+    ):
+        """Test that shared_params can be applied to tasks using apply_overrides.
+
+        This demonstrates how main.py will use shared_params after loading.
+        """
+        overrides = {}
+
+        multi_config = load_multi_task_config(
+            temp_multi_task_config_with_shared, overrides
+        )
+
+        # Apply shared_params to each task using apply_overrides
+        if multi_config.shared_params:
+            for i, task in enumerate(multi_config.tasks):
+                multi_config.tasks[i] = apply_overrides(
+                    task, multi_config.shared_params
+                )
+
+        # Now shared params should be applied to all tasks
+        assert multi_config.tasks[0].training_params.n_folds == 5
+        assert multi_config.tasks[0].training_params.min_lag == 0
+        assert multi_config.tasks[0].training_params.max_lag == 400
+
+        assert multi_config.tasks[1].training_params.n_folds == 5
+        assert multi_config.tasks[1].training_params.min_lag == 0
+        assert multi_config.tasks[1].training_params.max_lag == 400
+
+        # Task-specific values should be preserved
+        assert multi_config.tasks[0].training_params.batch_size == 32
+        assert multi_config.tasks[1].training_params.batch_size == 16
+
+    def test_load_multi_task_no_shared_params(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test loading multi-task config without shared_params."""
+        overrides = {}
+
+        multi_config = load_multi_task_config(temp_multi_task_config_file, overrides)
+
+        # shared_params should be None or empty
+        assert multi_config.shared_params is None or multi_config.shared_params == {}
+
+    def test_load_multi_task_applies_cli_overrides(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test that command-line overrides are applied during loading."""
+        # Override fields in individual tasks
+        overrides = {
+            "tasks.0.training_params.batch_size": 64,
+            "tasks.1.trial_name": "overridden_name",
+        }
+
+        multi_config = load_multi_task_config(temp_multi_task_config_file, overrides)
+
+        # CLI overrides should be applied to raw YAML before conversion
+        assert multi_config.tasks[0].training_params.batch_size == 64
+        assert multi_config.tasks[1].trial_name == "overridden_name"
+
+    def test_load_multi_task_with_nested_model_specs(
+        self, temp_multi_task_nested_models, mock_task_registry
+    ):
+        """Test loading multi-task config with nested model specs."""
+        overrides = {}
+
+        multi_config = load_multi_task_config(temp_multi_task_nested_models, overrides)
+
+        # Second task should have nested model spec with checkpoint_path
+        task2 = multi_config.tasks[1]
+        assert "encoder_model" in task2.model_spec.sub_models
+        encoder = task2.model_spec.sub_models["encoder_model"]
+        assert "{prev_checkpoint_dir}" in encoder.checkpoint_path
+
+    def test_load_multi_task_finalizes_task_configs(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test that each task's task_config is properly finalized."""
+        overrides = {}
+
+        multi_config = load_multi_task_config(temp_multi_task_config_file, overrides)
+
+        # Each task should have properly typed TaskConfig
+        for task in multi_config.tasks:
+            assert isinstance(task.task_config, TaskConfig)
+            assert task.task_config.task_name == "test_task"
+            # Task-specific config should be instantiated from TestTaskConfig
+            from tests.conftest import TestTaskConfig
+
+            assert isinstance(task.task_config.task_specific_config, TestTaskConfig)
+
+    def test_load_multi_task_processes_config_setters(
+        self, temp_multi_task_with_config_setters, mock_task_registry
+    ):
+        """Test that config setters are properly combined for each task."""
+        overrides = {}
+
+        multi_config = load_multi_task_config(
+            temp_multi_task_with_config_setters, overrides
+        )
+
+        # Each task should have required_config_setter_names processed
+        for task in multi_config.tasks:
+            # Should have required setters in the list
+            assert task.config_setter_name is not None
+            assert isinstance(task.config_setter_name, list)
+            assert "required_setter1" in task.config_setter_name
+
+
+class TestLoadConfig:
+    """Test auto-detection of single vs multi-task configs."""
+
+    def test_load_config_detects_single_task(
+        self, temp_task_config_file, mock_task_registry
+    ):
+        """Test that load_config correctly detects and loads single-task config."""
+        overrides = {}
+
+        config = load_config(temp_task_config_file, overrides)
+
+        # Should return ExperimentConfig
+        assert isinstance(config, ExperimentConfig)
+        assert config.trial_name == "test_with_task_config"
+
+    def test_load_config_detects_multi_task(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test that load_config correctly detects and loads multi-task config."""
+        overrides = {}
+
+        config = load_config(temp_multi_task_config_file, overrides)
+
+        # Should return MultiTaskConfig
+        assert isinstance(config, MultiTaskConfig)
+        assert len(config.tasks) == 2
+
+    def test_load_config_preserves_overrides_single(
+        self, temp_task_config_file, mock_task_registry
+    ):
+        """Test that load_config preserves overrides for single-task."""
+        overrides = {"trial_name": "cli_override"}
+
+        config = load_config(temp_task_config_file, overrides)
+
+        assert isinstance(config, ExperimentConfig)
+        assert config.trial_name == "cli_override"
+
+    def test_load_config_preserves_overrides_multi(
+        self, temp_multi_task_config_file, mock_task_registry
+    ):
+        """Test that load_config preserves overrides for multi-task."""
+        overrides = {"tasks.0.trial_name": "multi_override"}
+
+        config = load_config(temp_multi_task_config_file, overrides)
+
+        assert isinstance(config, MultiTaskConfig)
+        assert config.tasks[0].trial_name == "multi_override"
+
+
+class TestMultiTaskConfigValidation:
+    """Test validation of MultiTaskConfig."""
+
+    def test_validation_rejects_empty_tasks(self):
+        """Test that empty tasks list is rejected."""
+        from core.config import MultiTaskConfig
+
+        multi_config = MultiTaskConfig(tasks=[], shared_params=None)
+
+        with pytest.raises(ValueError, match="at least one task"):
+            validate_multi_task_config(multi_config)
+
+    def test_validation_rejects_duplicate_trial_names(self, sample_experiment_config):
+        """Test that duplicate trial_names are rejected."""
+        from core.config import MultiTaskConfig
+
+        task1 = deepcopy(sample_experiment_config)
+        task1.trial_name = "duplicate_name"
+
+        task2 = deepcopy(sample_experiment_config)
+        task2.trial_name = "duplicate_name"
+
+        multi_config = MultiTaskConfig(tasks=[task1, task2], shared_params=None)
+
+        with pytest.raises(ValueError, match="trial_names must be unique"):
+            validate_multi_task_config(multi_config)
+
+    def test_validation_allows_empty_trial_names(self, sample_experiment_config):
+        """Test that empty trial names don't trigger duplicate check."""
+        from core.config import MultiTaskConfig
+
+        task1 = deepcopy(sample_experiment_config)
+        task1.trial_name = ""
+
+        task2 = deepcopy(sample_experiment_config)
+        task2.trial_name = ""
+
+        multi_config = MultiTaskConfig(tasks=[task1, task2], shared_params=None)
+
+        # Should not raise - empty names are ignored in uniqueness check
+        validate_multi_task_config(multi_config)
+
+    def test_validation_accepts_valid_config(self, sample_experiment_config):
+        """Test that valid multi-task config passes validation."""
+        from core.config import MultiTaskConfig
+
+        task1 = deepcopy(sample_experiment_config)
+        task1.trial_name = "task1"
+
+        task2 = deepcopy(sample_experiment_config)
+        task2.trial_name = "task2"
+
+        multi_config = MultiTaskConfig(
+            tasks=[task1, task2], shared_params={"training_params.n_folds": 5}
+        )
+
+        # Should not raise
+        validate_multi_task_config(multi_config)
+
+
+# ============================================================================
+# Fixtures for Multi-Task Tests
+# ============================================================================
+
+
+@pytest.fixture
+def temp_multi_task_config_file():
+    """Create a temporary multi-task YAML config file."""
+    config_content = """
+tasks:
+  - trial_name: task1_pretrain
+    model_spec:
+      constructor_name: test_model
+      params:
+        hidden_dim: 256
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2, 3]
+      task_specific_config:
+        test_param: task1_value
+    training_params:
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 20
+    output_dir: results/task1
+    checkpoint_dir: checkpoints/task1
+
+  - trial_name: task2_finetune
+    model_spec:
+      constructor_name: test_model
+      params:
+        hidden_dim: 512
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2, 3]
+      task_specific_config:
+        test_param: task2_value
+    training_params:
+      batch_size: 16
+      learning_rate: 0.0001
+      epochs: 50
+    output_dir: results/task2
+    checkpoint_dir: checkpoints/task2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(config_content)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_multi_task_config_with_shared():
+    """Create a multi-task config with shared_params."""
+    config_content = """
+tasks:
+  - trial_name: task1
+    model_spec:
+      constructor_name: test_model
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: value1
+    training_params:
+      batch_size: 32
+    output_dir: results/task1
+    checkpoint_dir: checkpoints/task1
+
+  - trial_name: task2
+    model_spec:
+      constructor_name: test_model
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: value2
+    training_params:
+      batch_size: 16
+    output_dir: results/task2
+    checkpoint_dir: checkpoints/task2
+
+shared_params:
+  training_params.n_folds: 5
+  training_params.min_lag: 0
+  training_params.max_lag: 400
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(config_content)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_multi_task_nested_models():
+    """Create a multi-task config with nested model specs."""
+    config_content = """
+tasks:
+  - trial_name: pretrain_encoder
+    model_spec:
+      constructor_name: encoder_model
+      params:
+        embedding_dim: 768
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: encoder_pretrain
+    training_params:
+      batch_size: 32
+    output_dir: results/pretrain
+    checkpoint_dir: checkpoints/pretrain
+
+  - trial_name: finetune_full
+    model_spec:
+      constructor_name: gpt2_brain
+      params:
+        freeze_lm: true
+      sub_models:
+        encoder_model:
+          constructor_name: encoder_model
+          params:
+            embedding_dim: 768
+          checkpoint_path: "{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: finetune
+    training_params:
+      batch_size: 16
+    output_dir: results/finetune
+    checkpoint_dir: checkpoints/finetune
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(config_content)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+
+
+@pytest.fixture
+def temp_multi_task_with_config_setters():
+    """Create a multi-task config where tasks have required_config_setter_names."""
+    config_content = """
+tasks:
+  - trial_name: task1
+    model_spec:
+      constructor_name: test_model
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: value1
+        required_config_setter_names: [required_setter1, required_setter2]
+    training_params:
+      batch_size: 32
+    output_dir: results/task1
+    checkpoint_dir: checkpoints/task1
+
+  - trial_name: task2
+    model_spec:
+      constructor_name: test_model
+    task_config:
+      task_name: test_task
+      data_params:
+        window_width: 0.5
+        subject_ids: [1, 2]
+      task_specific_config:
+        test_param: value2
+        required_config_setter_names: [required_setter1]
+    training_params:
+      batch_size: 16
+    output_dir: results/task2
+    checkpoint_dir: checkpoints/task2
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(config_content)
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)

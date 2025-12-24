@@ -10,7 +10,7 @@ import yaml
 from typing import Any, Union
 from copy import deepcopy
 
-from core.config import ExperimentConfig, TaskConfig, DataParams, dict_to_config
+from core.config import ExperimentConfig, TaskConfig, DataParams, MultiTaskConfig, dict_to_config
 from core import registry
 from utils import data_utils
 
@@ -43,7 +43,13 @@ def parse_override_args(unknown_args):
 
 
 def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
-    """Get nested value from object using dot notation path."""
+    """Get nested value from object using dot notation path.
+
+    Supports accessing:
+    - Dictionary keys: obj.key1.key2
+    - Dataclass attributes: obj.attr1.attr2
+    - List indices: obj.list_field.0.nested_field
+    """
     fields = path.split(".")
     current = obj
     for field in fields:
@@ -51,15 +57,30 @@ def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
             current = current[field]
         elif is_dataclass(current):
             current = getattr(current, field)
+        elif isinstance(current, list):
+            # Handle list indexing
+            try:
+                index = int(field)
+                current = current[index]
+            except (ValueError, IndexError) as e:
+                raise TypeError(
+                    f"Cannot access list with key '{field}': {e}"
+                )
         else:
             raise TypeError(
-                f"Cannot access field '{field}' on non-dict, non-dataclass object: {current}"
+                f"Cannot access field '{field}' on non-dict, non-dataclass, non-list object: {current}"
             )
     return current
 
 
 def set_nested_attr(obj, key_path, value):
-    """Set nested attribute using dot notation path."""
+    """Set nested attribute using dot notation path.
+
+    Supports accessing:
+    - Dictionary keys: obj.key1.key2
+    - Dataclass attributes: obj.attr1.attr2
+    - List indices: obj.list_field.0.nested_field
+    """
     keys = key_path.split(".")
     target = obj
     for key in keys[:-1]:
@@ -70,6 +91,15 @@ def set_nested_attr(obj, key_path, value):
             if key not in target:
                 target[key] = {}
             target = target[key]
+        elif isinstance(target, list):
+            # Handle list indexing
+            try:
+                index = int(key)
+                target = target[index]
+            except (ValueError, IndexError) as e:
+                raise TypeError(
+                    f"Cannot access list with key '{key}': {e}"
+                )
         else:
             raise TypeError(
                 f"Unsupported type {type(target)} for intermediate key: {key}"
@@ -80,6 +110,15 @@ def set_nested_attr(obj, key_path, value):
         setattr(target, final_key, value)
     elif isinstance(target, dict):
         target[final_key] = value
+    elif isinstance(target, list):
+        # Handle list indexing for final key
+        try:
+            index = int(final_key)
+            target[index] = value
+        except (ValueError, IndexError) as e:
+            raise TypeError(
+                f"Cannot set list element with key '{final_key}': {e}"
+            )
     else:
         raise TypeError(f"Unsupported type {type(target)} for final key: {final_key}")
 
@@ -130,7 +169,46 @@ def load_experiment_config(
             task_specific_config=task_specific_config,
         )
 
-    # Overwrite subject id's and set per-subject electrodes based on file if provided.
+    # Finalize the experiment config (electrode files, config setters)
+    experiment_config = _finalize_experiment_config(experiment_config, subject_mapping_file)
+
+    return experiment_config
+
+
+def validate_multi_task_config(config: MultiTaskConfig):
+    """Validate multi-task configuration.
+
+    Args:
+        config: MultiTaskConfig to validate
+
+    Raises:
+        ValueError: If validation fails
+    """
+    if not config.tasks:
+        raise ValueError("MultiTaskConfig must have at least one task")
+
+    # Validate task names are unique (if provided and non-empty)
+    task_names = [t.trial_name for t in config.tasks if t.trial_name]
+    if len(task_names) != len(set(task_names)):
+        raise ValueError("Task trial_names must be unique")
+
+
+def _finalize_experiment_config(
+    experiment_config: ExperimentConfig,
+    subject_mapping_file: str = "data/participants.tsv"
+) -> ExperimentConfig:
+    """Finalize an experiment config by processing task_config and electrode files.
+
+    Extracted from load_experiment_config to allow reuse for multi-task configs.
+
+    Args:
+        experiment_config: ExperimentConfig to finalize
+        subject_mapping_file: Path to subject mapping file
+
+    Returns:
+        Finalized ExperimentConfig
+    """
+    # Overwrite subject id's and set per-subject electrodes based on file if provided
     if experiment_config.task_config.data_params.electrode_file_path:
         subject_id_map = data_utils.read_subject_mapping(
             subject_mapping_file, delimiter="\t"
@@ -146,7 +224,7 @@ def load_experiment_config(
             subject_electrode_map
         )
 
-    # Allow user defined function to alter config if necessary for their model.
+    # Allow user defined function to alter config if necessary for their model
     task_specific_config_setters = (
         experiment_config.task_config.task_specific_config.required_config_setter_names
     )
@@ -165,3 +243,99 @@ def load_experiment_config(
             )
 
     return experiment_config
+
+
+def load_multi_task_config(
+    config_path: str, overrides: dict, subject_mapping_file="data/participants.tsv"
+) -> MultiTaskConfig:
+    """Load multi-task config from file and apply overrides.
+
+    Args:
+        config_path: Path to YAML config file
+        overrides: Dict of override values to apply
+        subject_mapping_file: Path to subject mapping file
+
+    Returns:
+        MultiTaskConfig with loaded and finalized tasks
+
+    Raises:
+        ValueError: If file doesn't contain 'tasks' field
+    """
+    # Load raw config
+    with open(config_path, "r") as f:
+        raw_cfg = yaml.safe_load(f)
+
+    # Check if this is a multi-task config
+    if "tasks" not in raw_cfg:
+        raise ValueError(
+            f"Config file {config_path} does not contain 'tasks' field. "
+            "Use load_experiment_config() for single-task configs."
+        )
+
+    # Apply overrides to raw dict first
+    raw_cfg = apply_overrides(raw_cfg, overrides)
+
+    # Extract shared_params (removed from task processing)
+    shared_params = raw_cfg.get("shared_params", None)
+
+    # Load each task as an ExperimentConfig
+    tasks = []
+    for task_dict in raw_cfg["tasks"]:
+        # Keep task_config as dict for now
+        task_config_dict = task_dict.pop("task_config", {})
+
+        # Convert everything except task_config to ExperimentConfig
+        task_config = dict_to_config(task_dict, ExperimentConfig)
+
+        # Now handle task_config separately (similar to load_experiment_config)
+        if isinstance(task_config_dict, dict) and task_config_dict:
+            task_name = task_config_dict["task_name"]
+            task_info = registry.task_registry[task_name]
+
+            # Instantiate DataParams
+            data_params = dict_to_config(task_config_dict["data_params"], DataParams)
+
+            # Instantiate task-specific config
+            config_class = task_info["config_type"]
+            task_specific_config = dict_to_config(
+                task_config_dict.get("task_specific_config", {}), config_class
+            )
+
+            # Create TaskConfig
+            task_config.task_config = TaskConfig(
+                task_name=task_name,
+                data_params=data_params,
+                task_specific_config=task_specific_config,
+            )
+
+        # Finalize the task config (electrode files, config setters)
+        task_config = _finalize_experiment_config(task_config, subject_mapping_file)
+
+        tasks.append(task_config)
+
+    multi_config = MultiTaskConfig(tasks=tasks, shared_params=shared_params)
+    validate_multi_task_config(multi_config)
+
+    return multi_config
+
+
+def load_config(
+    config_path: str, overrides: dict, subject_mapping_file="data/participants.tsv"
+) -> Union[ExperimentConfig, MultiTaskConfig]:
+    """Auto-detect and load single or multi-task config.
+
+    Args:
+        config_path: Path to YAML config file
+        overrides: Dict of override values to apply
+        subject_mapping_file: Path to subject mapping file
+
+    Returns:
+        ExperimentConfig if single-task, MultiTaskConfig if multi-task
+    """
+    with open(config_path, "r") as f:
+        raw_cfg = yaml.safe_load(f)
+
+    if "tasks" in raw_cfg:
+        return load_multi_task_config(config_path, overrides, subject_mapping_file)
+    else:
+        return load_experiment_config(config_path, overrides, subject_mapping_file)

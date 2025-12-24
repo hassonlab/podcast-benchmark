@@ -199,6 +199,96 @@ class ExperimentConfig:
     tensorboard_dir: str = "event_logs"
 
 
+@dataclass
+class MultiTaskConfig:
+    """Configuration for running multiple tasks sequentially.
+
+    This allows combining multiple training stages (e.g., pretraining + finetuning)
+    into a single config file. Tasks are executed in order, and checkpoint directories
+    from previous tasks can be referenced using {prev_checkpoint_dir} placeholder.
+
+    Attributes:
+        tasks: List of ExperimentConfig objects to run in sequence
+        shared_params: Optional dict mapping parameter paths (e.g., "training_params.n_folds")
+                      to values that should override the same field across all tasks.
+                      Applied after config setters.
+
+    Example:
+        tasks:
+          - trial_name: pretrain
+            model_spec: {...}
+            ...
+          - trial_name: finetune
+            model_spec:
+              sub_models:
+                encoder:
+                  checkpoint_path: "{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+            ...
+        shared_params:
+          training_params.n_folds: 5
+          training_params.min_lag: 0
+    """
+
+    tasks: list[ExperimentConfig] = field(default_factory=list)
+    shared_params: Optional[Dict[str, Any]] = None
+
+
+def interpolate_prev_checkpoint_dir(model_spec: ModelSpec, prev_checkpoint_dir: str) -> ModelSpec:
+    """Recursively interpolate {prev_checkpoint_dir} in checkpoint paths of a ModelSpec.
+
+    Creates a deep copy of the model_spec and replaces any {prev_checkpoint_dir} placeholders
+    in checkpoint_path fields with the actual directory from the previous task.
+
+    Uses str.format() with prev_checkpoint_dir parameter, which allows it to be combined
+    with other placeholders like {lag} and {fold} that will be formatted later.
+
+    Args:
+        model_spec: ModelSpec to process
+        prev_checkpoint_dir: Checkpoint directory path from previous task
+
+    Returns:
+        New ModelSpec with interpolated paths
+
+    Raises:
+        ValueError: If {prev_checkpoint_dir} is found but prev_checkpoint_dir is None or empty
+
+    Example:
+        >>> spec = ModelSpec(
+        ...     constructor_name="encoder",
+        ...     checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+        ... )
+        >>> new_spec = interpolate_prev_checkpoint_dir(spec, "checkpoints/pretrain/run_123")
+        >>> print(new_spec.checkpoint_path)
+        checkpoints/pretrain/run_123/lag_{lag}/best_model_fold{fold}.pt
+    """
+    from copy import deepcopy
+
+    # Deep copy to avoid mutating original
+    new_spec = deepcopy(model_spec)
+
+    # Interpolate checkpoint_path at this level
+    if new_spec.checkpoint_path and "{prev_checkpoint_dir}" in new_spec.checkpoint_path:
+        if not prev_checkpoint_dir:
+            raise ValueError(
+                f"Cannot interpolate {{prev_checkpoint_dir}} in checkpoint path "
+                f"'{new_spec.checkpoint_path}' - no previous checkpoint directory available. "
+                f"This is likely the first task in a multi-task config."
+            )
+        # Use format() to replace {prev_checkpoint_dir}, leaving {lag} and {fold} intact
+        new_spec.checkpoint_path = new_spec.checkpoint_path.format(
+            prev_checkpoint_dir=prev_checkpoint_dir
+        )
+
+    # Recursively process sub-models
+    if new_spec.sub_models:
+        for param_name, sub_spec in new_spec.sub_models.items():
+            new_spec.sub_models[param_name] = interpolate_prev_checkpoint_dir(
+                sub_spec, prev_checkpoint_dir
+            )
+
+    return new_spec
+
+
 def dict_to_config(d: dict, config_class):
     """Recursively convert a dict d to an instance of config_class."""
     import typing
