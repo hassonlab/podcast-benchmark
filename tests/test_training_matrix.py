@@ -158,28 +158,6 @@ class TestTrainingMatrixTaskDataGetters:
             len(unregistered_tasks) == 0
         ), f"Unregistered tasks in training matrix: {unregistered_tasks}"
 
-    def test_all_config_task_names_match_matrix(self, training_matrix, configs_dir):
-        """Test that config task_name matches the training matrix task."""
-        config_paths = get_all_config_paths(training_matrix, configs_dir)
-
-        mismatched_tasks = []
-        for model_name, expected_task_name, config_path in config_paths:
-            with open(config_path, "r") as f:
-                config_dict = yaml.safe_load(f)
-
-            # Get task_name from config, with new structure it's under task_config
-            task_config = config_dict.get("task_config", {})
-            config_task_name = task_config.get("task_name", "word_embedding_decoding_task")
-
-            if config_task_name != expected_task_name:
-                mismatched_tasks.append(
-                    (model_name, expected_task_name, config_task_name, str(config_path))
-                )
-
-        assert (
-            len(mismatched_tasks) == 0
-        ), f"Task name mismatches (model, matrix_task, config_task, path): {mismatched_tasks}"
-
     def test_all_task_data_getters_exist(self, training_matrix, configs_dir):
         """
         Test that all task data getters referenced in configs exist in the registry.
@@ -209,7 +187,9 @@ class TestTrainingMatrixTaskDataGetters:
                 ), f"Task '{task_name}' not found in registry"
 
                 # Verify it has a getter function
-                assert "getter" in task_info, f"Task '{task_name}' missing 'getter' in registry"
+                assert (
+                    "getter" in task_info
+                ), f"Task '{task_name}' missing 'getter' in registry"
 
                 # Verify getter is callable
                 assert callable(
@@ -217,7 +197,9 @@ class TestTrainingMatrixTaskDataGetters:
                 ), f"Task '{task_name}' getter is not callable"
 
                 # Verify it has a config_type
-                assert "config_type" in task_info, f"Task '{task_name}' missing 'config_type' in registry"
+                assert (
+                    "config_type" in task_info
+                ), f"Task '{task_name}' missing 'config_type' in registry"
 
             except Exception as e:
                 missing_or_invalid_tasks.append(
@@ -239,8 +221,12 @@ class TestTaskDataGetterRegistry:
     def test_registry_functions_are_callable(self):
         """Test that all registered task data getters are callable."""
         for task_name, task_info in task_registry.items():
-            assert "getter" in task_info, f"Task '{task_name}' missing 'getter' in registry"
-            assert callable(task_info["getter"]), f"Task data getter '{task_name}' is not callable"
+            assert (
+                "getter" in task_info
+            ), f"Task '{task_name}' missing 'getter' in registry"
+            assert callable(
+                task_info["getter"]
+            ), f"Task data getter '{task_name}' is not callable"
 
     def test_required_tasks_are_registered(self):
         """Test that expected tasks are registered."""

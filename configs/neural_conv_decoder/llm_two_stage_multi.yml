@@ -108,6 +108,6 @@ tasks:
 # These override task-specific values to ensure consistency
 shared_params:
   training_params.n_folds: 5
-  training_params.min_lag: 0
-  training_params.max_lag: 400
-  training_params.lag_step_size: 100
+  training_params.min_lag: -1000
+  training_params.max_lag: 1000
+  training_params.lag_step_size: 200

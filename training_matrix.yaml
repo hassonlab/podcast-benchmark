@@ -17,6 +17,8 @@ neural_conv_decoder:
     - neural_conv_decoder_content_noncontent.yml
   pos_task:
     - neural_conv_decoder_pos.yml
+  llm_decoding_task:
+    - llm_two_stage_multi.yml
 time_pooling_model:
   volume_level_decoding_task:
     - simple_model.yml
