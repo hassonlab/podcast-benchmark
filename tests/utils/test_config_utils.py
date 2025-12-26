@@ -10,7 +10,7 @@ import tempfile
 import os
 from copy import deepcopy
 
-from core.config import ExperimentConfig, MultiTaskConfig, TaskConfig
+from core.config import ExperimentConfig, MultiTaskConfig, TaskConfig, ModelSpec
 from utils.config_utils import (
     apply_overrides,  # Reuse existing function for shared params
     load_multi_task_config,
@@ -20,6 +20,8 @@ from utils.config_utils import (
     set_nested_attr,
     get_nested_value,
     load_experiment_config,
+    partial_format,
+    interpolate_prev_checkpoint_dir,
 )
 
 
@@ -896,6 +898,213 @@ class TestMultiTaskConfigValidation:
 
         # Should not raise
         validate_multi_task_config(multi_config)
+
+
+class TestPartialFormat:
+    """Test partial_format function for partial string formatting."""
+
+    def test_format_with_all_variables_provided(self):
+        """Test formatting when all variables are provided."""
+        template = "{a} and {b}"
+        result = partial_format(template, a="hello", b="world")
+        assert result == "hello and world"
+
+    def test_format_with_some_variables_missing(self):
+        """Test formatting when some variables are missing - they should be preserved."""
+        template = "{a} and {b}"
+        result = partial_format(template, a="hello")
+        assert result == "hello and {b}"
+
+    def test_format_preserves_multiple_missing_variables(self):
+        """Test that multiple missing variables are preserved."""
+        template = "{prev_checkpoint_dir}/lag_{lag}/fold_{fold}"
+        result = partial_format(template, prev_checkpoint_dir="/path/to/checkpoint")
+        assert result == "/path/to/checkpoint/lag_{lag}/fold_{fold}"
+
+    def test_format_with_no_variables_provided(self):
+        """Test formatting when no variables are provided - all should be preserved."""
+        template = "{a} and {b} and {c}"
+        result = partial_format(template)
+        assert result == "{a} and {b} and {c}"
+
+    def test_format_with_repeated_variables(self):
+        """Test formatting with repeated variable names."""
+        template = "{x} plus {x} equals two {x}"
+        result = partial_format(template, x="5")
+        assert result == "5 plus 5 equals two 5"
+
+    def test_format_empty_string(self):
+        """Test formatting an empty string."""
+        result = partial_format("")
+        assert result == ""
+
+    def test_format_string_with_no_variables(self):
+        """Test formatting a string with no format variables."""
+        template = "plain text with no variables"
+        result = partial_format(template, unused="value")
+        assert result == "plain text with no variables"
+
+    def test_format_with_numeric_values(self):
+        """Test formatting with numeric values."""
+        template = "fold_{fold}_epoch_{epoch}"
+        result = partial_format(template, fold=3)
+        assert result == "fold_3_epoch_{epoch}"
+
+    def test_format_complex_path(self):
+        """Test formatting a complex file path."""
+        template = "{base_dir}/experiments/{experiment}/lag_{lag}/fold_{fold}/checkpoint.pt"
+        result = partial_format(
+            template,
+            base_dir="/home/user/data",
+            experiment="exp_001"
+        )
+        assert result == "/home/user/data/experiments/exp_001/lag_{lag}/fold_{fold}/checkpoint.pt"
+
+    def test_format_consecutive_variables(self):
+        """Test formatting with consecutive variables."""
+        template = "{a}{b}{c}"
+        result = partial_format(template, a="x", c="z")
+        assert result == "x{b}z"
+
+
+class TestInterpolatePrevCheckpointDir:
+    """Test interpolate_prev_checkpoint_dir function for checkpoint path interpolation."""
+
+    def test_interpolate_simple_checkpoint_path(self):
+        """Test interpolating prev_checkpoint_dir in a simple checkpoint path."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
+
+        assert result.checkpoint_path == "/path/to/prev/model.pt"
+        # Original should be unchanged (deep copy)
+        assert spec.checkpoint_path == "{prev_checkpoint_dir}/model.pt"
+
+    def test_interpolate_with_other_variables_preserved(self):
+        """Test that other format variables like {lag} and {fold} are preserved."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "checkpoints/pretrain/run_123")
+
+        assert result.checkpoint_path == "checkpoints/pretrain/run_123/lag_{lag}/best_model_fold{fold}.pt"
+
+    def test_interpolate_without_prev_checkpoint_dir_variable(self):
+        """Test that paths without {prev_checkpoint_dir} are unchanged."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="/absolute/path/model.pt"
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
+
+        assert result.checkpoint_path == "/absolute/path/model.pt"
+
+    def test_interpolate_with_none_checkpoint_path(self):
+        """Test handling of None checkpoint_path."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path=None
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
+
+        assert result.checkpoint_path is None
+
+    def test_interpolate_raises_on_missing_prev_checkpoint_dir(self):
+        """Test that ValueError is raised when prev_checkpoint_dir is needed but not provided."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+        )
+
+        with pytest.raises(ValueError, match="no previous checkpoint directory available"):
+            interpolate_prev_checkpoint_dir(spec, None)
+
+    def test_interpolate_raises_on_empty_prev_checkpoint_dir(self):
+        """Test that ValueError is raised when prev_checkpoint_dir is empty string."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+        )
+
+        with pytest.raises(ValueError, match="no previous checkpoint directory available"):
+            interpolate_prev_checkpoint_dir(spec, "")
+
+    def test_interpolate_recursive_sub_models(self):
+        """Test that sub_models are recursively processed."""
+        encoder_spec = ModelSpec(
+            constructor_name="encoder",
+            checkpoint_path="{prev_checkpoint_dir}/encoder.pt"
+        )
+
+        main_spec = ModelSpec(
+            constructor_name="main_model",
+            checkpoint_path="{prev_checkpoint_dir}/main.pt",
+            sub_models={"encoder": encoder_spec}
+        )
+
+        result = interpolate_prev_checkpoint_dir(main_spec, "/checkpoints/task1")
+
+        assert result.checkpoint_path == "/checkpoints/task1/main.pt"
+        assert result.sub_models["encoder"].checkpoint_path == "/checkpoints/task1/encoder.pt"
+        # Original should be unchanged
+        assert main_spec.sub_models["encoder"].checkpoint_path == "{prev_checkpoint_dir}/encoder.pt"
+
+    def test_interpolate_nested_sub_models_with_mixed_paths(self):
+        """Test recursive interpolation with some paths having {prev_checkpoint_dir} and others not."""
+        encoder_spec = ModelSpec(
+            constructor_name="encoder",
+            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/encoder_fold{fold}.pt"
+        )
+
+        decoder_spec = ModelSpec(
+            constructor_name="decoder",
+            checkpoint_path="/absolute/path/decoder.pt"  # No prev_checkpoint_dir
+        )
+
+        main_spec = ModelSpec(
+            constructor_name="main_model",
+            checkpoint_path="{prev_checkpoint_dir}/main.pt",
+            sub_models={"encoder": encoder_spec, "decoder": decoder_spec}
+        )
+
+        result = interpolate_prev_checkpoint_dir(main_spec, "/checkpoints/pretrain")
+
+        assert result.checkpoint_path == "/checkpoints/pretrain/main.pt"
+        assert result.sub_models["encoder"].checkpoint_path == "/checkpoints/pretrain/lag_{lag}/encoder_fold{fold}.pt"
+        assert result.sub_models["decoder"].checkpoint_path == "/absolute/path/decoder.pt"
+
+    def test_interpolate_empty_sub_models(self):
+        """Test that empty sub_models dict doesn't cause issues."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/model.pt",
+            sub_models={}
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "/checkpoints/prev")
+
+        assert result.checkpoint_path == "/checkpoints/prev/model.pt"
+        assert result.sub_models == {}
+
+    def test_interpolate_none_sub_models(self):
+        """Test that None sub_models doesn't cause issues."""
+        spec = ModelSpec(
+            constructor_name="test_model",
+            checkpoint_path="{prev_checkpoint_dir}/model.pt",
+            sub_models=None
+        )
+
+        result = interpolate_prev_checkpoint_dir(spec, "/checkpoints/prev")
+
+        assert result.checkpoint_path == "/checkpoints/prev/model.pt"
+        assert result.sub_models is None
 
 
 # ============================================================================

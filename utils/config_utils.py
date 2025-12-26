@@ -6,6 +6,7 @@ This module contains the testable configuration logic extracted from main.py.
 
 import argparse
 from dataclasses import is_dataclass
+import re
 import yaml
 from typing import Any, Union
 from copy import deepcopy
@@ -13,6 +14,97 @@ from copy import deepcopy
 from core.config import ExperimentConfig, TaskConfig, DataParams, MultiTaskConfig, dict_to_config
 from core import registry
 from utils import data_utils
+
+
+def partial_format(template: str, **kwargs) -> str:
+    """Format a string with provided kwargs while preserving unmatched format variables.
+
+    This function allows partial formatting of strings containing format variables.
+    Any format variables not provided in kwargs will be preserved for later formatting.
+
+    Example:
+        >>> partial_format("{a} and {b}", a="hello")
+        "hello and {b}"
+
+        >>> partial_format("{prev_checkpoint_dir}/lag_{lag}/fold_{fold}",
+        ...                prev_checkpoint_dir="/path/to/checkpoint")
+        "/path/to/checkpoint/lag_{lag}/fold_{fold}"
+
+    Args:
+        template: String template with format variables like {var_name}
+        **kwargs: Values to substitute for matching format variables
+
+    Returns:
+        Formatted string with unmatched variables preserved
+    """
+    # Find all format variables in the template
+    format_vars = re.findall(r'\{(\w+)\}', template)
+
+    # Create a complete format dict: provided kwargs + self-referencing for missing vars
+    format_dict = {}
+    for var in format_vars:
+        if var in kwargs:
+            format_dict[var] = kwargs[var]
+        else:
+            # Preserve the variable by formatting it to itself
+            format_dict[var] = f"{{{var}}}"
+
+    return template.format(**format_dict)
+
+
+def interpolate_prev_checkpoint_dir(model_spec, prev_checkpoint_dir: str):
+    """Recursively interpolate {prev_checkpoint_dir} in checkpoint paths of a ModelSpec.
+
+    Creates a deep copy of the model_spec and replaces any {prev_checkpoint_dir} placeholders
+    in checkpoint_path fields with the actual directory from the previous task.
+
+    Uses partial_format() with prev_checkpoint_dir parameter, which allows it to be combined
+    with other placeholders like {lag} and {fold} that will be formatted later.
+
+    Args:
+        model_spec: ModelSpec to process
+        prev_checkpoint_dir: Checkpoint directory path from previous task
+
+    Returns:
+        New ModelSpec with interpolated paths
+
+    Raises:
+        ValueError: If {prev_checkpoint_dir} is found but prev_checkpoint_dir is None or empty
+
+    Example:
+        >>> spec = ModelSpec(
+        ...     constructor_name="encoder",
+        ...     checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+        ... )
+        >>> new_spec = interpolate_prev_checkpoint_dir(spec, "checkpoints/pretrain/run_123")
+        >>> print(new_spec.checkpoint_path)
+        checkpoints/pretrain/run_123/lag_{lag}/best_model_fold{fold}.pt
+    """
+    # Deep copy to avoid mutating original
+    new_spec = deepcopy(model_spec)
+
+    # Interpolate checkpoint_path at this level
+    if new_spec.checkpoint_path and "{prev_checkpoint_dir}" in new_spec.checkpoint_path:
+        if not prev_checkpoint_dir:
+            raise ValueError(
+                f"Cannot interpolate {{prev_checkpoint_dir}} in checkpoint path "
+                f"'{new_spec.checkpoint_path}' - no previous checkpoint directory available. "
+                f"This is likely the first task in a multi-task config."
+            )
+        # Use partial_format() to replace {prev_checkpoint_dir}, leaving {lag} and {fold} intact
+        new_spec.checkpoint_path = partial_format(
+            new_spec.checkpoint_path,
+            prev_checkpoint_dir=prev_checkpoint_dir
+        )
+
+    # Recursively process sub-models
+    if new_spec.sub_models:
+        for param_name, sub_spec in new_spec.sub_models.items():
+            new_spec.sub_models[param_name] = interpolate_prev_checkpoint_dir(
+                sub_spec, prev_checkpoint_dir
+            )
+
+    return new_spec
 
 
 def parse_known_args():

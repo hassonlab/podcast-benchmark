@@ -9,12 +9,13 @@ from utils import decoding_utils
 import random
 from utils.module_loader_utils import import_all_from_package
 from core import registry
-from core.config import TaskConfig, DataParams, MultiTaskConfig, ExperimentConfig, dict_to_config, interpolate_prev_checkpoint_dir
+from core.config import TaskConfig, DataParams, MultiTaskConfig, ExperimentConfig, dict_to_config
 from utils.config_utils import (
     parse_known_args,
     load_config,
     apply_overrides,
     get_nested_value,
+    interpolate_prev_checkpoint_dir,
 )
 
 import_all_from_package("models", recursive=True)
