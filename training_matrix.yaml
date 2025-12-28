@@ -2,6 +2,9 @@
 # Maps model types to tasks to config files
 # Format: {model_name: {task_name: [config_files]}}
 
+controls:
+  llm_decoding_task:
+    - llm_decoding_no_brain_data.yml
 neural_conv_decoder:
   word_embedding_decoding_task:
     - neural_conv_decoder_gpt2.yml
