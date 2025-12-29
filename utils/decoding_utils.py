@@ -790,6 +790,11 @@ def train_decoding_model(
             elif name == "confusion_matrix":
                 print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
 
+    if "cross_entropy" in metric_names:
+        for phase in phases:
+            vals = cv_results[f"{phase}_perplexity"]
+            print(f"Mean {phase} perplexity: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]
