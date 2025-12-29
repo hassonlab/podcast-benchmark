@@ -382,6 +382,9 @@ def train_decoding_model(
     }
 
     cv_results["num_epochs"] = []
+    if "cross_entropy" in metric_names:
+        for phase in phases:
+            cv_results[f"{phase}_perplexity"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.
     # Clean this up later. Hardcoding for now since generalizing this like other metrics would
@@ -603,6 +606,10 @@ def train_decoding_model(
         history = {
             f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+
+        if "cross_entropy" in metric_names:
+            for phase in ("train", "val"):
+                history[f"{phase}_perplexity"] = []
         history["train_loss"] = []
         history["val_loss"] = []
         history["num_epochs"] = None
