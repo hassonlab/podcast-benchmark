@@ -394,7 +394,6 @@ def conf_matrix(
     return confusion_matrix(ground_truth, pred_labels, labels=np.arange(num_classes))
 
 
-@register_metric("perplexity")
 def perplexity(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
     """
     Calculate perplexity of predictions as used for LLM evaluation.

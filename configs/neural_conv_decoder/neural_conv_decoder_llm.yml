@@ -21,8 +21,7 @@ training_params:
   lag_step_size: 200
   losses:
   - cross_entropy
-  metrics:
-  - perplexity
+  metrics: []
   early_stopping_metric: cross_entropy
   smaller_is_better: true
 trial_name: llm_decoding

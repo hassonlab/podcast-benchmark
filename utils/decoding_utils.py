@@ -473,12 +473,18 @@ def train_decoding_model(
                 loss = loss.detach().mean().item()
             sums["loss"] += loss
 
-        return {
+        result = {
             name: (
                 sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
             )
             for name in sums
         }
+
+        # Calculate perplexity as derived metric from averaged cross_entropy
+        if "cross_entropy" in result:
+            result["perplexity"] = np.exp(result["cross_entropy"])
+
+        return result
 
     # 6. Cross‐val loop
     for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
