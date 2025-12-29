@@ -281,6 +281,67 @@ def create_combined_ensemble_plots(ensemble_results, output_dir):
     }
 
 
+def create_llm_comparison_plot(baseline_dir, output_dir):
+    """Create comparison plot for LLM decoding with and without brain data."""
+    # Find the most recent llm_token_finetune and llm_decoding_control results
+    finetune_dirs = sorted([d for d in baseline_dir.iterdir() if 'llm_token_finetune' in d.name and d.is_dir()], reverse=True)
+    control_dirs = sorted([d for d in baseline_dir.iterdir() if 'llm_decoding_control' in d.name and d.is_dir()], reverse=True)
+
+    if not finetune_dirs or not control_dirs:
+        print("Warning: Could not find both llm_token_finetune and llm_decoding_control results")
+        return None
+
+    finetune_dir = finetune_dirs[0]
+    control_dir = control_dirs[0]
+
+    finetune_file = finetune_dir / 'lag_performance.csv'
+    control_file = control_dir / 'lag_performance.csv'
+
+    if not finetune_file.exists() or not control_file.exists():
+        print("Warning: Missing lag_performance.csv files for LLM comparison")
+        return None
+
+    # Read the data
+    finetune_data = pd.read_csv(finetune_file)
+    control_data = pd.read_csv(control_file)
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Plot test perplexity for both experiments
+    ax.plot(finetune_data['lags'], finetune_data['test_perplexity_mean'],
+            marker='o', linewidth=2, markersize=6, label='LLM Token Finetuning (Brain Data)')
+
+    ax.plot(control_data['lags'], control_data['test_perplexity_mean'],
+            marker='s', linewidth=2, markersize=6, label='LLM Decoding (No Brain Data)')
+
+    ax.set_xlabel('Lag (ms)', fontsize=12)
+    ax.set_ylabel('Test Perplexity', fontsize=12)
+    ax.set_title('LLM Decoding: Brain Data vs Control', fontsize=14)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    # Save the plot
+    plot_path = output_dir / 'llm_decoding_comparison.png'
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    # Get best performances
+    best_finetune_idx = finetune_data['test_perplexity_mean'].idxmin()
+    best_control_idx = control_data['test_perplexity_mean'].idxmin()
+
+    return {
+        'plot_path': plot_path,
+        'finetune_dir': finetune_dir.name,
+        'control_dir': control_dir.name,
+        'finetune_best_lag': int(finetune_data.loc[best_finetune_idx, 'lags']),
+        'finetune_best_perplexity': finetune_data.loc[best_finetune_idx, 'test_perplexity_mean'],
+        'control_best_lag': int(control_data.loc[best_control_idx, 'lags']),
+        'control_best_perplexity': control_data.loc[best_control_idx, 'test_perplexity_mean']
+    }
+
+
 def create_plot(result_data, output_dir):
     """Create a plot for a baseline result."""
     task_name = result_data['task_name']
@@ -442,6 +503,22 @@ def main():
                     print(f"    Data: baseline-results/{result_data['result_dir_name']}/lag_performance.csv")
                     print(f"    Best Lag: {perf['best_lag']}ms")
                     print(f"    Best AUC-ROC: {perf['test_word_avg_auc_roc_mean']:.4f}")
+
+    # Create LLM comparison plot
+    print("\n" + "=" * 80)
+    print("\nCreating LLM decoding comparison plot...")
+    llm_plot_info = create_llm_comparison_plot(baseline_dir, plots_dir)
+    if llm_plot_info:
+        print(f"\nLLM Decoding Comparison:")
+        print(f"  Plot: {llm_plot_info['plot_path'].name}")
+        print(f"\n  LLM Token Finetuning (Brain Data):")
+        print(f"    Data: baseline-results/{llm_plot_info['finetune_dir']}/lag_performance.csv")
+        print(f"    Best Lag: {llm_plot_info['finetune_best_lag']}ms")
+        print(f"    Best Perplexity: {llm_plot_info['finetune_best_perplexity']:.4f}")
+        print(f"\n  LLM Decoding (No Brain Data - Control):")
+        print(f"    Data: baseline-results/{llm_plot_info['control_dir']}/lag_performance.csv")
+        print(f"    Best Lag: {llm_plot_info['control_best_lag']}ms")
+        print(f"    Best Perplexity: {llm_plot_info['control_best_perplexity']:.4f}")
 
     print("\n" + "=" * 80)
     print(f"\nPlots saved to: {plots_dir}")
