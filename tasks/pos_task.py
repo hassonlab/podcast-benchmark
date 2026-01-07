@@ -1,14 +1,21 @@
 import os
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from core.config import DataParams
+from core.config import BaseTaskConfig, TaskConfig
 from core import registry
 
 
-@registry.register_task_data_getter()
-def pos_task(data_params: DataParams):
+@dataclass
+class PosTaskConfig(BaseTaskConfig):
+    """Configuration for pos_task."""
+    pos_path: str = "processed_data/df_word_onset_with_pos_class.csv"
+
+
+@registry.register_task_data_getter(config_type=PosTaskConfig)
+def pos_task(task_config: TaskConfig):
     """
     Dataset for Parts of Speech Classification. It contains five classes:
     Noun (0), Verb (1), Adjective (2), Adverb (3) and others (4)
@@ -18,18 +25,12 @@ def pos_task(data_params: DataParams):
       - target: Parts of Speech class label
 
     Notes:
-      - Uses `data_params.content_noncontent_path` if provided; else defaults to
+      - Uses config.pos_path if provided; else defaults to
         `<data_root>/podcast-benchmark/df_word_onset_with_pos_class.csv.
 
     """
-    # Pull task-specific params from data_params.task_params with local defaults
-    tp = getattr(data_params, "task_params", {}) or {}
-
-    # Resolve CSV path
-    default_csv = os.path.join(
-        os.getcwd(), "processed_data", "df_word_onset_with_pos_class.csv"
-    )
-    csv_path = tp.get("pos_path", default_csv)
+    config: PosTaskConfig = task_config.task_specific_config
+    csv_path = config.pos_path
 
     df1 = pd.read_csv(csv_path, index_col=0)
 

@@ -39,7 +39,7 @@ make foundation-model
 
 Training results will be saved to:
 - `results/` - Performance metrics and CSV files
-- `models/` - Saved model checkpoints
+- `checkpoints/` - Saved model checkpoints
 - `event_logs/` - TensorBoard logs
 
 See [Baseline Results](baseline-results.md) for performance benchmarks across all tasks.

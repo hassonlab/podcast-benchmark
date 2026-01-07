@@ -183,3 +183,6 @@ checkpoints/
 results/
 logs/
 event_logs/
+
+# Downloaded models
+model_cache/
