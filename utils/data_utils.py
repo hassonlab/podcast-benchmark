@@ -5,6 +5,7 @@ import numpy as np
 import mne
 from mne_bids import BIDSPath
 import pandas as pd
+import torch
 
 from core.config import DataParams
 from core import registry
@@ -182,7 +183,6 @@ def get_data(
     window_width: float,
     preprocessing_fns=None,
     preprocessor_params: dict = None,
-    word_column: Optional[str] = None,
 ):
     """Gather data for every row in task_df from raw.
 
@@ -195,7 +195,6 @@ def get_data(
             Should have contract:
                 preprocessing_fn(data: np.array of shape [num_words, num_electrodes, timesteps],
                                 preprocessor_params)  -> array of shape [num_words, ...]
-        word_column: If provided, will return the column of words specified here.
     """
     datas = []
     for raw in raws:
@@ -232,18 +231,13 @@ def get_data(
         )
 
         data = epochs.get_data(copy=False)
-        selected_targets = task_df_valid.target.to_numpy()[epochs.selection]
-
-        # TODO: Clean this up so we don't need to pass around this potentially None variable.
-        if word_column:
-            selected_words = task_df_valid[word_column].to_numpy()[epochs.selection]
-        else:
-            selected_words = None
+        # Should be the same selected rows from all raws.
+        # TODO: add an assertion to make sure this always holds.
+        selected_rows_df = task_df_valid.iloc[epochs.selection]
+        selected_targets = task_df_valid.target.to_numpy()
 
         # Make sure the number of samples match
-        assert data.shape[0] == selected_targets.shape[0], "Sample counts don't match"
-        if selected_words is not None:
-            assert data.shape[0] == selected_words.shape[0], "Words don't match"
+        assert data.shape[0] == selected_rows_df.shape[0], "Sample counts don't match"
 
         datas.append(data)
 
@@ -254,4 +248,53 @@ def get_data(
 
     datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
 
-    return datas, selected_targets, selected_words
+    return datas, selected_targets, selected_rows_df
+
+
+def df_columns_to_tensors(
+    df: pd.DataFrame,
+    column_names: Optional[list[str]],
+    fold_indices: Optional[np.ndarray] = None,
+) -> dict[str, torch.Tensor]:
+    """
+    Convert specified DataFrame columns to PyTorch tensors.
+
+    Args:
+        df: pandas DataFrame containing the data
+        column_names: list of column names to convert to tensors
+        fold_indices: optional array of row indices to select from the DataFrame.
+                     If provided, only rows at these indices will be converted.
+
+    Returns:
+        dict: Dictionary where keys are column names and values are PyTorch tensors
+              containing the values from those columns
+
+    Example:
+        >>> df = pd.DataFrame({'a': [1, 2, 3], 'b': [4.0, 5.0, 6.0]})
+        >>> result = df_columns_to_tensors(df, ['a', 'b'])
+        >>> print(result)
+        {'a': tensor([1, 2, 3]), 'b': tensor([4., 5., 6.])}
+
+        >>> # With fold indices
+        >>> result = df_columns_to_tensors(df, ['a'], fold_indices=np.array([0, 2]))
+        >>> print(result)
+        {'a': tensor([1, 3])}
+    """
+    if column_names is None:
+        return {}
+
+    result = {}
+    for col_name in column_names:
+        column_data = df[col_name].values
+
+        # Apply fold indices if provided
+        if fold_indices is not None:
+            column_data = column_data[fold_indices]
+
+        # Check if we have an object array (likely containing arrays/lists)
+        # If so, stack them into a 2D array
+        if column_data.dtype == object:
+            column_data = np.stack(column_data)
+
+        result[col_name] = torch.tensor(column_data)
+    return result

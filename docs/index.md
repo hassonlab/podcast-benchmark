@@ -10,6 +10,7 @@ A benchmarking framework for neural decoding from podcast listening data.
 4. **Content/Non-Content Words Classification** (Binary classification)
 5. **Part of Speech Classification** (Multiclass classification)
 6. **LLM Surprise** Predict how likely the perceived word is given it's context (Regression)
+7. **LLM Decoding** Encode brain data as vector input to language models (GPT-2) for direct brain-to-text generation
 
 ## Table of Contents
 

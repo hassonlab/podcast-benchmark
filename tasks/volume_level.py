@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import math
+from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 import warnings
 
@@ -10,13 +11,28 @@ import pandas as pd
 from scipy.io import wavfile
 from scipy.signal import butter, hilbert, resample_poly, sosfilt, sosfiltfilt
 
-from core.config import DataParams
+from core.config import BaseTaskConfig, TaskConfig
 import core.registry as registry
 from utils.data_utils import load_raws
 
 
-@registry.register_task_data_getter()
-def volume_level_decoding_task(data_params: DataParams):
+@dataclass
+class VolumeLevelConfig(BaseTaskConfig):
+    """Configuration for volume_level_decoding_task."""
+    audio_path: str = "stimuli/podcast.wav"
+    target_sr: int = 512
+    audio_sr: int = 44100
+    cutoff_hz: float = 8.0
+    butter_order: int = 4
+    zero_phase: bool = True
+    log_eps: Optional[float] = None
+    allow_resample_audio: bool = False
+    window_size: Optional[float] = None  # in milliseconds
+    hop_size: Optional[float] = None  # in milliseconds
+
+
+@registry.register_task_data_getter(config_type=VolumeLevelConfig)
+def volume_level_decoding_task(task_config: TaskConfig):
     """Prepare continuous audio-intensity targets for decoding.
 
       1. Load the podcast waveform from disk.
@@ -24,13 +40,12 @@ def volume_level_decoding_task(data_params: DataParams):
       3. Resample the envelope to match neural sampling rate expectations.
       4. Log-compress the envelope to produce perceptual loudness values.
 
-    Optional sliding-window aggregation can be enabled via ``task_params`` by
+    Optional sliding-window aggregation can be enabled via config by
     specifying window and hop sizes (ms). Targets are timestamped at the
     window centers, and each window is reduced to a single RMS value.
 
     Args:
-        data_params (DataParams): Configuration object containing data paths,
-            neural sampling rate, and task-specific parameters.
+        task_config (TaskConfig): Configuration object containing task-specific config and data params.
 
     Returns:
         pd.DataFrame: Continuous targets with columns ``start`` (seconds) and
@@ -38,18 +53,19 @@ def volume_level_decoding_task(data_params: DataParams):
         decoding pipeline.
     """
 
-    tp = getattr(data_params, "task_params", {}) or {}
+    config: VolumeLevelConfig = task_config.task_specific_config
+    data_params = task_config.data_params
 
-    audio_rel_path = tp.get("audio_path", os.path.join("stimuli", "podcast.wav"))
-    target_sr = int(tp.get("target_sr", 512))
-    expected_audio_sr = int(tp.get("audio_sr", 44100))
-    cutoff_hz = float(tp.get("cutoff_hz", 8.0))
-    butter_order = int(tp.get("butter_order", 4))
-    zero_phase = bool(tp.get("zero_phase", True))
-    log_eps = tp.get("log_eps")
-    allow_audio_resample = bool(tp.get("allow_resample_audio", False))
-    window_size_ms = tp.get("window_size")
-    hop_size_ms = tp.get("hop_size")
+    audio_rel_path = config.audio_path
+    target_sr = config.target_sr
+    expected_audio_sr = config.audio_sr
+    cutoff_hz = config.cutoff_hz
+    butter_order = config.butter_order
+    zero_phase = config.zero_phase
+    log_eps = config.log_eps
+    allow_audio_resample = config.allow_resample_audio
+    window_size_ms = config.window_size
+    hop_size_ms = config.hop_size
 
     audio_path = (
         audio_rel_path
@@ -222,7 +238,7 @@ def volume_level_config_setter(experiment_config, raws, df_word):
     """Align experiment config to volume-level task outputs.
 
     This setter will:
-      - Set data_params.window_width (seconds) from task_params.window_size (ms)
+      - Set data_params.window_width (seconds) from task config window_size (ms)
         so that neural windows align with audio windows by default.
       - Set the data preprocessing function to 'window_rms' if not already set,
         so each neural window is reduced to RMS amplitudes like the audio.
@@ -233,11 +249,15 @@ def volume_level_config_setter(experiment_config, raws, df_word):
     """
 
     # Ensure nested objects exist
-    dp = experiment_config.data_params
-    tp = getattr(dp, "task_params", {}) or {}
+    tc = experiment_config.task_config
+    if tc is None:
+        return experiment_config
+
+    dp = tc.data_params
+    config: VolumeLevelConfig = tc.task_specific_config
 
     # If the task defines a window size in ms, set the neural window width (s)
-    window_size_ms = tp.get("window_size")
+    window_size_ms = config.window_size
     if window_size_ms is not None:
         try:
             width_ms = float(window_size_ms)
