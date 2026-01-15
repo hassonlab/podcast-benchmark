@@ -39,6 +39,13 @@ class DataParams:
     word_column: Optional[str] = None
     # Dictionary of parameters to pass to your specific task_data_getter if needed.
     task_params: dict = field(default_factory=lambda: {})
+    # Whether to apply STFT preprocessing during data loading (for models that expect STFT features).
+    # If True, raw signals will be converted to STFT spectrograms before being passed to models.
+    use_stft_preprocessing: bool = False
+    # STFT preprocessing configuration. If None, uses default values matching original PopT.
+    # Should contain: fs (sampling rate), freq_channel_cutoff (default: 40), nperseg (default: 400),
+    # noverlap (default: 350), normalizing (default: 'zscore')
+    stft_config: Optional[dict] = None
 
 
 @dataclass

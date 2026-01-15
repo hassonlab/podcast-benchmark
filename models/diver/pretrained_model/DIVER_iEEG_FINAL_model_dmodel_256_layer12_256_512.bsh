@@ -1,0 +1,506 @@
+# This is a base shape file encoded in yaml
+# - `null` indicates a dimension is "finite", i.e. a non-"width" dimension
+# - a number indicates the base dimension of an "infinite" dimension, i.e. some notion of "width"
+embedding.0.proj_in.0.bias:
+- 32
+embedding.0.proj_in.0.weight:
+- 32
+- null
+- null
+- null
+embedding.0.proj_in.1.bias:
+- 32
+embedding.0.proj_in.1.weight:
+- 32
+embedding.0.proj_in.3.bias:
+- 32
+embedding.0.proj_in.3.weight:
+- 32
+- 32
+- null
+- null
+embedding.0.proj_in.4.bias:
+- 32
+embedding.0.proj_in.4.weight:
+- 32
+embedding.0.proj_in.6.bias:
+- 32
+embedding.0.proj_in.6.weight:
+- 32
+- 32
+- null
+- null
+embedding.0.proj_in.7.bias:
+- 32
+embedding.0.proj_in.7.weight:
+- 32
+embedding.1.embedding.spectral_proj.0.bias:
+- 256
+embedding.1.embedding.spectral_proj.0.weight:
+- 256
+- 129
+embedding.2.embedding.embedding2.models.0.embedding.weight:
+- null
+- 64
+embedding.2.embedding.embedding2.models.1.embedding.weight:
+- null
+- 64
+embedding.3.embedding.0.module.bias:
+- 32
+embedding.3.embedding.0.module.weight:
+- 32
+- 256
+embedding.3.embedding.1.model.encoder.layers.0.ffn.fc1.weight:
+- 128
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.ffn.fc2.weight:
+- 32
+- 128
+embedding.3.embedding.1.model.encoder.layers.0.ffn.fc_gate.weight:
+- 128
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.norm1.weight:
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.norm2.weight:
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.k_norm.weight:
+- null
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.k_proj.weight:
+- 32
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.out_proj.weight:
+- 32
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.q_norm.weight:
+- null
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.q_proj.weight:
+- 32
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.v_proj.weight:
+- 32
+- 32
+embedding.3.embedding.1.model.encoder.layers.0.self_attn.var_attn_bias.emb.weight:
+- null
+- 1
+embedding.3.embedding.1.model.encoder.norm.weight:
+- 32
+embedding.3.embedding.2.module.bias:
+- 256
+embedding.3.embedding.2.module.weight:
+- 256
+- 32
+encoder.encoder.layers.0.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.0.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.0.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.0.norm1.weight:
+- 256
+encoder.encoder.layers.0.norm2.weight:
+- 256
+encoder.encoder.layers.0.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.0.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.0.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.0.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.0.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.0.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.0.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.1.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.1.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.1.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.1.norm1.weight:
+- 256
+encoder.encoder.layers.1.norm2.weight:
+- 256
+encoder.encoder.layers.1.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.1.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.1.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.1.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.1.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.1.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.1.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.10.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.10.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.10.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.10.norm1.weight:
+- 256
+encoder.encoder.layers.10.norm2.weight:
+- 256
+encoder.encoder.layers.10.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.10.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.10.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.10.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.10.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.10.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.10.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.11.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.11.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.11.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.11.norm1.weight:
+- 256
+encoder.encoder.layers.11.norm2.weight:
+- 256
+encoder.encoder.layers.11.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.11.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.11.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.11.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.11.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.11.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.11.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.2.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.2.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.2.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.2.norm1.weight:
+- 256
+encoder.encoder.layers.2.norm2.weight:
+- 256
+encoder.encoder.layers.2.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.2.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.2.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.2.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.2.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.2.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.2.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.3.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.3.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.3.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.3.norm1.weight:
+- 256
+encoder.encoder.layers.3.norm2.weight:
+- 256
+encoder.encoder.layers.3.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.3.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.3.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.3.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.3.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.3.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.3.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.4.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.4.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.4.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.4.norm1.weight:
+- 256
+encoder.encoder.layers.4.norm2.weight:
+- 256
+encoder.encoder.layers.4.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.4.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.4.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.4.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.4.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.4.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.4.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.5.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.5.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.5.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.5.norm1.weight:
+- 256
+encoder.encoder.layers.5.norm2.weight:
+- 256
+encoder.encoder.layers.5.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.5.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.5.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.5.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.5.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.5.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.5.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.6.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.6.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.6.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.6.norm1.weight:
+- 256
+encoder.encoder.layers.6.norm2.weight:
+- 256
+encoder.encoder.layers.6.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.6.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.6.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.6.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.6.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.6.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.6.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.7.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.7.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.7.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.7.norm1.weight:
+- 256
+encoder.encoder.layers.7.norm2.weight:
+- 256
+encoder.encoder.layers.7.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.7.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.7.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.7.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.7.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.7.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.7.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.8.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.8.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.8.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.8.norm1.weight:
+- 256
+encoder.encoder.layers.8.norm2.weight:
+- 256
+encoder.encoder.layers.8.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.8.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.8.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.8.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.8.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.8.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.8.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.layers.9.ffn.fc1.weight:
+- 1024
+- 256
+encoder.encoder.layers.9.ffn.fc2.weight:
+- 256
+- 1024
+encoder.encoder.layers.9.ffn.fc_gate.weight:
+- 1024
+- 256
+encoder.encoder.layers.9.norm1.weight:
+- 256
+encoder.encoder.layers.9.norm2.weight:
+- 256
+encoder.encoder.layers.9.self_attn.k_norm.weight:
+- null
+encoder.encoder.layers.9.self_attn.k_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.9.self_attn.out_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.9.self_attn.q_norm.weight:
+- null
+encoder.encoder.layers.9.self_attn.q_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.9.self_attn.v_proj.weight:
+- 256
+- 256
+encoder.encoder.layers.9.self_attn.var_attn_bias.emb.weight:
+- null
+- 8
+encoder.encoder.norm.weight:
+- 256
+heads.org.heads.fft_amplitude_head.module.bias:
+- null
+heads.org.heads.fft_amplitude_head.module.weight:
+- null
+- 256
+heads.org.heads.multiscale_stft_amplitude_head.module.bias:
+- null
+heads.org.heads.multiscale_stft_amplitude_head.module.weight:
+- null
+- 256
+heads.org.heads.time_head.module.bias:
+- null
+heads.org.heads.time_head.module.weight:
+- null
+- 256
+mask_encoding:
+- null
+token_manager.special_tokens.C_token.param:
+- null
+- null
+- 256
+token_manager.special_tokens.NC_token.param:
+- null
+- null
+- 256
+token_manager.special_tokens.N_token.param:
+- null
+- null
+- 256

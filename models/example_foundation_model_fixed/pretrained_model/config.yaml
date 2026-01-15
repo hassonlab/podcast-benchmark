@@ -1,0 +1,15 @@
+# Configuration for Example Foundation Model
+# This config defines the architecture of the pretrained transformer model
+
+# Model architecture parameters
+input_channels: 64  # Number of input channels (electrodes)
+model_dim: 256      # Dimension of transformer embeddings
+num_layers: 4       # Number of transformer encoder layers
+num_heads: 8        # Number of attention heads
+dim_feedforward: 1024  # Dimension of feedforward network
+dropout: 0.1        # Dropout probability
+max_seq_len: 1000   # Maximum sequence length
+
+# Data parameters
+window_width: 0.625  # Window width in seconds
+sample_rate: 512     # Sample rate (Hz)

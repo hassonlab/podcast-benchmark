@@ -1,0 +1,20 @@
+# Configuration for BrainBERT Foundation Model
+# This config defines the architecture of the pretrained BrainBERT transformer model
+# Based on actual checkpoint structure from stft_large_pretrained.pth
+
+# Model architecture parameters (from model_cfg in checkpoint)
+input_channels: 40  # Number of input channels (STFT features)
+                    # This will be overridden by config_setter based on actual data
+model_dim: 768      # Dimension of transformer embeddings (hidden_dim)
+num_layers: 6       # Number of transformer encoder layers (encoder_num_layers)
+num_heads: 12       # Number of attention heads (nhead)
+dim_feedforward: 3072  # Dimension of feedforward network (layer_dim_feedforward)
+dropout: 0.1        # Dropout probability (default, may need adjustment)
+max_seq_len: 5000   # Maximum sequence length (from positional encoding)
+
+# Data parameters
+window_width: 1.0  # Window width in seconds
+sample_rate: 512     # Sample rate (Hz)
+
+# Checkpoint file name (since checkpoint.pth contains multiple files)
+checkpoint_file: stft_large_pretrained.pth  # Use STFT version

@@ -64,6 +64,7 @@ def compute_word_embedding_task_metrics(
     min_train_freq_auc,
     min_test_freq_auc,
     batch_size=16,
+    data_info_list=None,
     **kwargs,
 ):
     """
@@ -80,6 +81,7 @@ def compute_word_embedding_task_metrics(
         top_k_thresholds: List of k values for top-k accuracy
         min_train_freq_auc: Minimum training frequency for AUC calculation
         min_test_freq_auc: Minimum test frequency for AUC calculation
+        data_info_list: Optional list of data_info dicts (for LIP coordinates)
 
     Returns:
         dict: Dictionary containing computed metrics
@@ -92,14 +94,15 @@ def compute_word_embedding_task_metrics(
     X_test, Y_test = X_test.to(device), Y_test.to(device)
 
     # Get predictions
-    predictions = get_predictions(X_test, model, device, batch_size, **kwargs)
+    predictions = get_predictions(X_test, model, device, batch_size, data_info_list=data_info_list, **kwargs)
 
     # Compute cosine distances
     distances = compute_cosine_distances(predictions, Y_test)
 
     # Measure performance based on each individual word occurrence
     occurence_scores, _, _ = compute_class_scores(distances)
-    occurence_scores_np = occurence_scores.cpu().numpy()
+    # Convert to float32 first for numpy compatibility
+    occurence_scores_np = occurence_scores.cpu().float().numpy()
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
         results[f"test_occurence_top_{k_val}"] = top_k_accuracy(
@@ -122,7 +125,8 @@ def compute_word_embedding_task_metrics(
     class_to_test_idxs = np.empty(np.max(position_to_id) + 1, dtype=int)
     class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
 
-    word_scores_np = word_scores.cpu().numpy()
+    # Convert to float32 first for numpy compatibility
+    word_scores_np = word_scores.cpu().float().numpy()
     train_frequencies = np.bincount(
         position_to_id[train_index], minlength=np.max(position_to_id) + 1
     )
@@ -189,7 +193,7 @@ def build_vocabulary(words):
     return word_to_id, id_to_word, position_to_id
 
 
-def get_predictions(X, model, device, batch_size, **kwargs):
+def get_predictions(X, model, device, batch_size, data_info_list=None, **kwargs):
     X = X.to(device)
 
     # Step 2: Get predicted embeddings for all neural data
@@ -197,7 +201,16 @@ def get_predictions(X, model, device, batch_size, **kwargs):
     for i in range(0, len(X), batch_size):
         with torch.no_grad():
             input_data = X[i : i + batch_size]
-            pred = model(input_data, **kwargs)
+            
+            # Prepare kwargs for model forward
+            model_kwargs = kwargs.copy()
+            
+            # Add data_info_list if available (for LIP coordinates)
+            if data_info_list is not None:
+                batch_data_info = data_info_list[i : i + batch_size]
+                model_kwargs['data_info_list'] = batch_data_info
+            
+            pred = model(input_data, **model_kwargs)
 
         model_predictions.append(pred)
 

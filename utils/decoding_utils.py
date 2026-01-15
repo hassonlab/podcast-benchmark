@@ -1,4 +1,5 @@
 from collections import Counter
+from typing import Optional
 import os
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +8,7 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset, Dataset
 
 # Optional TensorBoard support
 try:
@@ -190,9 +191,13 @@ def setup_metrics_and_loss(training_params: TrainingParams):
 
 
 def compute_loss(out, groundtruth, training_params, all_fns):
-    loss = 0.0
+    loss = None
     for i, loss_name in enumerate(training_params.losses):
-        loss += training_params.loss_weights[i] * all_fns[loss_name](out, groundtruth)
+        loss_val = training_params.loss_weights[i] * all_fns[loss_name](out, groundtruth)
+        if loss is None:
+            loss = loss_val
+        else:
+            loss = loss + loss_val
     return loss
 
 
@@ -332,6 +337,9 @@ def train_decoding_model(
     plot_results: bool = False,
     write_to_tensorboard: bool = False,
     tensorboard_dir: str = "event_logs",
+    lip_coords_list: Optional[list[dict]] = None,
+    mni_coords: Optional[np.ndarray] = None,  # MNI coordinates for DIVER [num_channels, 3]
+    channel_names: Optional[list[str]] = None,  # Channel names for DIVER
 ):
     # 1. Prepare device & output dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -437,17 +445,33 @@ def train_decoding_model(
         sums["loss"] = 0.0
 
         grad_steps = training_params.grad_accumulation_steps
+        
         if is_train:
             optimizer.zero_grad()
 
-        for i, (Xb, yb) in enumerate(loader):
-            Xb, yb = Xb.to(device), yb.to(device)
+        for i, batch_data in enumerate(loader):
+            # Handle data_info_list
+            if len(batch_data) == 3:
+                # Case with lip_coords
+                Xb, yb, data_info_list = batch_data
+                Xb, yb = Xb.to(device), yb.to(device)
+            else:
+                # Case without lip_coords (backward compatibility)
+                Xb, yb = batch_data
+                Xb, yb = Xb.to(device), yb.to(device)
+                data_info_list = None
 
             if is_train:
-                out = model(Xb)
+                # Forward pass
+                if data_info_list is not None:
+                    out = model(Xb, data_info_list=data_info_list)
+                else:
+                    out = model(Xb)
+                # Loss calculation
                 loss = compute_loss(out, yb, training_params, all_fns)
                 # Normalize loss to account for gradient accumulation
                 loss = loss / grad_steps
+                # Backward pass
                 loss.backward()
 
                 if should_update_gradient_accumulation(i, len(loader), grad_steps):
@@ -455,7 +479,11 @@ def train_decoding_model(
                     optimizer.zero_grad()
             else:
                 with torch.no_grad():
-                    out = model(Xb)
+                    if data_info_list is not None:
+                        out = model(Xb, data_info_list=data_info_list)
+                    else:
+                        out = model(Xb)
+                    # Loss calculation
                     loss = compute_loss(out, yb, training_params, all_fns)
 
             # Compute all metrics for this batch using the helper function
@@ -519,17 +547,120 @@ def train_decoding_model(
             Y_test_norm = Y[te_idx]
 
         # DataLoaders
-        datasets = {
-            "train": TensorDataset(X[tr_idx], Y_train_norm),
-            "val": TensorDataset(X[va_idx], Y_val_norm),
-            "test": TensorDataset(X[te_idx], Y_test_norm),
-        }
-        loaders = {
-            phase: DataLoader(
-                ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
-            )
-            for phase, ds in datasets.items()
-        }
+        if lip_coords_list is not None:
+            # Split lip_coords_list according to fold
+            train_lip_coords = [lip_coords_list[i] for i in tr_idx]
+            val_lip_coords = [lip_coords_list[i] for i in va_idx]
+            test_lip_coords = [lip_coords_list[i] for i in te_idx]
+            
+            # Custom Dataset class
+            class PopTDataset(Dataset):
+                def __init__(self, X, Y, lip_coords_list):
+                    self.X = X
+                    self.Y = Y
+                    self.lip_coords_list = lip_coords_list
+                
+                def __len__(self):
+                    return len(self.X)
+                
+                def __getitem__(self, idx):
+                    if self.lip_coords_list:
+                        return self.X[idx], self.Y[idx], self.lip_coords_list[idx]
+                    else:
+                        return self.X[idx], self.Y[idx]
+            
+            datasets = {
+                "train": PopTDataset(X[tr_idx], Y_train_norm, train_lip_coords),
+                "val": PopTDataset(X[va_idx], Y_val_norm, val_lip_coords),
+                "test": PopTDataset(X[te_idx], Y_test_norm, test_lip_coords),
+            }
+            
+            # Custom collate function
+            def collate_fn(batch):
+                data_list = [item[0] for item in batch]
+                label_list = [item[1] for item in batch]
+                data_info_list = [item[2] for item in batch]
+                return (
+                    torch.stack(data_list, dim=0),
+                    torch.stack(label_list, dim=0),
+                    data_info_list
+                )
+            
+            loaders = {
+                phase: DataLoader(
+                    ds,
+                    batch_size=training_params.batch_size,
+                    shuffle=(phase == "train"),
+                    collate_fn=collate_fn,
+                )
+                for phase, ds in datasets.items()
+            }
+        elif mni_coords is not None:
+            # For DIVER model: include MNI coordinates (matching original DIVER-1 approach)
+            from models.diver.integration import create_data_info_list
+            
+            # Custom Dataset class for DIVER
+            class DIVERDataset(Dataset):
+                def __init__(self, X, Y):
+                    self.X = X
+                    self.Y = Y
+                
+                def __len__(self):
+                    return len(self.X)
+                
+                def __getitem__(self, idx):
+                    return self.X[idx], self.Y[idx]
+            
+            datasets = {
+                "train": DIVERDataset(X[tr_idx], Y_train_norm),
+                "val": DIVERDataset(X[va_idx], Y_val_norm),
+                "test": DIVERDataset(X[te_idx], Y_test_norm),
+            }
+            
+            # Custom collate function for DIVER: create data_info_list
+            def collate_fn(batch):
+                data_list = [item[0] for item in batch]
+                label_list = [item[1] for item in batch]
+                
+                # Create data_info_list (matching original DIVER-1 approach)
+                batch_size = len(batch)
+                num_channels = data_list[0].shape[0] if len(data_list[0].shape) >= 2 else data_list[0].shape[1]
+                
+                data_info_list = create_data_info_list(
+                    batch_size=batch_size,
+                    num_channels=num_channels,
+                    channel_names=channel_names,
+                    xyz_id=mni_coords  # Include MNI coordinates
+                )
+                
+                return (
+                    torch.stack(data_list, dim=0),
+                    torch.stack(label_list, dim=0),
+                    data_info_list
+                )
+            
+            loaders = {
+                phase: DataLoader(
+                    ds,
+                    batch_size=training_params.batch_size,
+                    shuffle=(phase == "train"),
+                    collate_fn=collate_fn,
+                )
+                for phase, ds in datasets.items()
+            }
+        else:
+            # Default approach (no lip_coords and no MNI coordinates)
+            datasets = {
+                "train": TensorDataset(X[tr_idx], Y_train_norm),
+                "val": TensorDataset(X[va_idx], Y_val_norm),
+                "test": TensorDataset(X[te_idx], Y_test_norm),
+            }
+            loaders = {
+                phase: DataLoader(
+                    ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
+                )
+                for phase, ds in datasets.items()
+            }
 
         # Train baseline models and compute all metrics
         logistic_baseline_metrics = None
@@ -712,6 +843,30 @@ def train_decoding_model(
         if is_word_embedding_decoding_task:
             # TODO: figure out how we want to generalize evaluation inference vs training inference better.
             # Key focus on preserve_ensemble argument.
+            # Prepare test data_info_list for coordinates if available
+            test_data_info_list = None
+            
+            # For DIVER model: create data_info_list with MNI coordinates
+            if mni_coords is not None and channel_names is not None:
+                # Create data_info_list for DIVER model
+                from models.diver.integration import create_data_info_list
+                num_test_samples = len(te_idx)
+                # Get num_channels from test data shape
+                if len(X[te_idx].shape) >= 2:
+                    num_channels = X[te_idx].shape[1]
+                else:
+                    num_channels = X[te_idx].shape[0] if len(X[te_idx].shape) == 1 else X[te_idx].shape[1]
+                
+                test_data_info_list = create_data_info_list(
+                    batch_size=num_test_samples,
+                    num_channels=num_channels,
+                    channel_names=channel_names,
+                    xyz_id=mni_coords
+                )
+            elif lip_coords_list is not None:
+                # For PopT/BrainBERT: use LIP coordinates
+                test_data_info_list = [lip_coords_list[i] for i in te_idx]
+            
             results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
                 X[te_idx],
                 Y[te_idx],
@@ -723,6 +878,7 @@ def train_decoding_model(
                 training_params.top_k_thresholds,
                 training_params.min_train_freq_auc,
                 training_params.min_test_freq_auc,
+                data_info_list=test_data_info_list,
                 preserve_ensemble=True,
             )
             for key, val in results.items():
@@ -847,15 +1003,39 @@ def run_training_over_lags(
         print("=" * 60)
 
         # TODO: Support lazy-loading for larger datasets on future tasks.
-        X, Y, selected_words = data_utils.get_data(
-            lag,
-            raws,
-            task_df,
-            data_params.window_width,
-            preprocessing_fns,
-            data_params.preprocessor_params,
-            word_column=data_params.word_column,
-        )
+        # Check if LIP coordinates should be loaded
+        use_lip_coords = model_params.get("use_lip_coords", False)
+        
+        # Check if STFT preprocessing is enabled
+        use_stft_preprocessing = getattr(data_params, 'use_stft_preprocessing', False)
+        
+        if use_lip_coords:
+            X, Y, selected_words, lip_coords_list = data_utils.get_data(
+                lag,
+                raws,
+                task_df,
+                data_params.window_width,
+                preprocessing_fns,
+                data_params.preprocessor_params,
+                word_column=data_params.word_column,
+                return_lip_coords=True,
+                data_root=data_params.data_root,
+                use_stft_preprocessing=use_stft_preprocessing,
+                stft_config=getattr(data_params, 'stft_config', None),
+            )
+        else:
+            X, Y, selected_words = data_utils.get_data(
+                lag,
+                raws,
+                task_df,
+                data_params.window_width,
+                preprocessing_fns,
+                data_params.preprocessor_params,
+                word_column=data_params.word_column,
+                use_stft_preprocessing=use_stft_preprocessing,
+                stft_config=getattr(data_params, 'stft_config', None),
+            )
+            lip_coords_list = None
 
         X_tensor = torch.FloatTensor(X)
         # Handle case where Y contains arrays (e.g., word embeddings)
@@ -864,6 +1044,47 @@ def run_training_over_lags(
         Y_tensor = torch.FloatTensor(Y)
 
         print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
+        if lip_coords_list is not None:
+            print(f"LIP coordinates loaded: {len(lip_coords_list)} samples")
+
+        # Check if DIVER model (requires MNI coordinates)
+        # DIVER model uses PositionalEncoding3D, so MNI coordinates are required
+        is_diver_model = (
+            "diver" in str(model_constructor_fn).lower() or
+            model_params.get("foundation_dir") is not None or
+            "diver" in task_name.lower()
+        )
+        
+        # Load MNI coordinates (for DIVER)
+        mni_coords = None
+        channel_names = None
+        if is_diver_model:
+            try:
+                from utils.data_utils import get_mni_coordinates
+                
+                # Extract subject ID (from first raw)
+                subject_id = data_utils.extract_subject_id_from_raw(raws[0])
+                
+                # Extract channel names (from first raw)
+                channel_names = raws[0].ch_names
+                
+                # Load MNI coordinates
+                mni_coords = get_mni_coordinates(
+                    subject_id=subject_id,
+                    channel_names=channel_names,
+                    data_root=data_params.data_root
+                )
+                print(f"DIVER: Loaded MNI coordinates for subject {subject_id}: shape {mni_coords.shape}")
+                print(f"DIVER: Channel names: {len(channel_names)} channels")
+            except FileNotFoundError as e:
+                print(f"Warning: {e}")
+                print("DIVER model will run without MNI coordinates (PositionalEncoding3D may fail)")
+                mni_coords = None
+            except Exception as e:
+                print(f"Warning: Failed to load MNI coordinates: {e}")
+                import traceback
+                traceback.print_exc()
+                mni_coords = None
 
         models, histories, cv_results = train_decoding_model(
             X_tensor,
@@ -877,6 +1098,9 @@ def run_training_over_lags(
             checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
             write_to_tensorboard=write_to_tensorboard,
             tensorboard_dir=tensorboard_dir,
+            lip_coords_list=lip_coords_list,
+            mni_coords=mni_coords,  # MNI coordinates for DIVER
+            channel_names=channel_names,  # Channel names for DIVER
         )
 
         # Aggregate metrics

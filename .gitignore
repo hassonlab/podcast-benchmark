@@ -183,3 +183,24 @@ checkpoints/
 results/
 logs/
 event_logs/
+
+# cursor docs
+cursor_docs/
+
+sync*.sh
+
+ds005574/
+
+only_sub1_debug/
+only_sub1_no_lip/
+only_sub1_use_lip/
+only_sub1_use_lip_debug/
+
+models/past_diver/
+
+
+exp/
+
+*.pth
+*.pt
+*.ckpt
