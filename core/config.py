@@ -46,6 +46,10 @@ class DataParams:
     # Should contain: fs (sampling rate), freq_channel_cutoff (default: 40), nperseg (default: 400),
     # noverlap (default: 350), normalizing (default: 'zscore')
     stft_config: Optional[dict] = None
+    # Dictionary of parameters to pass to your specific loading_options if needed.
+    loading_options: Optional[dict] = None
+    # Whether to use high gamma data.
+    use_high_gamma: bool = False
 
 
 @dataclass
@@ -63,6 +67,8 @@ class TrainingParams:
     early_stopping_patience: int = 10
     # Number of folds to train over per-lag.
     n_folds: int = 5
+    # If provided, only trains and evaluates on the specified fold ids.
+    fold_ids: Optional[list[int]] = None
     # If lag is specified then will train over just this lag relative to word onset. In ms.
     lag: Optional[int] = None
     # Otherwise models will be trained over all lags in range(min_lag, max_lag, lag_step_size). In ms.
@@ -114,6 +120,19 @@ class TrainingParams:
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
     shuffle_targets: bool = False
 
+    # --------------------------------------------------------------------------
+    # Optimizer extras (optional)
+    # --------------------------------------------------------------------------
+    # If > 0, clip gradient norm (L2) before each optimizer step.
+    clip_grad_norm: float = 0.0
+    # Optional LR scheduler. Supported: None, "cosine_annealing".
+    lr_scheduler: Optional[str] = None
+    # Multiplier applied to learning_rate to set eta_min for cosine annealing.
+    # (CBraMod uses eta_min = lr * 1e-2)
+    cosine_eta_min_factor: float = 1e-2
+
+
+
 
 @dataclass
 class ExperimentConfig:
@@ -144,8 +163,23 @@ class ExperimentConfig:
 
 
 def dict_to_config(d: dict, config_class):
-    """Recursively convert a dict d to an instance of config_class."""
+    """
+    Recursively convert a dict d to an instance of config_class.
+    Raises ValueError if unknown keys are found in d.
+    """
     init_kwargs = {}
+
+    # 1. Validation: Check for unknown keys (Strict Mode)
+    valid_keys = {f.name for f in fields(config_class)}
+    input_keys = set(d.keys())
+    unknown_keys = input_keys - valid_keys
+    if unknown_keys:
+        raise ValueError(
+            f"Unknown keys found in config for '{config_class.__name__}': {unknown_keys}\n"
+            f"Allowed keys: {valid_keys}"
+        )
+
+    # 2. Construction
     for field_info in fields(config_class):
         field_name = field_info.name
         field_type = field_info.type

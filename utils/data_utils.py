@@ -13,45 +13,94 @@ from core import registry
 
 def load_raws(data_params: DataParams):
     """
-    Loads raw iEEG data for multiple subjects based on specified parameters.
-
-    This function:
-    1. Iterates over subject IDs provided in the configuration.
-    2. Constructs BIDS-compliant file paths to locate preprocessed high-gamma iEEG data.
-    3. Loads each subject's data using MNE's `read_raw_fif` function.
-    4. Optionally filters channels using a regular expression (e.g., for selecting specific electrode groups).
-    5. Collects and returns a list of raw MNE objects.
-    Args:
-        data_params (DataParams): Configuration object containing subject IDs, data paths,
-        and optional channel filtering settings.
-
-    Returns:
-        List[mne.io.Raw]: A list of raw iEEG recordings for the specified subjects.
+    Loads raw iEEG data with YAML-configurable preprocessing.
+    All transformations (Resampling, Drop Bad, Scaling) happen here directly on the Raw object.
     """
     raws = []
+    
+    load_opts = getattr(data_params, "loading_options", {}) or {}
+    use_high_gamma = getattr(data_params, "use_high_gamma", True)
+    
+    target_sr = load_opts.get("target_sr", None)
+    do_drop_bads = load_opts.get("drop_bad_channels", False)
+    signal_unit = load_opts.get("unit", None)
+
     for sub_id in data_params.subject_ids:
+        if use_high_gamma:
+            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
+            description = "highgamma"
+            print(f"Loading High Gamma data for subject {sub_id}...")
+        else:
+            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
+            description = None 
+            print(f"Loading Raw data for subject {sub_id}...")
+
         file_path = BIDSPath(
-            root=os.path.join(data_params.data_root, "derivatives/ecogprep"),
+            root=root_path,
             subject=f"{sub_id:02}",
             task="podcast",
             datatype="ieeg",
-            description="highgamma",
+            description=description,
             suffix="ieeg",
             extension=".fif",
         )
 
-        raw = mne.io.read_raw_fif(file_path, verbose=False)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Data file not found: {file_path}")
+
+        raw = mne.io.read_raw_fif(file_path, preload=True, verbose=False)
+
+        if target_sr is not None:
+            if int(raw.info['sfreq']) != int(target_sr):
+                print(f"  - [Config] Resampling {raw.info['sfreq']}Hz -> {target_sr}Hz")
+                raw.resample(target_sr)
+
+        if do_drop_bads:
+            try:
+                # Build channels.tsv path via BIDSPath (avoid accidental reading of .fif)
+                ch_path = file_path.copy()
+                ch_path.update(suffix="channels", extension=".tsv")
+                tsv_path = str(ch_path)
+
+                # Some datasets omit 'description' on channels.tsv even if present on ieeg.fif
+                if not os.path.exists(tsv_path) and getattr(file_path, "description", None):
+                    ch_path2 = file_path.copy()
+                    ch_path2.update(description=None, suffix="channels", extension=".tsv")
+                    tsv_path = str(ch_path2)
+
+                if not os.path.exists(tsv_path) and "derivatives" in str(file_path):
+                    raw_root = data_params.data_root
+                    raw_bids_path = BIDSPath(root=raw_root, subject=f"{sub_id:02}", task="podcast",
+                                             datatype="ieeg", suffix="channels", extension=".tsv")
+                    tsv_path = str(raw_bids_path)
+
+                if os.path.exists(tsv_path):
+                    df_ch = pd.read_csv(tsv_path, sep='\t')
+                    if 'status' in df_ch.columns and 'name' in df_ch.columns:
+                        bad_channels = df_ch[df_ch['status'] == 'bad']['name'].tolist()
+                        if bad_channels:
+                            bad_channels = [ch for ch in bad_channels if ch in raw.ch_names]
+                            raw.info['bads'].extend(bad_channels)
+                            print(f"  - [Config] Dropping {len(bad_channels)} bad channels")
+                            raw.drop_channels(bad_channels)
+            except Exception as e:
+                print(f"Warning: Failed to process bad channels: {e}")
+
+        if signal_unit == 'uV':
+            print(f"  - [Config] Scaling data: Volt -> MicroVolt (x 1e6)")
+            raw.apply_function(lambda x: x * 1e6, channel_wise=False)
+
         if data_params.per_subject_electrodes:
             subject_electrode_names = data_params.per_subject_electrodes[sub_id]
-            picks = mne.pick_channels(raw.ch_names, subject_electrode_names)
+            picks = [ch for ch in subject_electrode_names if ch in raw.ch_names]
             raw = raw.pick(picks)
         elif data_params.channel_reg_ex:
             picks = mne.pick_channels_regexp(raw.ch_names, data_params.channel_reg_ex)
             raw = raw.pick(picks)
+            
         raws.append(raw)
 
     return raws
-
 
 def read_subject_mapping(participant_map_file: str, delimiter="\t"):
     """
