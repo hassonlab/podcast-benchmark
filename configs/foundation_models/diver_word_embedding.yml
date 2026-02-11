@@ -1,0 +1,89 @@
+# DIVER Foundation Model - Word Embedding Decoding Task
+#
+# This config finetunes the DIVER-1 foundation model on word embedding prediction.
+# Uses MNI coordinates for 3D positional encoding.
+#
+# Prerequisites:
+#   1. Download DIVER pretrained weights to models/diver/pretrained_model/
+#   2. Ensure MNI coordinates are available for subject electrodes
+#
+# Usage:
+#   python main.py --config configs/foundation_models/diver_word_embedding.yml
+
+config_setter_name: diver_finetune
+
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    electrode_file_path: processed_data/all_subject_sig.csv
+    subject_ids:
+      - 1
+    window_width: 0.5  # Will be used by DIVER
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
+
+training_params:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+  # Loss and metrics for embedding prediction
+  losses:
+    - mse
+  loss_weights:
+    - 1.0
+  metrics:
+    - cosine_sim
+  early_stopping_metric: cosine_sim
+  smaller_is_better: false
+  # Lag sweep (optional - set to single lag for quick testing)
+  min_lag: 0
+  max_lag: 0
+  lag_step_size: 200
+
+trial_name: diver_word_embedding
+
+# Model specification
+# Note: model_data_getter is automatically set via required_data_getter="diver_data_info"
+model_spec:
+  constructor_name: diver_finetune
+  params:
+    # Path to pretrained weights (DeepSpeed format)
+    # Download from DIVER-1 release and place in this directory
+    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+
+    # Output dimension matches embedding_pca_dim
+    output_dim: 50
+
+    # Task info for DIVER
+    task_name: word_embedding
+
+    # Architecture parameters (must match pretrained weights)
+    d_model: 256
+    e_layer: 12
+    patch_size: 50
+    patch_sampling_rate: 500
+
+    # Finetuning configuration
+    ft_config: flatten_linear  # or flatten_mlp for more capacity
+    deepspeed_pth_format: true
+
+    # MuP settings (set to true if pretrained with MuP)
+    mup_weights: false
+    ft_mup: false
+
+    # Freezing options
+    freeze_foundation: false
+
+    # Data root for loading MNI coordinates
+    data_root: data
+
+    # Output activation (auto-determined: linear for regression)
+    # output_activation: linear
+  sub_models: {}
