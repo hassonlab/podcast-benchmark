@@ -687,7 +687,6 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     - use_lip_coords=False -> use_brainbert=False (direct input processing)
     """
     from .config import load_config
-    from models.shared_config_setters import set_input_channels
 
     model_params = experiment_config.model_spec.params
     data_params = experiment_config.task_config.data_params
@@ -743,11 +742,12 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         model_params["input_channels"] = 768
         print("Using BrainBERT: input_channels set to 768 (BrainBERT output dimension)")
     else:
-        # Direct input processing: use actual channel count
-        experiment_config = set_input_channels(experiment_config, raws, _df_word)
-        print(
-            f"Direct input processing: input_channels set to {model_params.get('input_channels', 'unknown')}"
-        )
+        # Direct input processing: input_channels = time dimension per electrode
+        # In PopT, each electrode is a token in the sequence. The feature dimension
+        # per token is the number of time samples (window_width * sample_rate).
+        # NOTE: set_input_channels sets input_channels to num_electrodes, which is
+        # wrong for PopT — that's the sequence length, not the feature dimension.
+        pass
 
     model_dir = model_params["model_dir"]
     config_path = os.path.join(model_dir, "config.yaml")
@@ -755,6 +755,16 @@ def set_finetuning_config(experiment_config, raws, _df_word):
 
     # Set window width based on foundation model
     data_params.window_width = foundation_config.window_width
+
+    # For direct input, compute input_channels from window_width and sample rate
+    if not use_brainbert:
+        sample_rate = int(raws[0].info["sfreq"]) if raws else 512
+        time_steps = int(foundation_config.window_width * sample_rate)
+        model_params["input_channels"] = time_steps
+        print(
+            f"Direct input processing: input_channels set to {time_steps} "
+            f"(window_width={foundation_config.window_width}s x sample_rate={sample_rate}Hz)"
+        )
 
     # Fix: Copy output_dim to embedding_dim for compatibility with compute_all_metrics
     # This ensures that confusion_matrix can correctly determine num_classes
