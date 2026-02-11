@@ -1,0 +1,113 @@
+# Multi-Task Configuration for Two-Stage LLM Training
+# This config runs encoder pretraining followed by full model finetuning in a single job.
+# No need to manually track checkpoint paths between stages!
+
+tasks:
+  # Task 1: Pretrain encoder to predict average token embeddings
+  - trial_name: llm_embedding_pretrain
+    config_setter_name: neural_conv
+
+    task_config:
+      task_name: llm_embedding_pretraining_task
+      data_params:
+        data_root: data
+        electrode_file_path: processed_data/all_subject_sig.csv
+        window_width: 0.625
+        preprocessing_fn_name: window_average_neural_data
+        preprocessor_params:
+          num_average_samples: 32
+
+      task_specific_config:
+        max_context: 32
+        max_target_tokens: 16
+        transcript_path: data/stimuli/podcast_transcript.csv
+        prepend_space: true
+        model_name: gpt2
+        cache_dir: ./model_cache
+        gpt2_embedding_dim: 768
+
+    training_params:
+      batch_size: 32
+      epochs: 100
+      learning_rate: 0.001
+      weight_decay: 0.000001
+      early_stopping_patience: 10
+      losses: [mse]
+      metrics: [corr, nll_embedding]
+      early_stopping_metric: mse
+      smaller_is_better: true
+      normalize_targets: false
+
+    model_spec:
+      constructor_name: ensemble_pitom_model
+      params:
+        num_models: 10
+        conv_filters: 128
+        dropout: 0.2
+        embedding_dim: 768
+      sub_models: {}
+
+    output_dir: results/llm_two_stage/embedding_pretrain
+    checkpoint_dir: checkpoints/llm_two_stage/embedding_pretrain
+    tensorboard_dir: event_logs/llm_two_stage/embedding_pretrain
+
+  # Task 2: Finetune full model for token prediction, loading pretrained encoder
+  - trial_name: llm_token_finetune
+    config_setter_name: neural_conv
+
+    task_config:
+      task_name: llm_decoding_task
+      data_params:
+        data_root: data
+        electrode_file_path: processed_data/all_subject_sig.csv
+        window_width: 0.625
+        preprocessing_fn_name: window_average_neural_data
+        preprocessor_params:
+          num_average_samples: 32
+
+      task_specific_config:
+        max_context: 32
+        max_target_tokens: 16
+        transcript_path: data/stimuli/podcast_transcript.csv
+        prepend_space: true
+        model_name: gpt2
+        cache_dir: ./model_cache
+
+    training_params:
+      batch_size: 16
+      epochs: 50
+      learning_rate: 0.0001  # Lower learning rate for finetuning
+      weight_decay: 0.0
+      early_stopping_patience: 15
+      losses: [cross_entropy]
+      metrics: []
+      early_stopping_metric: cross_entropy
+      smaller_is_better: true
+
+    model_spec:
+      constructor_name: gpt2_brain
+      params:
+        freeze_lm: true
+        encoder_forward_kwargs:
+          preserve_ensemble: true
+      sub_models:
+        encoder_model:
+          constructor_name: ensemble_pitom_model
+          params:
+            num_models: 10
+            conv_filters: 128
+            dropout: 0.2
+            embedding_dim: 768
+          checkpoint_path: "{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+
+    output_dir: results/llm_two_stage/token_finetune
+    checkpoint_dir: checkpoints/llm_two_stage/token_finetune
+    tensorboard_dir: event_logs/llm_two_stage/token_finetune
+
+# Shared parameters applied to ALL tasks
+# These override task-specific values to ensure consistency
+shared_params:
+  training_params.n_folds: 5
+  training_params.min_lag: -1000
+  training_params.max_lag: 1000
+  training_params.lag_step_size: 200

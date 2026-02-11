@@ -1,27 +1,20 @@
-# Example: Feature Extraction with Foundation Model
-#
-# This config demonstrates PATTERN 1: Using a frozen foundation model to extract
-# embeddings during preprocessing, then training a simple MLP decoder.
-#
-# Flow: Neural Data → [Frozen Foundation] → Embeddings → [Trainable MLP] → Predictions
-
-# Model constructor (creates the MLP decoder)
-model_constructor_name: example_foundation_mlp
-
-# Config setter (sets dimensions based on foundation model)
 config_setter_name: example_foundation_feature_extraction
-
-# Model parameters
-model_params:
-  # Path to pretrained foundation model directory
-  model_dir: example_foundation_model/pretrained_model
-
-  # MLP decoder architecture (input_dim will be set automatically by config_setter)
-  layer_sizes: [128, 50]  # Hidden layer(s) + output dimension
-  dropout: 0.1
-  use_layer_norm: true
-
-# Training parameters
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    subject_ids:
+    - 1
+    - 2
+    - 3
+    preprocessing_fn_name: example_foundation_feature_extraction
+    preprocessor_params:
+      batch_size: 32
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
 training_params:
   batch_size: 64
   epochs: 100
@@ -29,13 +22,17 @@ training_params:
   weight_decay: 0.0001
   early_stopping_patience: 10
   n_folds: 5
-
-  # Loss and metrics
-  losses: [mse]
-  loss_weights: [1.0]
-  metrics: [cosine_sim, nll_embedding]
+  losses:
+  - mse
+  loss_weights:
+  - 1.0
+  metrics:
+  - cosine_sim
+  - nll_embedding
   early_stopping_metric: cosine_sim
   smaller_is_better: false
+<<<<<<< HEAD
+=======
 
 # Data parameters
 data_params:
@@ -55,4 +52,15 @@ data_params:
     batch_size: 32  # Batch size for feature extraction
 
 # Trial identifier
+>>>>>>> 8e54602540327232ddbfc9ca795b4eab08e17474
 trial_name: example_foundation_feature_extraction
+model_spec:
+  constructor_name: example_foundation_mlp
+  params:
+    model_dir: example_foundation_model/pretrained_model
+    layer_sizes:
+    - 128
+    - 50
+    dropout: 0.1
+    use_layer_norm: true
+  sub_models: {}

@@ -204,3 +204,5 @@ exp/
 *.pth
 *.pt
 *.ckpt
+# Downloaded models
+model_cache/

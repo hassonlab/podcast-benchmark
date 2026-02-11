@@ -51,22 +51,23 @@ class MyDecodingModel(nn.Module):
 
 ### Create a Constructor Function
 
-Define a constructor that takes model parameters from your config:
+Define a constructor that takes a params dict (which may include sub-models) from your config:
 
 ```python
 import core.registry as registry
 
 @registry.register_model_constructor()
-def my_model_constructor(model_params):
+def my_model_constructor(params):
     return MyDecodingModel(
-        input_dim=model_params['input_dim'],
-        output_dim=model_params['output_dim']
+        input_dim=params['input_dim'],
+        output_dim=params['output_dim']
     )
 ```
 
 **Important**:
 - Use the `@registry.register_model_constructor()` decorator
-- The function must have signature: `constructor_fn(model_params: dict) -> Model`
+- The function must have signature: `constructor_fn(params: dict) -> Model`
+- The `params` dict contains both regular parameters and any built sub-models
 - By default, the registered name is the function name (can override with `@registry.register_model_constructor('custom_name')`)
 
 ### Examples
@@ -74,15 +75,27 @@ def my_model_constructor(model_params):
 **Neural Conv Decoder** (ensemble model):
 ```python
 @registry.register_model_constructor()
-def ensemble_pitom_model(model_params):
+def ensemble_pitom_model(params):
     return EnsemblePitomModel(
-        num_models=model_params['num_models'],
-        input_channels=model_params['input_channels'],
-        output_dim=model_params['embedding_dim'],
-        conv_filters=model_params['conv_filters'],
-        reg=model_params['reg'],
-        reg_head=model_params['reg_head'],
-        dropout=model_params['dropout']
+        num_models=params['num_models'],
+        input_channels=params['input_channels'],
+        output_dim=params['embedding_dim'],
+        conv_filters=params['conv_filters'],
+        dropout=params['dropout']
+    )
+```
+
+**Model with Nested Sub-Model** (e.g., GPT2Brain with encoder):
+```python
+@registry.register_model_constructor()
+def gpt2_brain(params):
+    # params contains both regular params and built sub-models
+    return GPT2Brain(
+        lm_model=params['lm_model'],
+        tokenizer=params['tokenizer'],
+        encoder_model=params['encoder_model'],  # This is a pre-built model
+        device=params.get('device', 'cpu'),
+        freeze_lm=params.get('freeze_lm', True)
     )
 ```
 
@@ -127,15 +140,15 @@ class FoundationModelMLP(nn.Module):
 
 
 @registry.register_model_constructor()
-def foundation_model_finetune_mlp(model_params):
+def foundation_model_finetune_mlp(params):
     return FoundationModelMLP(
-        model_params["model_dim"],
-        model_params["mlp_layer_sizes"],
-        model_dir=model_params.get("model_dir"),
-        foundation_model_config=model_params["foundation_model_config"],
+        params["model_dim"],
+        params["mlp_layer_sizes"],
+        model_dir=params.get("model_dir"),
+        foundation_model_config=params["foundation_model_config"],
         finetune=True,
-        freeze_foundation_model=model_params.get("freeze_foundation_model", False),
-        num_unfrozen_blocks=model_params.get("num_unfrozen_blocks", 0),
+        freeze_foundation_model=params.get("freeze_foundation_model", False),
+        num_unfrozen_blocks=params.get("num_unfrozen_blocks", 0),
     )
 ```
 
@@ -236,16 +249,30 @@ See [Configuration Guide](configuration.md) for detailed documentation on all co
 ### Basic Example
 
 ```yaml
-# Model constructor name (must match registered function name)
-model_constructor_name: my_model_constructor
+# Model specification
+model_spec:
+  constructor_name: my_model_constructor
+  params:
+    input_dim: 256
+    output_dim: 50
+  sub_models: {}
 
 # Optional: config setter function name
 config_setter_name: my_config_setter
 
-# Model-specific parameters (passed to constructor)
-model_params:
-  input_dim: 256
-  output_dim: 50
+# Task configuration
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    window_width: 0.625
+    preprocessing_fn_name: my_preprocessing_fn
+    subject_ids: [1, 2, 3]
+    preprocessor_params:
+      custom_param: value
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
 
 # Training parameters
 training_params:
@@ -259,35 +286,45 @@ training_params:
   metrics: [cosine_sim]
   early_stopping_metric: cosine_sim
 
-# Data parameters
-data_params:
-  data_root: data
-  embedding_type: gpt-2xl
-  embedding_layer: 24
-  window_width: 0.625
-  preprocessing_fn_name: my_preprocessing_fn
-  subject_ids: [1, 2, 3]
-  preprocessor_params:
-    custom_param: value
-
 # Trial identifier
 trial_name: my_model_v1
 ```
 
-### Finetuning Example
+### Nested Model Example (e.g., GPT2Brain with encoder)
 
 ```yaml
-model_constructor_name: foundation_model_finetune_mlp
-config_setter_name: foundation_model_finetune_mlp
+model_spec:
+  constructor_name: gpt2_brain
+  params:
+    freeze_lm: true
+    device: cuda
+  sub_models:
+    encoder_model:
+      constructor_name: pitom_model
+      params:
+        input_channels: 64
+        output_dim: 768
+        conv_filters: 128
+        dropout: 0.2
+      sub_models: {}
+      checkpoint_path: "checkpoints/encoder/lag_{lag}/best_model_fold{fold}.pt"
 
-model_params:
-  mlp_layer_sizes: [50]
-  norm_embedding: true
-  # Path to pretrained foundation model
-  model_dir: /path/to/pretrained/model
-  # Optionally freeze most of foundation model
-  freeze_foundation_model: true
-  num_unfrozen_blocks: 2  # Only finetune last 2 transformer blocks
+config_setter_name: set_input_channels
+
+# This allows training different encoders at each lag
+# while reusing the same parent GPT2Brain model
+
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    preprocessing_fn_name: foundation_model_finetune_mlp
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
 
 training_params:
   batch_size: 64
@@ -295,14 +332,6 @@ training_params:
   losses: [mse]
   metrics: [cosine_sim, nll_embedding]
   early_stopping_metric: cosine_sim
-
-data_params:
-  data_root: data
-  embedding_type: gpt-2xl
-  embedding_layer: 24
-  embedding_pca_dim: 50
-  preprocessing_fn_name: foundation_model_finetune_mlp
-  subject_ids: [1, 2, 3]
 
 trial_name: foundation_finetune_v1
 ```
@@ -320,7 +349,7 @@ import core.registry as registry
 def my_config_setter(experiment_config, raws, df_word):
     # Set values based on data
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
-    experiment_config.model_params['input_channels'] = num_electrodes
+    experiment_config.model_spec.params['input_channels'] = num_electrodes
     return experiment_config
 ```
 
@@ -335,6 +364,20 @@ def config_setter(
 ) -> ExperimentConfig
 ```
 
+**Multiple Config Setters**: You can apply multiple setters in sequence:
+```yaml
+# Single setter
+config_setter_name: my_model
+
+# Multiple setters (applied in order)
+config_setter_name: [set_input_channels, set_embedding_dim, initialize_model]
+```
+
+This is useful for:
+- Applying task-specific setters from `task_specific_config.required_config_setter_names`
+- Following up with model-specific setters
+- Chaining multiple config transformations
+
 ### Examples
 
 **Neural Conv** (set number of input channels):
@@ -342,7 +385,7 @@ def config_setter(
 @registry.register_config_setter('neural_conv')
 def set_config_input_channels(experiment_config, raws, _df_word):
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
-    experiment_config.model_params['input_channels'] = num_electrodes
+    experiment_config.model_spec.params['input_channels'] = num_electrodes
     return experiment_config
 ```
 
@@ -354,20 +397,20 @@ def foundation_model_mlp_finetune_config_setter(
 ):
     # Add channel names for preprocessing
     ch_names = sum([raw.info.ch_names for raw in raws], [])
-    experiment_config.data_params.preprocessor_params = {"ch_names": ch_names}
+    experiment_config.task_config.data_params.preprocessor_params = {"ch_names": ch_names}
 
     # Load foundation model config
     config_path = os.path.join(
-        experiment_config.model_params["model_dir"],
+        experiment_config.model_spec.params["model_dir"],
         "experiment_config.yml"
     )
     foundation_config = load_config(config_path)
 
     # Set dimensions and window width from foundation model
-    experiment_config.model_params["foundation_model_config"] = foundation_config
-    experiment_config.model_params["model_dim"] = foundation_config.vit_config.dim
-    experiment_config.data_params.window_width = foundation_config.sample_length
-    experiment_config.data_params.preprocessor_params["ecog_data_config"] = (
+    experiment_config.model_spec.params["foundation_model_config"] = foundation_config
+    experiment_config.model_spec.params["model_dim"] = foundation_config.vit_config.dim
+    experiment_config.task_config.data_params.window_width = foundation_config.sample_length
+    experiment_config.task_config.data_params.preprocessor_params["ecog_data_config"] = (
         foundation_config.ecog_data_config
     )
 
@@ -424,7 +467,7 @@ python main.py --config configs/my_model/config.yml
 
 Results will be saved to:
 - `results/` - Performance metrics
-- `models/` - Model checkpoints
+- `checkpoints/` - Model checkpoints
 - `event_logs/` - TensorBoard logs (if enabled)
 
 ### Debugging

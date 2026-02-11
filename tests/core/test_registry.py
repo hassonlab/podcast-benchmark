@@ -20,6 +20,7 @@ def reset_registries():
     registry.data_preprocessor_registry.clear()
     registry.config_setter_registry.clear()
     registry.metric_registry.clear()
+    registry.model_data_getter_registry.clear()
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ def mock_config_setter():
 
     def setter(experiment_config, raws, df_word):
         # Modify some config field
-        experiment_config.model_params["modified"] = True
+        experiment_config.model_spec.params["modified"] = True
         return experiment_config
 
     return setter
@@ -77,9 +78,11 @@ class TestModelConstructorRegistry:
             mock_model_constructor
         )
 
-        # Check it was added to registry
+        # Check it was added to registry (new structure: {"constructor": fn, "required_data_getter": str|None})
         assert "test_model" in registry.model_constructor_registry
-        assert registry.model_constructor_registry["test_model"] == decorated_fn
+        model_info = registry.model_constructor_registry["test_model"]
+        assert model_info["constructor"] == decorated_fn
+        assert model_info["required_data_getter"] is None
         assert decorated_fn == mock_model_constructor  # Should return original function
 
     def test_register_model_constructor_default_name(self, mock_model_constructor):
@@ -90,13 +93,15 @@ class TestModelConstructorRegistry:
         decorated_fn = registry.register_model_constructor()(mock_model_constructor)
 
         assert "my_custom_model" in registry.model_constructor_registry
-        assert registry.model_constructor_registry["my_custom_model"] == decorated_fn
+        model_info = registry.model_constructor_registry["my_custom_model"]
+        assert model_info["constructor"] == decorated_fn
 
     def test_model_constructor_functionality(self, mock_model_constructor):
         """Test that registered model constructor works correctly."""
         registry.register_model_constructor("test_model")(mock_model_constructor)
 
-        constructor = registry.model_constructor_registry["test_model"]
+        model_info = registry.model_constructor_registry["test_model"]
+        constructor = model_info["constructor"]
         test_params = {"param1": "value1", "param2": 42}
 
         model = constructor(test_params)
@@ -121,8 +126,8 @@ class TestModelConstructorRegistry:
         assert "model2" in registry.model_constructor_registry
 
         # Test they work independently
-        result1 = registry.model_constructor_registry["model1"]({"test": 1})
-        result2 = registry.model_constructor_registry["model2"]({"test": 2})
+        result1 = registry.model_constructor_registry["model1"]["constructor"]({"test": 1})
+        result2 = registry.model_constructor_registry["model2"]["constructor"]({"test": 2})
 
         assert result1["type"] == "model1"
         assert result2["type"] == "model2"
@@ -193,12 +198,12 @@ class TestConfigSetterRegistry:
         mock_df_word = {"words": ["word1", "word2"]}
 
         # Should modify the config
-        original_params = sample_experiment_config.model_params.copy()
+        original_params = sample_experiment_config.model_spec.params.copy()
         modified_config = setter(sample_experiment_config, mock_raws, mock_df_word)
 
         # Check that modification was made
-        assert "modified" in modified_config.model_params
-        assert modified_config.model_params["modified"] == True
+        assert "modified" in modified_config.model_spec.params
+        assert modified_config.model_spec.params["modified"] == True
 
         # Should return the same config object
         assert modified_config is sample_experiment_config
@@ -291,11 +296,11 @@ class TestRegistryManagement:
 
         # Register first function
         registry.register_model_constructor("test_overwrite")(fn1)
-        assert registry.model_constructor_registry["test_overwrite"]() == "first"
+        assert registry.model_constructor_registry["test_overwrite"]["constructor"]() == "first"
 
         # Register second function with same name
         registry.register_model_constructor("test_overwrite")(fn2)
-        assert registry.model_constructor_registry["test_overwrite"]() == "second"
+        assert registry.model_constructor_registry["test_overwrite"]["constructor"]() == "second"
 
         # Should only have one entry
         assert (
@@ -325,5 +330,72 @@ class TestRegistryManagement:
         assert len(registry.model_constructor_registry) == 2
 
         # Both should still be accessible
-        assert registry.model_constructor_registry["func1"]() == 1
-        assert registry.model_constructor_registry["func2"]() == 2
+        assert registry.model_constructor_registry["func1"]["constructor"]() == 1
+        assert registry.model_constructor_registry["func2"]["constructor"]() == 2
+
+    def test_required_data_getter_registration(self):
+        """Test that required_data_getter is stored when registering model constructor."""
+
+        def constructor(params):
+            return {"params": params}
+
+        # Register with required_data_getter
+        registry.register_model_constructor("test_model", required_data_getter="my_getter")(
+            constructor
+        )
+
+        model_info = registry.model_constructor_registry["test_model"]
+        assert model_info["constructor"] == constructor
+        assert model_info["required_data_getter"] == "my_getter"
+
+
+class TestModelDataGetterRegistry:
+    """Test model data getter registration and lookup."""
+
+    def test_register_model_data_getter_decorator(self):
+        """Test that @register_model_data_getter adds function to registry."""
+
+        def my_getter(task_df, raws, model_params):
+            task_df["new_col"] = ["value"] * len(task_df)
+            return task_df, ["new_col"]
+
+        decorated_fn = registry.register_model_data_getter("test_getter")(my_getter)
+
+        assert "test_getter" in registry.model_data_getter_registry
+        assert registry.model_data_getter_registry["test_getter"] == decorated_fn
+        assert decorated_fn == my_getter  # Should return original function
+
+    def test_model_data_getter_default_name(self):
+        """Test that decorator uses function name when no name provided."""
+
+        def custom_data_getter(task_df, raws, model_params):
+            return task_df, []
+
+        decorated_fn = registry.register_model_data_getter()(custom_data_getter)
+
+        assert "custom_data_getter" in registry.model_data_getter_registry
+        assert registry.model_data_getter_registry["custom_data_getter"] == decorated_fn
+
+    def test_model_data_getter_functionality(self):
+        """Test that registered model data getter works correctly."""
+        import pandas as pd
+
+        def add_test_column(task_df, raws, model_params):
+            task_df = task_df.copy()
+            task_df["test_col"] = [{"data": i} for i in range(len(task_df))]
+            return task_df, ["test_col"]
+
+        registry.register_model_data_getter("test_getter")(add_test_column)
+
+        getter_fn = registry.model_data_getter_registry["test_getter"]
+
+        # Create test dataframe
+        test_df = pd.DataFrame({"start": [1, 2, 3], "target": [0, 1, 0]})
+        mock_raws = []
+        mock_params = {}
+
+        enriched_df, added_cols = getter_fn(test_df, mock_raws, mock_params)
+
+        assert "test_col" in enriched_df.columns
+        assert added_cols == ["test_col"]
+        assert len(enriched_df["test_col"]) == 3

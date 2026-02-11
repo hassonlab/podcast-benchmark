@@ -8,21 +8,18 @@ import pytest
 import yaml
 from dataclasses import asdict
 
-from core.config import DataParams, TrainingParams, ExperimentConfig, dict_to_config
+from core.config import DataParams, TrainingParams, ExperimentConfig, dict_to_config, ModelSpec
 
 
 @pytest.fixture
 def sample_data_params():
     """Sample DataParams configuration for testing."""
     return DataParams(
-        embedding_type="gpt-2xl",
         window_width=0.5,
         preprocessing_fn_name="test_preprocessor",
         subject_ids=[1, 2],
         data_root="test_data",
-        embedding_pca_dim=50,
         channel_reg_ex=None,
-        embedding_layer=24,
         preprocessor_params={"param1": "value1"},
     )
 
@@ -53,19 +50,16 @@ def sample_training_params():
 def sample_config_dict():
     """Sample configuration dictionary for testing dict_to_config."""
     return {
-        "model_constructor_name": "test_model",
-        "model_params": {"lr": 0.001, "hidden_dim": 128},
+        "model_spec": {
+            "constructor_name": "test_model",
+            "params": {"lr": 0.001, "hidden_dim": 128},
+        },
         "training_params": {
             "batch_size": 16,
             "epochs": 5,
             "learning_rate": 0.01,
             "loss_name": "mse",
             "metrics": ["cosine_sim"],
-        },
-        "data_params": {
-            "embedding_type": "glove",
-            "subject_ids": [1, 2, 3],
-            "window_width": 0.625,
         },
         "trial_name": "test_trial",
     }
@@ -77,19 +71,17 @@ class TestDictToConfig:
     def test_simple_dict_conversion(self):
         """Test converting simple dictionary to DataParams."""
         data_dict = {
-            "embedding_type": "glove",
             "window_width": 0.5,
             "subject_ids": [1, 2, 3],
-            "embedding_pca_dim": 50,
+            "preprocessing_fn_name": "test_preprocessor",
         }
 
         params = dict_to_config(data_dict, DataParams)
 
         assert isinstance(params, DataParams)
-        assert params.embedding_type == "glove"
         assert params.window_width == 0.5
         assert params.subject_ids == [1, 2, 3]
-        assert params.embedding_pca_dim == 50
+        assert params.preprocessing_fn_name == "test_preprocessor"
         # Check that defaults are preserved
         assert params.data_root == "data"
 
@@ -98,7 +90,7 @@ class TestDictToConfig:
         config = dict_to_config(sample_config_dict, ExperimentConfig)
 
         assert isinstance(config, ExperimentConfig)
-        assert config.model_constructor_name == "test_model"
+        assert config.model_spec.constructor_name == "test_model"
         assert config.trial_name == "test_trial"
 
         # Check nested dataclasses
@@ -107,15 +99,17 @@ class TestDictToConfig:
         assert config.training_params.epochs == 5
         assert config.training_params.learning_rate == 0.01
 
-        assert isinstance(config.data_params, DataParams)
-        assert config.data_params.embedding_type == "glove"
-        assert config.data_params.subject_ids == [1, 2, 3]
-        assert config.data_params.window_width == 0.625
+        # Check model spec
+        assert isinstance(config.model_spec, ModelSpec)
+        assert config.model_spec.params["lr"] == 0.001
+        assert config.model_spec.params["hidden_dim"] == 128
 
     def test_partial_dict_conversion(self):
         """Test conversion with partial dictionary (missing fields use defaults)."""
         partial_dict = {
-            "model_constructor_name": "test_model",
+            "model_spec": {
+                "constructor_name": "test_model",
+            },
             "training_params": {
                 "batch_size": 128
                 # Other fields should use defaults
@@ -124,33 +118,31 @@ class TestDictToConfig:
 
         config = dict_to_config(partial_dict, ExperimentConfig)
 
-        assert config.model_constructor_name == "test_model"
+        assert config.model_spec.constructor_name == "test_model"
         assert config.training_params.batch_size == 128
         # Check defaults are preserved
         assert config.training_params.epochs == 100  # default
         assert config.training_params.learning_rate == 0.001  # default
-        assert config.data_params.embedding_type == "gpt-2xl"  # default
 
     def test_empty_dict_conversion(self):
         """Test conversion with empty dictionary (all defaults)."""
         config = dict_to_config({}, ExperimentConfig)
 
         assert isinstance(config, ExperimentConfig)
-        assert config.model_constructor_name == ""
+        assert config.model_spec.constructor_name == ""
         assert config.training_params.batch_size == 32
-        assert config.data_params.embedding_type == "gpt-2xl"
 
     def test_invalid_field_ignored(self):
         """Test that invalid fields in dictionary are ignored."""
         data_dict = {
-            "embedding_type": "glove",
+            "window_width": 0.5,
             "invalid_field": "should_be_ignored",
             "another_invalid": 42,
         }
 
         params = dict_to_config(data_dict, DataParams)
 
-        assert params.embedding_type == "glove"
+        assert params.window_width == 0.5
         assert not hasattr(params, "invalid_field")
         assert not hasattr(params, "another_invalid")
 
@@ -166,16 +158,13 @@ class TestYAMLIntegration:
         config = dict_to_config(config_dict, ExperimentConfig)
 
         assert isinstance(config, ExperimentConfig)
-        assert config.model_constructor_name == "test_model"
+        assert config.model_spec.constructor_name == "test_model"
         assert config.config_setter_name == "test_setter"
-        assert config.model_params["hidden_dim"] == 256
-        assert config.model_params["dropout"] == 0.1
+        assert config.model_spec.params["hidden_dim"] == 256
+        assert config.model_spec.params["dropout"] == 0.1
         assert config.training_params.batch_size == 64
         assert config.training_params.learning_rate == 0.001
         assert config.training_params.epochs == 20
-        assert config.data_params.embedding_type == "gpt-2xl"
-        assert config.data_params.embedding_layer == 24
-        assert config.data_params.subject_ids == [1, 2, 3]
         assert config.trial_name == "temp_test"
 
     def test_roundtrip_conversion(self, sample_experiment_config):
@@ -188,15 +177,11 @@ class TestYAMLIntegration:
 
         # Check key fields are preserved
         assert (
-            recovered_config.model_constructor_name
-            == sample_experiment_config.model_constructor_name
+            recovered_config.model_spec.constructor_name
+            == sample_experiment_config.model_spec.constructor_name
         )
         assert recovered_config.trial_name == sample_experiment_config.trial_name
         assert (
             recovered_config.training_params.batch_size
             == sample_experiment_config.training_params.batch_size
-        )
-        assert (
-            recovered_config.data_params.embedding_type
-            == sample_experiment_config.data_params.embedding_type
         )

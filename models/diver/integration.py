@@ -183,24 +183,41 @@ class DIVERDecoder(nn.Module):
     def forward(self, x, **kwargs):
         """
         Forward pass through DIVER model.
-        
+
         Args:
             x: Input tensor [batch_size, num_channels, seq_len]
             **kwargs: Additional keyword arguments
-                - data_info_list: List of dicts with metadata for each sample (optional)
-        
+                - xyz_id: MNI coordinates [batch_size, num_channels, 3] (preferred)
+                - data_info_list: List of dicts with metadata for each sample (legacy)
+
         Returns:
             Output tensor [batch_size, output_dim] (probabilities if activation applied)
         """
-        # Extract data_info_list from kwargs
+        # Accept xyz_id directly (flattened approach) or legacy data_info_list
+        xyz_id = kwargs.get('xyz_id', None)
         data_info_list = kwargs.get('data_info_list', None)
-        
-        # If data_info_list is not provided, create a default one
-        if data_info_list is None:
-            batch_size = x.shape[0]
-            num_channels = x.shape[1]
+
+        batch_size = x.shape[0]
+        num_channels = x.shape[1]
+
+        # Build data_info_list for underlying DIVER-1 model
+        if xyz_id is not None:
+            # xyz_id is [batch_size, num_channels, 3]
+            data_info_list = []
+            for i in range(batch_size):
+                # Convert tensor to numpy if needed
+                coords = xyz_id[i]
+                if torch.is_tensor(coords):
+                    coords = coords.cpu().numpy()
+                data_info_list.append({
+                    'num_channels': num_channels,
+                    'modality': 'iEEG',
+                    'xyz_id': coords,
+                })
+        elif data_info_list is None:
+            # Fallback: create default data_info_list without coordinates
             data_info_list = create_data_info_list(batch_size, num_channels)
-        
+
         # DIVER model forward (outputs logits)
         output = self.diver_model(x, data_info_list=data_info_list)
         
@@ -222,7 +239,43 @@ class DIVERDecoder(nn.Module):
 # MODEL CONSTRUCTOR
 # =============================================================================
 
-@registry.register_model_constructor("diver_finetune")
+@registry.register_model_data_getter("diver_data_info")
+def get_diver_data_info(task_df, raws, model_params):
+    """
+    Add xyz_id column to task_df for DIVER model.
+
+    The xyz_id contains MNI coordinates for PositionalEncoding3D.
+    Each sample gets a copy of the same [num_channels, 3] array since all samples
+    share the same electrode configuration.
+
+    Args:
+        task_df: DataFrame containing task-specific data
+        raws: List of MNE Raw objects
+        model_params: Dictionary of model parameters from ModelSpec
+
+    Returns:
+        Tuple of (enriched_df, list of added column names)
+    """
+    from utils.data_utils import extract_subject_id_from_raw, get_mni_coordinates
+
+    # Extract subject ID and channel names from first raw
+    subject_id = extract_subject_id_from_raw(raws[0])
+    channel_names = raws[0].ch_names
+
+    # Load MNI coordinates
+    data_root = model_params.get("data_root", "data")
+    mni_coords = get_mni_coordinates(subject_id, channel_names, data_root)
+    print(f"DIVER: Loaded MNI coordinates for subject {subject_id}: shape {mni_coords.shape}")
+
+    # Add xyz_id column - same coords for all samples
+    num_samples = len(task_df)
+    task_df = task_df.copy()  # Avoid modifying original
+    task_df["xyz_id"] = [mni_coords.copy() for _ in range(num_samples)]
+
+    return task_df, ["xyz_id"]
+
+
+@registry.register_model_constructor("diver_finetune", required_data_getter="diver_data_info")
 def create_diver_finetuning_model(model_params):
     """
     Create DIVER finetuning model using DIVER-1's finetune_model classes.

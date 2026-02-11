@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset, Dataset, Dataset
@@ -24,16 +25,16 @@ from tqdm import tqdm
 import mne
 
 from utils import data_utils
-from core.config import TrainingParams, DataParams
+from utils.dataset import NeuralDictDataset
+from core.config import TrainingParams, TaskConfig, ModelSpec
 from utils.fold_utils import get_sequential_folds, get_zero_shot_folds
+from utils.model_utils import build_model_from_spec
 import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score
 
 from sklearn.linear_model import LinearRegression, Ridge
-from scipy.stats import pearsonr
 
 
 def train_logistic_regression(X_train, y_train):
@@ -310,6 +311,33 @@ def should_update_best(current_val, best_val, smaller_is_better):
         return current_val > best_val
 
 
+def create_lr_scheduler(optimizer, training_params: TrainingParams):
+    """
+    Create a ReduceLROnPlateau learning rate scheduler.
+
+    Args:
+        optimizer: PyTorch optimizer
+        training_params: Training parameters containing scheduler config
+
+    Returns:
+        ReduceLROnPlateau scheduler or None if use_lr_scheduler is False
+    """
+    if not training_params.use_lr_scheduler:
+        return None
+
+    params = training_params.scheduler_params or {}
+    
+    # Auto-detect mode based on smaller_is_better unless explicitly provided
+    mode = params.get("mode", "min" if training_params.smaller_is_better else "max")
+    factor = params.get("factor", 0.5)
+    patience = params.get("patience", 10)
+    min_lr = params.get("min_lr", 1e-6)
+    
+    return lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode=mode, factor=factor, patience=patience, min_lr=min_lr
+    )
+
+
 def should_update_gradient_accumulation(
     batch_idx, total_batches, grad_accumulation_steps
 ):
@@ -325,33 +353,22 @@ def should_update_gradient_accumulation(
 
 
 def train_decoding_model(
-    X: np.ndarray,
-    Y: np.ndarray,
-    selected_words: list[str],
-    model_constructor_fn,
+    neural_data: torch.Tensor,
+    Y: torch.Tensor,
+    data_df: pd.DataFrame,
+    model_spec: ModelSpec,
     task_name: str,
+    task_config: TaskConfig,
     lag: int,
-    model_params: dict,
     training_params: TrainingParams,
     checkpoint_dir: str,
     plot_results: bool = False,
     write_to_tensorboard: bool = False,
     tensorboard_dir: str = "event_logs",
-    lip_coords_list: Optional[list[dict]] = None,
-    mni_coords: Optional[np.ndarray] = None,  # MNI coordinates for DIVER [num_channels, 3]
-    channel_names: Optional[list[str]] = None,  # Channel names for DIVER
 ):
-    # 1. Prepare device & output dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # 2. Convert to tensors if needed
-    if isinstance(X, np.ndarray):
-        X = torch.tensor(X, dtype=torch.float32)
-    if isinstance(Y, np.ndarray):
-        Y = torch.tensor(Y, dtype=torch.float32)
-
-    # 2.5. Shuffle targets if requested (sanity check to verify model is working)
     if training_params.shuffle_targets:
         print(
             "WARNING: Shuffling targets for sanity check. Model should perform poorly."
@@ -363,10 +380,13 @@ def train_decoding_model(
 
     # 3. Get fold indices
     if training_params.fold_type == "sequential_folds":
-        fold_indices = get_sequential_folds(X, num_folds=training_params.n_folds)
+        fold_indices = get_sequential_folds(
+            neural_data, num_folds=training_params.n_folds
+        )
     elif training_params.fold_type == "zero_shot_folds":
         fold_indices = get_zero_shot_folds(
-            selected_words, num_folds=training_params.n_folds
+            data_df[task_config.data_params.word_column].values,
+            num_folds=training_params.n_folds,
         )
     else:
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
@@ -374,6 +394,7 @@ def train_decoding_model(
     # 3.5. Visualize fold distribution if requested
     if training_params.visualize_fold_distribution:
         from utils.analysis_utils import visualize_fold_distribution
+
         # Convert Y to numpy if it's a tensor
         Y_np = Y.cpu().numpy() if isinstance(Y, torch.Tensor) else Y
         visualize_fold_distribution(Y_np, fold_indices, task_name=task_name, lag=lag)
@@ -394,6 +415,9 @@ def train_decoding_model(
     }
 
     cv_results["num_epochs"] = []
+    if "cross_entropy" in metric_names:
+        for phase in phases:
+            cv_results[f"{phase}_perplexity"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.
     # Clean this up later. Hardcoding for now since generalizing this like other metrics would
@@ -450,23 +474,16 @@ def train_decoding_model(
             optimizer.zero_grad()
 
         for i, batch_data in enumerate(loader):
-            # Handle data_info_list
-            if len(batch_data) == 3:
-                # Case with lip_coords
-                Xb, yb, data_info_list = batch_data
-                Xb, yb = Xb.to(device), yb.to(device)
-            else:
-                # Case without lip_coords (backward compatibility)
-                Xb, yb = batch_data
-                Xb, yb = Xb.to(device), yb.to(device)
-                data_info_list = None
+            # NeuralDictDataset returns (X, inputs_dict, Y)
+            Xb, inputs_dict, yb = batch_data
+            Xb = Xb.to(device)
+            # Move all input tensors to device (handles data_info_list and other inputs)
+            inputs_dict = {k: v.to(device) if torch.is_tensor(v) else v for k, v in inputs_dict.items()}
+            yb = yb.to(device)
 
             if is_train:
                 # Forward pass
-                if data_info_list is not None:
-                    out = model(Xb, data_info_list=data_info_list)
-                else:
-                    out = model(Xb)
+                out = model(Xb, **inputs_dict)
                 # Loss calculation
                 loss = compute_loss(out, yb, training_params, all_fns)
                 # Normalize loss to account for gradient accumulation
@@ -479,15 +496,12 @@ def train_decoding_model(
                     optimizer.zero_grad()
             else:
                 with torch.no_grad():
-                    if data_info_list is not None:
-                        out = model(Xb, data_info_list=data_info_list)
-                    else:
-                        out = model(Xb)
+                    out = model(Xb, **inputs_dict)
                     # Loss calculation
                     loss = compute_loss(out, yb, training_params, all_fns)
 
             # Compute all metrics for this batch using the helper function
-            batch_metrics = compute_all_metrics(out, yb, all_fns, model_params)
+            batch_metrics = compute_all_metrics(out, yb, all_fns, model_spec.params)
 
             # Accumulate metrics
             for name, val in batch_metrics.items():
@@ -503,12 +517,18 @@ def train_decoding_model(
                 loss = loss.detach().mean().item()
             sums["loss"] += loss
 
-        return {
+        result = {
             name: (
                 sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
             )
             for name in sums
         }
+
+        # Calculate perplexity as derived metric from averaged cross_entropy
+        if "cross_entropy" in result:
+            result["perplexity"] = np.exp(result["cross_entropy"])
+
+        return result
 
     # 6. Cross‐val loop
     for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
@@ -546,213 +566,84 @@ def train_decoding_model(
             Y_val_norm = Y[va_idx]
             Y_test_norm = Y[te_idx]
 
-        # DataLoaders
-        if lip_coords_list is not None:
-            # Split lip_coords_list according to fold
-            train_lip_coords = [lip_coords_list[i] for i in tr_idx]
-            val_lip_coords = [lip_coords_list[i] for i in va_idx]
-            test_lip_coords = [lip_coords_list[i] for i in te_idx]
-            
-            # Custom Dataset class
-            class PopTDataset(Dataset):
-                def __init__(self, X, Y, lip_coords_list):
-                    self.X = X
-                    self.Y = Y
-                    self.lip_coords_list = lip_coords_list
-                
-                def __len__(self):
-                    return len(self.X)
-                
-                def __getitem__(self, idx):
-                    if self.lip_coords_list:
-                        return self.X[idx], self.Y[idx], self.lip_coords_list[idx]
-                    else:
-                        return self.X[idx], self.Y[idx]
-            
-            datasets = {
-                "train": PopTDataset(X[tr_idx], Y_train_norm, train_lip_coords),
-                "val": PopTDataset(X[va_idx], Y_val_norm, val_lip_coords),
-                "test": PopTDataset(X[te_idx], Y_test_norm, test_lip_coords),
-            }
-            
-            # Custom collate function
-            def collate_fn(batch):
-                data_list = [item[0] for item in batch]
-                label_list = [item[1] for item in batch]
-                data_info_list = [item[2] for item in batch]
-                return (
-                    torch.stack(data_list, dim=0),
-                    torch.stack(label_list, dim=0),
-                    data_info_list
-                )
-            
-            loaders = {
-                phase: DataLoader(
-                    ds,
-                    batch_size=training_params.batch_size,
-                    shuffle=(phase == "train"),
-                    collate_fn=collate_fn,
-                )
-                for phase, ds in datasets.items()
-            }
-        elif mni_coords is not None:
-            # For DIVER model: include MNI coordinates (matching original DIVER-1 approach)
-            from models.diver.integration import create_data_info_list
-            
-            # Custom Dataset class for DIVER
-            class DIVERDataset(Dataset):
-                def __init__(self, X, Y):
-                    self.X = X
-                    self.Y = Y
-                
-                def __len__(self):
-                    return len(self.X)
-                
-                def __getitem__(self, idx):
-                    return self.X[idx], self.Y[idx]
-            
-            datasets = {
-                "train": DIVERDataset(X[tr_idx], Y_train_norm),
-                "val": DIVERDataset(X[va_idx], Y_val_norm),
-                "test": DIVERDataset(X[te_idx], Y_test_norm),
-            }
-            
-            # Custom collate function for DIVER: create data_info_list
-            def collate_fn(batch):
-                data_list = [item[0] for item in batch]
-                label_list = [item[1] for item in batch]
-                
-                # Create data_info_list (matching original DIVER-1 approach)
-                batch_size = len(batch)
-                num_channels = data_list[0].shape[0] if len(data_list[0].shape) >= 2 else data_list[0].shape[1]
-                
-                data_info_list = create_data_info_list(
-                    batch_size=batch_size,
-                    num_channels=num_channels,
-                    channel_names=channel_names,
-                    xyz_id=mni_coords  # Include MNI coordinates
-                )
-                
-                return (
-                    torch.stack(data_list, dim=0),
-                    torch.stack(label_list, dim=0),
-                    data_info_list
-                )
-            
-            loaders = {
-                phase: DataLoader(
-                    ds,
-                    batch_size=training_params.batch_size,
-                    shuffle=(phase == "train"),
-                    collate_fn=collate_fn,
-                )
-                for phase, ds in datasets.items()
-            }
-        else:
-            # Default approach (no lip_coords and no MNI coordinates)
-            datasets = {
-                "train": TensorDataset(X[tr_idx], Y_train_norm),
-                "val": TensorDataset(X[va_idx], Y_val_norm),
-                "test": TensorDataset(X[te_idx], Y_test_norm),
-            }
-            loaders = {
-                phase: DataLoader(
-                    ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
-                )
-                for phase, ds in datasets.items()
-            }
+        # DataLoaders - unified path using NeuralDictDataset for all models
+        # Model-specific columns (like data_info_list) are added via model_data_getter
+        # and included in input_fields, so they flow through automatically
+        extra_train_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, tr_idx
+        )
+        extra_val_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, va_idx
+        )
+        extra_test_inputs = data_utils.df_columns_to_tensors(
+            data_df, task_config.task_specific_config.input_fields, te_idx
+        )
+        datasets = {
+            "train": NeuralDictDataset(
+                neural_data[tr_idx], extra_train_inputs, Y_train_norm
+            ),
+            "val": NeuralDictDataset(neural_data[va_idx], extra_val_inputs, Y_val_norm),
+            "test": NeuralDictDataset(
+                neural_data[te_idx], extra_test_inputs, Y_test_norm
+            ),
+        }
+        loaders = {
+            phase: DataLoader(
+                ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
+            )
+            for phase, ds in datasets.items()
+        }
 
         # Train baseline models and compute all metrics
-        logistic_baseline_metrics = None
-        linear_baseline_metrics = None
-        ridge_baseline_metrics = None
+        def train_and_eval_baseline(training_fn, **kwargs):
+            model = training_fn(
+                neural_data[tr_idx].cpu().numpy(),
+                Y_train_norm.cpu().numpy(),
+                **kwargs,
+            )
+            # Prepare data splits for metric computation (use normalized targets)
+            X_splits = {
+                "train": neural_data[tr_idx].cpu().numpy(),
+                "val": neural_data[va_idx].cpu().numpy(),
+                "test": neural_data[te_idx].cpu().numpy(),
+            }
+            Y_splits = {
+                "train": Y_train_norm.cpu().numpy(),
+                "val": Y_val_norm.cpu().numpy(),
+                "test": Y_test_norm.cpu().numpy(),
+            }
+            # Compute all metrics
+            return compute_baseline_metrics(
+                model, X_splits, Y_splits, all_fns, model_spec.params
+            )
 
         if training_params.logistic_regression_baseline:
             print("Training logistic regression baseline...")
-            # Train logistic regression model (use normalized targets if applicable)
-            logistic_model = train_logistic_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            logistic_baseline_metrics = compute_baseline_metrics(
-                logistic_model, X_splits, Y_splits, all_fns, model_params
+            logistic_baseline_metrics = train_and_eval_baseline(
+                train_logistic_regression
             )
             logistic_regression_results.append(logistic_baseline_metrics)
-
         if training_params.linear_regression_baseline:
             print("Training linear regression baseline...")
-            # Train linear regression model (use normalized targets if applicable)
-            linear_model = train_linear_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            linear_baseline_metrics = compute_baseline_metrics(
-                linear_model, X_splits, Y_splits, all_fns, model_params
-            )
+            linear_baseline_metrics = train_and_eval_baseline(train_linear_regression)
             linear_regression_results.append(linear_baseline_metrics)
-
         if training_params.ridge_regression_baseline:
             print("Training ridge regression baseline...")
-            # Train ridge regression model (use normalized targets if applicable)
-            ridge_model = train_ridge_regression(
-                X[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-                alpha=training_params.ridge_alpha,
-            )
-
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": X[tr_idx].cpu().numpy(),
-                "val": X[va_idx].cpu().numpy(),
-                "test": X[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-
-            # Compute all metrics
-            ridge_baseline_metrics = compute_baseline_metrics(
-                ridge_model, X_splits, Y_splits, all_fns, model_params
+            ridge_baseline_metrics = train_and_eval_baseline(
+                train_ridge_regression, alpha=training_params.ridge_alpha
             )
             ridge_regression_results.append(ridge_baseline_metrics)
 
         # Model, optimizer, early‐stop setup
-        model = model_constructor_fn(model_params).to(device)
+        model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
         optimizer = optim.Adam(
             model.parameters(),
             lr=training_params.learning_rate,
             weight_decay=training_params.weight_decay,
         )
+
+        # Create learning rate scheduler if specified
+        scheduler = create_lr_scheduler(optimizer, training_params)
 
         best_val, patience = setup_early_stopping_state(training_params)
         best_epoch = 0
@@ -761,6 +652,10 @@ def train_decoding_model(
         history = {
             f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
         }
+
+        if "cross_entropy" in metric_names:
+            for phase in ("train", "val"):
+                history[f"{phase}_perplexity"] = []
         history["train_loss"] = []
         history["val_loss"] = []
         history["num_epochs"] = None
@@ -786,12 +681,27 @@ def train_decoding_model(
             if should_update_best(cur, best_val, training_params.smaller_is_better):
                 best_val = cur
                 best_epoch = epoch
-                torch.save(model.state_dict(), model_path)
+                # Use model's save_checkpoint method if available, otherwise save state_dict
+                if hasattr(model, "save_checkpoint") and callable(
+                    getattr(model, "save_checkpoint")
+                ):
+                    model.save_checkpoint(model_path)
+                else:
+                    torch.save(model.state_dict(), model_path)
                 patience = 0
             else:
                 patience += 1
                 if patience >= training_params.early_stopping_patience:
                     break
+
+            # learning rate scheduler 
+            if scheduler is not None:
+                scheduler.step(cur)
+
+            # Log learning rate to TensorBoard
+            if write_to_tensorboard:
+                current_lr = optimizer.param_groups[0]["lr"]
+                writer.add_scalar("learning_rate", current_lr, epoch)
 
             loop.set_postfix(
                 {
@@ -804,7 +714,13 @@ def train_decoding_model(
         history["num_epochs"] = best_epoch + 1
 
         # load best and eval on test set
-        model.load_state_dict(torch.load(model_path))
+        # Use model's load_checkpoint method if available, otherwise save state_dict
+        if hasattr(model, "load_checkpoint") and callable(
+            getattr(model, "load_checkpoint")
+        ):
+            model.load_checkpoint(model_path)
+        else:
+            model.load_state_dict(torch.load(model_path))
         test_mets = run_epoch(model, loaders["test"])
 
         # record into cv_results
@@ -825,15 +741,18 @@ def train_decoding_model(
             log_metrics_to_tensorboard(writer, test_mets, "model", "test", fold)
 
             # Log baseline metrics
-            log_metrics_to_tensorboard(
-                writer, logistic_baseline_metrics, "logistic_regression", None, fold
-            )
-            log_metrics_to_tensorboard(
-                writer, linear_baseline_metrics, "linear_regression", None, fold
-            )
-            log_metrics_to_tensorboard(
-                writer, ridge_baseline_metrics, "ridge_regression", None, fold
-            )
+            if training_params.logistic_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, logistic_baseline_metrics, "logistic_regression", None, fold
+                )
+            if training_params.linear_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, linear_baseline_metrics, "linear_regression", None, fold
+                )
+            if training_params.ridge_regression_baseline:
+                log_metrics_to_tensorboard(
+                    writer, ridge_baseline_metrics, "ridge_regression", None, fold
+                )
 
             writer.close()
 
@@ -841,44 +760,23 @@ def train_decoding_model(
         # Hardcoded for now since this would be a bit complicated
         # to generalize at the moment.
         if is_word_embedding_decoding_task:
-            # TODO: figure out how we want to generalize evaluation inference vs training inference better.
-            # Key focus on preserve_ensemble argument.
-            # Prepare test data_info_list for coordinates if available
-            test_data_info_list = None
-            
-            # For DIVER model: create data_info_list with MNI coordinates
-            if mni_coords is not None and channel_names is not None:
-                # Create data_info_list for DIVER model
-                from models.diver.integration import create_data_info_list
-                num_test_samples = len(te_idx)
-                # Get num_channels from test data shape
-                if len(X[te_idx].shape) >= 2:
-                    num_channels = X[te_idx].shape[1]
-                else:
-                    num_channels = X[te_idx].shape[0] if len(X[te_idx].shape) == 1 else X[te_idx].shape[1]
-                
-                test_data_info_list = create_data_info_list(
-                    batch_size=num_test_samples,
-                    num_channels=num_channels,
-                    channel_names=channel_names,
-                    xyz_id=mni_coords
-                )
-            elif lip_coords_list is not None:
-                # For PopT/BrainBERT: use LIP coordinates
-                test_data_info_list = [lip_coords_list[i] for i in te_idx]
-            
+            # Get extra inputs for test set (includes model-specific data like data_info_list)
+            test_extra_inputs = data_utils.df_columns_to_tensors(
+                data_df, task_config.task_specific_config.input_fields, te_idx
+            )
+
             results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
-                X[te_idx],
+                neural_data[te_idx],
                 Y[te_idx],
                 model,
                 device,
-                selected_words,
+                data_df[task_config.data_params.word_column],
                 te_idx,
                 tr_idx,
                 training_params.top_k_thresholds,
                 training_params.min_train_freq_auc,
                 training_params.min_test_freq_auc,
-                data_info_list=test_data_info_list,
+                extra_inputs=test_extra_inputs,
                 preserve_ensemble=True,
             )
             for key, val in results.items():
@@ -951,6 +849,11 @@ def train_decoding_model(
             elif name == "confusion_matrix":
                 print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
 
+    if "cross_entropy" in metric_names:
+        for phase in phases:
+            vals = cv_results[f"{phase}_perplexity"]
+            print(f"Mean {phase} perplexity: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]
@@ -967,16 +870,16 @@ def run_training_over_lags(
     raws: list[mne.io.Raw],
     task_df: pd.DataFrame,
     preprocessing_fns: list[callable] | None,
-    model_constructor_fn,
+    model_spec: ModelSpec,
     task_name: str,
-    model_params: dict,
     training_params: TrainingParams,
-    data_params: DataParams,
+    task_config: TaskConfig,
     output_dir="results/",
     checkpoint_dir="checkpoints/",
     write_to_tensorboard=False,
     tensorboard_dir="event_log",
 ):
+    data_params = task_config.data_params
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -1003,104 +906,35 @@ def run_training_over_lags(
         print("=" * 60)
 
         # TODO: Support lazy-loading for larger datasets on future tasks.
-        # Check if LIP coordinates should be loaded
-        use_lip_coords = model_params.get("use_lip_coords", False)
-        
-        # Check if STFT preprocessing is enabled
-        use_stft_preprocessing = getattr(data_params, 'use_stft_preprocessing', False)
-        
-        if use_lip_coords:
-            X, Y, selected_words, lip_coords_list = data_utils.get_data(
-                lag,
-                raws,
-                task_df,
-                data_params.window_width,
-                preprocessing_fns,
-                data_params.preprocessor_params,
-                word_column=data_params.word_column,
-                return_lip_coords=True,
-                data_root=data_params.data_root,
-                use_stft_preprocessing=use_stft_preprocessing,
-                stft_config=getattr(data_params, 'stft_config', None),
-            )
-        else:
-            X, Y, selected_words = data_utils.get_data(
-                lag,
-                raws,
-                task_df,
-                data_params.window_width,
-                preprocessing_fns,
-                data_params.preprocessor_params,
-                word_column=data_params.word_column,
-                use_stft_preprocessing=use_stft_preprocessing,
-                stft_config=getattr(data_params, 'stft_config', None),
-            )
-            lip_coords_list = None
-
-        X_tensor = torch.FloatTensor(X)
-        # Handle case where Y contains arrays (e.g., word embeddings)
-        if Y.dtype == object:
-            Y = np.stack(Y)
-        Y_tensor = torch.FloatTensor(Y)
-
-        print(f"X_tensor shape: {X_tensor.shape}, Y_tensor shape: {Y_tensor.shape}")
-        if lip_coords_list is not None:
-            print(f"LIP coordinates loaded: {len(lip_coords_list)} samples")
-
-        # Check if DIVER model (requires MNI coordinates)
-        # DIVER model uses PositionalEncoding3D, so MNI coordinates are required
-        is_diver_model = (
-            "diver" in str(model_constructor_fn).lower() or
-            model_params.get("foundation_dir") is not None or
-            "diver" in task_name.lower()
+        neural_data, targets, data_df = data_utils.get_data(
+            lag,
+            raws,
+            task_df,
+            data_params.window_width,
+            preprocessing_fns,
+            data_params.preprocessor_params,
         )
-        
-        # Load MNI coordinates (for DIVER)
-        mni_coords = None
-        channel_names = None
-        if is_diver_model:
-            try:
-                from utils.data_utils import get_mni_coordinates
-                
-                # Extract subject ID (from first raw)
-                subject_id = data_utils.extract_subject_id_from_raw(raws[0])
-                
-                # Extract channel names (from first raw)
-                channel_names = raws[0].ch_names
-                
-                # Load MNI coordinates
-                mni_coords = get_mni_coordinates(
-                    subject_id=subject_id,
-                    channel_names=channel_names,
-                    data_root=data_params.data_root
-                )
-                print(f"DIVER: Loaded MNI coordinates for subject {subject_id}: shape {mni_coords.shape}")
-                print(f"DIVER: Channel names: {len(channel_names)} channels")
-            except FileNotFoundError as e:
-                print(f"Warning: {e}")
-                print("DIVER model will run without MNI coordinates (PositionalEncoding3D may fail)")
-                mni_coords = None
-            except Exception as e:
-                print(f"Warning: Failed to load MNI coordinates: {e}")
-                import traceback
-                traceback.print_exc()
-                mni_coords = None
+
+        neural_tensor = torch.FloatTensor(neural_data)
+        # Handle case where Y contains arrays (e.g., word embeddings)
+        if targets.dtype == object:
+            targets = np.stack(targets)
+        targets_tensor = torch.FloatTensor(targets)
+
+        print(f"neural_tensor shape: {neural_tensor.shape}")
 
         models, histories, cv_results = train_decoding_model(
-            X_tensor,
-            Y_tensor,
-            selected_words,
-            model_constructor_fn,
+            neural_tensor,
+            targets_tensor,
+            data_df,
+            model_spec,
             task_name,
+            task_config,
             lag,
-            model_params=model_params,
             training_params=training_params,
             checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
             write_to_tensorboard=write_to_tensorboard,
             tensorboard_dir=tensorboard_dir,
-            lip_coords_list=lip_coords_list,
-            mni_coords=mni_coords,  # MNI coordinates for DIVER
-            channel_names=channel_names,  # Channel names for DIVER
         )
 
         # Aggregate metrics

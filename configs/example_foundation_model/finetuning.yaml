@@ -1,46 +1,35 @@
-# Example: Finetuning Foundation Model
-#
-# This config demonstrates PATTERN 2: Including the foundation model as part of
-# your decoder and training it end-to-end (with optional partial freezing).
-#
-# Flow: Neural Data → [Partially Frozen Foundation → Decoder Head] → Predictions
-#                            (single model, trained together)
-
-# Model constructor (creates decoder with foundation model inside)
-model_constructor_name: example_foundation_finetune
-
-# Config setter (sets window width based on foundation model)
 config_setter_name: example_foundation_finetune
-
-# Model parameters
-model_params:
-  # Path to pretrained foundation model directory
-  model_dir: example_foundation_model/pretrained_model
-
-  # Decoder head architecture
-  mlp_layer_sizes: [128]  # Hidden layers before output
-  output_dim: 50  # Final output dimension
-  dropout: 0.1
-
-  # Freezing options
-  freeze_foundation: false  # Set to true to freeze entire foundation model
-  num_frozen_layers: 2  # Freeze first N transformer layers (0 = freeze none)
-
-# Training parameters
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    subject_ids:
+    - 1
+    - 2
+    - 3
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
 training_params:
-  batch_size: 32  # Smaller batch size for finetuning (uses more memory)
+  batch_size: 32
   epochs: 100
-  learning_rate: 0.0001  # Lower learning rate for finetuning
+  learning_rate: 0.0001
   weight_decay: 0.0001
   early_stopping_patience: 10
   n_folds: 5
-
-  # Loss and metrics
-  losses: [mse]
-  loss_weights: [1.0]
-  metrics: [cosine_sim, nll_embedding]
+  losses:
+  - mse
+  loss_weights:
+  - 1.0
+  metrics:
+  - cosine_sim
+  - nll_embedding
   early_stopping_metric: cosine_sim
   smaller_is_better: false
+<<<<<<< HEAD
+=======
 
 # Data parameters
 data_params:
@@ -56,4 +45,16 @@ data_params:
   # window_width will be set automatically by config_setter
 
 # Trial identifier
+>>>>>>> 8e54602540327232ddbfc9ca795b4eab08e17474
 trial_name: example_foundation_finetune
+model_spec:
+  constructor_name: example_foundation_finetune
+  params:
+    model_dir: example_foundation_model/pretrained_model
+    mlp_layer_sizes:
+    - 128
+    output_dim: 50
+    dropout: 0.1
+    freeze_foundation: false
+    num_frozen_layers: 2
+  sub_models: {}

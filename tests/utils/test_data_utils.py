@@ -15,11 +15,13 @@ from math import gcd
 from unittest.mock import patch, MagicMock
 
 from scipy.signal import resample_poly
+import torch
 from utils.data_utils import (
     get_data,
     read_electrode_file,
     load_raws,
     read_subject_mapping,
+    df_columns_to_tensors,
 )
 from core.config import DataParams
 
@@ -80,24 +82,23 @@ class TestGetDataOutOfBounds:
         lag = 0
         window_width = 0.5
 
-        data, targets, words = get_data(
+        data, targets, selected_rows_df = get_data(
             lag=lag,
             raws=[mock_raw],
             task_df=task_df_in_bounds,
             window_width=window_width,
-            word_column="word",
         )
 
         assert data.shape[0] == len(task_df_in_bounds)
         assert len(targets) == len(task_df_in_bounds)
-        assert len(words) == len(task_df_in_bounds)
+        assert len(selected_rows_df) == len(task_df_in_bounds)
 
     def test_get_data_without_word_column(self, mock_raw, task_df_in_bounds):
         """Test that get_data works correctly with in-bounds events."""
         lag = 0
         window_width = 0.5
 
-        data, targets, words = get_data(
+        data, targets, selected_rows_df = get_data(
             lag=lag,
             raws=[mock_raw],
             task_df=task_df_in_bounds,
@@ -106,6 +107,7 @@ class TestGetDataOutOfBounds:
 
         assert data.shape[0] == len(task_df_in_bounds)
         assert len(targets) == len(task_df_in_bounds)
+        assert len(selected_rows_df) == len(task_df_in_bounds)
 
     def test_get_data_out_of_bounds_bug(self, mock_raw, task_df_out_of_bounds):
         """Test that out-of-bounds events raise ValueError instead of creating empty epochs."""
@@ -160,18 +162,17 @@ class TestGetDataOutOfBounds:
         lag = 500
         window_width = 1.0
 
-        data, targets, words = get_data(
+        data, targets, selected_rows_df = get_data(
             lag=lag,
             raws=[mock_raw],
             task_df=task_df_mixed,
             window_width=window_width,
-            word_column="word",
         )
 
         expected_valid_events = 2
         assert data.shape[0] == expected_valid_events
         assert len(targets) == expected_valid_events
-        assert len(words) == expected_valid_events
+        assert len(selected_rows_df) == expected_valid_events
 
     def test_get_data_negative_time_bounds(self, mock_raw):
         """Test that events with negative time windows are filtered out."""
@@ -217,18 +218,17 @@ class TestGetDataOutOfBounds:
         lag = -500  # -0.5 seconds
         window_width = 0.4  # ±0.2s around event+lag
 
-        data, targets, words = get_data(
+        data, targets, selected_rows_df = get_data(
             lag=lag,
             raws=[mock_raw],
             task_df=task_df_mixed_neg,
             window_width=window_width,
-            word_column="word",
         )
 
         expected_valid_events = 3
         assert data.shape[0] == expected_valid_events
         assert len(targets) == expected_valid_events
-        assert len(words) == expected_valid_events
+        assert len(selected_rows_df) == expected_valid_events
 
 
 @pytest.fixture
@@ -813,3 +813,137 @@ class TestReadSubjectMapping:
         assert 5 in electrode_mapping
         assert 12 in electrode_mapping
         assert 8 in electrode_mapping
+
+
+class TestDfColumnsToTensors:
+    """Test df_columns_to_tensors function for converting DataFrame columns to PyTorch tensors."""
+
+    def test_single_numeric_column(self):
+        """Test converting a single numeric column to tensor."""
+        df = pd.DataFrame({"values": [1, 2, 3, 4, 5]})
+        result = df_columns_to_tensors(df, ["values"])
+
+        assert "values" in result
+        assert isinstance(result["values"], torch.Tensor)
+        assert torch.equal(result["values"], torch.tensor([1, 2, 3, 4, 5]))
+
+    def test_empty_column_names_returns_empty_dict(self):
+        """Test converting a single numeric column to tensor."""
+        df = pd.DataFrame({"values": [1, 2, 3, 4, 5]})
+        result = df_columns_to_tensors(df, [])
+
+        assert result == {}
+
+    def test_none_column_names_returns_empty_dict(self):
+        """Test converting a single numeric column to tensor."""
+        df = pd.DataFrame({"values": [1, 2, 3, 4, 5]})
+        result = df_columns_to_tensors(df, None)
+
+        assert result == {}
+
+    def test_multiple_numeric_columns(self):
+        """Test converting multiple numeric columns to tensors."""
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0], "c": [7, 8, 9]})
+        result = df_columns_to_tensors(df, ["a", "b", "c"])
+
+        assert len(result) == 3
+        assert torch.equal(result["a"], torch.tensor([1, 2, 3]))
+        assert torch.equal(result["b"], torch.tensor([4.0, 5.0, 6.0]))
+        assert torch.equal(result["c"], torch.tensor([7, 8, 9]))
+
+    def test_subset_of_columns(self):
+        """Test converting only a subset of columns."""
+        df = pd.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6], "d": [7, 8]})
+        result = df_columns_to_tensors(df, ["a", "c"])
+
+        assert len(result) == 2
+        assert "a" in result
+        assert "c" in result
+        assert "b" not in result
+        assert "d" not in result
+
+    def test_empty_column_list(self):
+        """Test with empty column list returns empty dict."""
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        result = df_columns_to_tensors(df, [])
+
+        assert result == {}
+        assert len(result) == 0
+
+    def test_tensor_dtype_preservation(self):
+        """Test that different numeric types are converted appropriately."""
+        df = pd.DataFrame({"int_col": [1, 2, 3], "float_col": [1.5, 2.5, 3.5]})
+        result = df_columns_to_tensors(df, ["int_col", "float_col"])
+
+        # Check that tensors have appropriate dtypes
+        assert result["int_col"].dtype in [torch.int32, torch.int64]
+        assert result["float_col"].dtype in [torch.float32, torch.float64]
+
+    def test_fold_indices_basic(self):
+        """Test filtering rows using fold indices."""
+        df = pd.DataFrame({"a": [10, 20, 30, 40, 50], "b": [1, 2, 3, 4, 5]})
+        fold_indices = np.array([0, 2, 4])  # Select rows 0, 2, 4
+        result = df_columns_to_tensors(df, ["a", "b"], fold_indices=fold_indices)
+
+        assert torch.equal(result["a"], torch.tensor([10, 30, 50]))
+        assert torch.equal(result["b"], torch.tensor([1, 3, 5]))
+
+    def test_fold_indices_empty_array(self):
+        """Test with empty fold indices array."""
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        fold_indices = np.array([], dtype=int)
+        result = df_columns_to_tensors(df, ["a"], fold_indices=fold_indices)
+
+        assert result["a"].shape[0] == 0
+
+    def test_fold_indices_none_default(self):
+        """Test that fold_indices=None behaves the same as not providing it."""
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        result_with_none = df_columns_to_tensors(df, ["a"], fold_indices=None)
+        result_without = df_columns_to_tensors(df, ["a"])
+
+        assert torch.equal(result_with_none["a"], result_without["a"])
+
+    def test_multidimensional_arrays(self):
+        """Test converting columns containing multi-dimensional arrays."""
+        # Create DataFrame with columns containing arrays
+        df = pd.DataFrame(
+            {
+                "vectors": [
+                    np.array([1, 2, 3]),
+                    np.array([4, 5, 6]),
+                    np.array([7, 8, 9]),
+                    np.array([10, 11, 12]),
+                ],
+                "scalars": [1, 2, 3, 4],
+            }
+        )
+
+        result = df_columns_to_tensors(df, ["vectors", "scalars"])
+
+        # vectors should be a 2D tensor of shape (4, 3)
+        expected_vectors = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+        assert result["vectors"].shape == (4, 3)
+        assert torch.equal(result["vectors"], expected_vectors)
+
+        # scalars should still be 1D
+        assert result["scalars"].shape == (4,)
+
+    def test_multidimensional_arrays_with_fold_indices(self):
+        """Test multi-dimensional arrays with fold indices."""
+        df = pd.DataFrame(
+            {
+                "vectors": [
+                    np.array([1, 2, 3]),
+                    np.array([4, 5, 6]),
+                    np.array([7, 8, 9]),
+                ]
+            }
+        )
+
+        fold_indices = np.array([0, 2])
+        result = df_columns_to_tensors(df, ["vectors"], fold_indices=fold_indices)
+
+        expected = torch.tensor([[1, 2, 3], [7, 8, 9]])
+        assert result["vectors"].shape == (2, 3)
+        assert torch.equal(result["vectors"], expected)

@@ -67,8 +67,19 @@ def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> 
     """
     Cross-entropy loss for multi-class classification, expects raw logits.
     Groundtruth should contain class indices (not one-hot).
+
+    Handles both standard classification (batch, num_classes) and sequence prediction
+    (batch, seq_len, num_classes) by automatically reshaping.
+
+    Supports -100 as ignore_index for padding tokens.
     """
-    return F.cross_entropy(predicted, groundtruth.long())
+    # Handle sequence prediction case: reshape (batch, seq_len, num_classes) -> (batch*seq_len, num_classes)
+    if predicted.ndim == 3:
+        batch_size, seq_len, num_classes = predicted.shape
+        predicted = predicted.reshape(batch_size * seq_len, num_classes)
+        groundtruth = groundtruth.reshape(batch_size * seq_len)
+
+    return F.cross_entropy(predicted, groundtruth.long(), ignore_index=-100)
 
 @register_metric("weighted_cross_entropy")
 def weighted_cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> torch.Tensor:
@@ -383,18 +394,21 @@ def conf_matrix(
     return confusion_matrix(ground_truth, pred_labels, labels=np.arange(num_classes))
 
 
-@register_metric("perplexity")
-def perplexity(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
+def perplexity(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
     """
     Calculate perplexity of predictions as used for LLM evaluation.
 
-    Perplexity = 2^(cross_entropy) where cross_entropy is the average negative
+    Perplexity = exp(cross_entropy) where cross_entropy is the average negative
     log-likelihood of the true labels.
 
+    Handles both standard classification (batch, num_classes) and sequence prediction
+    (batch, seq_len, num_classes) by automatically reshaping.
+
+    Supports -100 as ignore_index for padding tokens.
+
     Args:
-        predictions: Array of shape [num_samples, num_classes] where each row
-                    contains prediction probabilities for each class (should sum to 1)
-        ground_truth: Array of shape [num_samples] containing the true class
+        predictions: Tensor of shape [num_samples, num_classes] or [batch, seq_len, num_classes] containing raw logits
+        ground_truth: Tensor of shape [num_samples] or [batch, seq_len] containing the true class
                      indices for each sample
 
     Returns:
@@ -403,12 +417,14 @@ def perplexity(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
     if len(predictions) == 0:
         return float("inf")
 
-    # Ensure predictions are valid probabilities
-    predictions = np.clip(predictions, 1e-12, 1.0)
+    # Handle sequence prediction case: reshape (batch, seq_len, num_classes) -> (batch*seq_len, num_classes)
+    if predictions.ndim == 3:
+        batch_size, seq_len, num_classes = predictions.shape
+        predictions = predictions.reshape(batch_size * seq_len, num_classes)
+        ground_truth = ground_truth.reshape(batch_size * seq_len)
 
-    # Calculate cross-entropy: -1/N * sum(log(p_i)) where p_i is probability of true class
-    true_class_probs = predictions[np.arange(len(ground_truth)), ground_truth]
-    cross_entropy = -np.mean(np.log2(true_class_probs))
+    # Calculate cross-entropy using PyTorch's implementation (expects raw logits)
+    cross_entropy = F.cross_entropy(predictions, ground_truth.long(), ignore_index=-100)
 
-    # Perplexity = 2^(cross_entropy)
-    return 2**cross_entropy
+    # Perplexity = exp(cross_entropy)
+    return torch.exp(cross_entropy).item()

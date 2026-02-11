@@ -1,5 +1,7 @@
 import os
 import re
+from dataclasses import dataclass
+from typing import Optional
 
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -7,12 +9,20 @@ from gensim.models import KeyedVectors
 import h5py
 import numpy as np
 
-from core.config import DataParams
+from core.config import BaseTaskConfig, TaskConfig
 from core import registry
 
 
-@registry.register_task_data_getter()
-def word_embedding_decoding_task(data_params: DataParams):
+@dataclass
+class WordEmbeddingConfig(BaseTaskConfig):
+    """Configuration for word_embedding_decoding_task."""
+    embedding_type: str = "gpt-2xl"
+    embedding_layer: Optional[int] = None  # Required if using gpt2-xl
+    embedding_pca_dim: Optional[int] = None
+
+
+@registry.register_task_data_getter(config_type=WordEmbeddingConfig)
+def word_embedding_decoding_task(task_config: TaskConfig):
     """
     Loads and processes word-level data and retrieves corresponding embeddings based on specified parameters.
 
@@ -23,12 +33,15 @@ def word_embedding_decoding_task(data_params: DataParams):
     4. Optionally applies PCA to reduce the dimensionality of the embeddings.
 
     Args:
-        data_params (DataParams): Configuration object containing paths, embedding type, and PCA settings.
+        task_config (TaskConfig): Configuration object containing task-specific config and data params.
 
     Returns:
-        Tuple[pd.DataFrame, np.ndarray]: A DataFrame containing word-level information (word, start time, end time),
-        and a NumPy array of corresponding word-level embeddings under the header target.
+        pd.DataFrame: A DataFrame containing word-level information (word, start time, end time),
+        and corresponding word-level embeddings under the header target.
     """
+    config: WordEmbeddingConfig = task_config.task_specific_config
+    data_params = task_config.data_params
+
     import nltk
     from nltk.stem import WordNetLemmatizer as wl
 
@@ -47,8 +60,8 @@ def word_embedding_decoding_task(data_params: DataParams):
     # Load transcript
     df_contextual = pd.read_csv(transcript_path, sep="\t", index_col=0)
 
-    if data_params.embedding_type == "gpt-2xl":
-        aligned_embeddings = get_gpt_2xl_embeddings(df_contextual, data_params)
+    if config.embedding_type == "gpt-2xl":
+        aligned_embeddings = get_gpt_2xl_embeddings(df_contextual, config, data_params)
 
     # Group sub-tokens together into words.
     df_word = df_contextual.groupby("word_idx").agg(
@@ -59,15 +72,15 @@ def word_embedding_decoding_task(data_params: DataParams):
     )
     df_word["lemmatized_word"] = df_word.norm_word.apply(lambda x: wl().lemmatize(x))
 
-    if data_params.embedding_type == "gpt-2xl":
+    if config.embedding_type == "gpt-2xl":
         df_word["target"] = list(aligned_embeddings)
-    if data_params.embedding_type == "glove":
-        df_word = get_glove_embeddings(df_word, data_params)
-    elif data_params.embedding_type == "arbitrary":
-        df_word = get_arbitrary_embeddings(df_word, data_params)
+    if config.embedding_type == "glove":
+        df_word = get_glove_embeddings(df_word, config, data_params)
+    elif config.embedding_type == "arbitrary":
+        df_word = get_arbitrary_embeddings(df_word, config, data_params)
 
-    if data_params.embedding_pca_dim:
-        pca = PCA(n_components=data_params.embedding_pca_dim, svd_solver="auto")
+    if config.embedding_pca_dim:
+        pca = PCA(n_components=config.embedding_pca_dim, svd_solver="auto")
         df_word.target = list(pca.fit_transform(df_word.target.tolist()))
 
     return df_word
@@ -76,7 +89,7 @@ def word_embedding_decoding_task(data_params: DataParams):
 # TODO: If we decide that we want to add support for more embeddings later it could be worth
 # making this more generic with a function registry. For now I don't see a reason to make this
 # more complicated though.
-def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
+def get_gpt_2xl_embeddings(df_contextual, config: WordEmbeddingConfig, data_params):
     """
     Loads GPT-2 XL contextual embeddings and aligns them to word-level units.
 
@@ -87,7 +100,8 @@ def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
 
     Args:
         df_contextual (pd.DataFrame): DataFrame containing token-level data, including `word_idx` for grouping.
-        data_params (config.DataParams): Configuration object with data paths and the GPT-2 layer to extract.
+        config (WordEmbeddingConfig): Configuration object with the GPT-2 layer to extract.
+        data_params: DataParams with data_root path.
 
     Returns:
         np.ndarray: A 2D array of shape (num_words, embedding_dim), where each row is a word-level embedding.
@@ -97,7 +111,7 @@ def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
     )
 
     with h5py.File(embedding_path, "r") as f:
-        contextual_embeddings = f[f"layer-{data_params.embedding_layer}"][...]
+        contextual_embeddings = f[f"layer-{config.embedding_layer}"][...]
 
     # Group embeddings for each word (some are sub-tokenized).
     aligned_embeddings = []
@@ -110,7 +124,7 @@ def get_gpt_2xl_embeddings(df_contextual, data_params: DataParams):
     return aligned_embeddings
 
 
-def get_glove_embeddings(df_word, data_params: DataParams):
+def get_glove_embeddings(df_word, config: WordEmbeddingConfig, data_params):
     """
     Retrieves GloVe embeddings for each word in the input DataFrame.
 
@@ -123,7 +137,8 @@ def get_glove_embeddings(df_word, data_params: DataParams):
 
     Args:
         df_word (pd.DataFrame): DataFrame with a 'word' column containing word-level text entries.
-        data_params (config.DataParams): Configuration object specifying the data root and GloVe file path.
+        config (WordEmbeddingConfig): Configuration object.
+        data_params: DataParams with data_root path.
 
     Returns:
         pd.DataFrame:
@@ -162,7 +177,7 @@ def get_glove_embeddings(df_word, data_params: DataParams):
     return df_word
 
 
-def get_arbitrary_embeddings(df_word, data_params: DataParams):
+def get_arbitrary_embeddings(df_word, config: WordEmbeddingConfig, data_params):
     """
     Generates arbitrary (random) embeddings for each unique word in the input DataFrame.
 
@@ -170,9 +185,10 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
     -----------
     df_word : pandas.DataFrame
         A DataFrame containing a column named 'word', representing a list of words.
+    config : WordEmbeddingConfig
+        Configuration object containing `embedding_pca_dim`.
     data_params : DataParams
-        An object containing configuration parameters, specifically `embedding_pca_dim`,
-        which defines the dimensionality of the final embeddings.
+        Data parameters with word_column field.
 
     Returns:
     --------
@@ -186,7 +202,8 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
       `embedding_pca_dim`.
     - Useful as a placeholder or for testing models where real word embeddings are not required.
     """
-    words = df_word[data_params.word_column].tolist()
+    word_col = data_params.word_column if data_params.word_column else "word"
+    words = df_word[word_col].tolist()
     unique_words = list(set(words))
     word_to_idx = {}
     for i, word in enumerate(words):
@@ -195,9 +212,9 @@ def get_arbitrary_embeddings(df_word, data_params: DataParams):
         word_to_idx[word].append(i)
 
     arbitrary_embeddings_per_word = np.random.uniform(
-        low=-1.0, high=1.0, size=(len(unique_words), data_params.embedding_pca_dim)
+        low=-1.0, high=1.0, size=(len(unique_words), config.embedding_pca_dim)
     )
-    arbitrary_embeddings = np.zeros((len(words), data_params.embedding_pca_dim))
+    arbitrary_embeddings = np.zeros((len(words), config.embedding_pca_dim))
     for i, word in enumerate(unique_words):
         for idx in word_to_idx[word]:
             arbitrary_embeddings[idx] = arbitrary_embeddings_per_word[i]

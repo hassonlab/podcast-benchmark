@@ -141,6 +141,36 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ---
 
+## LLM Token Decoding
+
+This section compares two approaches to LLM-based decoding from brain activity: one using brain data (LLM Token Finetuning) and a control without brain data (LLM Decoding).
+
+![LLM Decoding Comparison](baseline_plots/llm_decoding_comparison.png)
+
+### LLM Token Finetuning (Brain Data)
+
+**Config:** `configs/neural_conv_decoder/llm_two_stage_multi.yml`
+
+**Detailed Results:** `baseline-results/llm_token_finetune_2025-12-26-12-44-36/lag_performance.csv`
+
+**Best Performance:**
+
+- **Lag:** 200ms
+- **Perplexity:** 60.40
+
+### LLM Decoding (No Brain Data - Control)
+
+**Config:** `configs/controls/llm_decoding_no_brain_data.yml`
+
+**Detailed Results:** `baseline-results/llm_decoding_control_2025-12-28-15-55-38/lag_performance.csv`
+
+**Best Performance:**
+
+- **Lag:** -200ms
+- **Perplexity:** 67.22
+
+---
+
 <!--
 This file is manually maintained.
 To regenerate plots only, run: python scripts/generate_baseline_plots.py

@@ -64,7 +64,7 @@ def compute_word_embedding_task_metrics(
     min_train_freq_auc,
     min_test_freq_auc,
     batch_size=16,
-    data_info_list=None,
+    extra_inputs=None,
     **kwargs,
 ):
     """
@@ -81,7 +81,7 @@ def compute_word_embedding_task_metrics(
         top_k_thresholds: List of k values for top-k accuracy
         min_train_freq_auc: Minimum training frequency for AUC calculation
         min_test_freq_auc: Minimum test frequency for AUC calculation
-        data_info_list: Optional list of data_info dicts (for LIP coordinates)
+        extra_inputs: Optional dict of extra input tensors to pass to model
 
     Returns:
         dict: Dictionary containing computed metrics
@@ -94,22 +94,20 @@ def compute_word_embedding_task_metrics(
     X_test, Y_test = X_test.to(device), Y_test.to(device)
 
     # Get predictions
-    predictions = get_predictions(X_test, model, device, batch_size, data_info_list=data_info_list, **kwargs)
+    predictions = get_predictions(X_test, model, device, batch_size, extra_inputs=extra_inputs, **kwargs)
 
     # Compute cosine distances
     distances = compute_cosine_distances(predictions, Y_test)
 
     # Measure performance based on each individual word occurrence
     occurence_scores, _, _ = compute_class_scores(distances)
-    # Convert to float32 first for numpy compatibility
-    occurence_scores_np = occurence_scores.cpu().float().numpy()
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
         results[f"test_occurence_top_{k_val}"] = top_k_accuracy(
-            occurence_scores_np, np.arange(occurence_scores_np.shape[0]), k_val
+            occurence_scores, torch.arange(occurence_scores.shape[0], device=device), k_val
         )
     results["test_occurence_perplexity"] = perplexity(
-        occurence_scores_np, np.arange(occurence_scores_np.shape[0])
+        occurence_scores, torch.arange(occurence_scores.shape[0], device=device)
     )
 
     # Group by words for an easier task.
@@ -119,27 +117,29 @@ def compute_word_embedding_task_metrics(
     position_to_id = np.array(position_to_id)
 
     word_scores, _, test_class_idxs = compute_class_scores(
-        distances, torch.from_numpy(position_to_id[test_index])
+        distances, torch.from_numpy(position_to_id[test_index]).to(device)
     )
     # Get a mapping from over-all class index -> test class index.
+    test_class_idxs_np = test_class_idxs.cpu().numpy()
     class_to_test_idxs = np.empty(np.max(position_to_id) + 1, dtype=int)
-    class_to_test_idxs[test_class_idxs] = np.arange(len(test_class_idxs))
+    class_to_test_idxs[test_class_idxs_np] = np.arange(len(test_class_idxs_np))
 
-    # Convert to float32 first for numpy compatibility
-    word_scores_np = word_scores.cpu().float().numpy()
     train_frequencies = np.bincount(
         position_to_id[train_index], minlength=np.max(position_to_id) + 1
     )
     # Limit train frequencies to only those in the test set.
-    train_frequencies = train_frequencies[test_class_idxs]
+    train_frequencies = train_frequencies[test_class_idxs_np]
 
     test_frequencies = np.bincount(
         position_to_id[test_index], minlength=np.max(position_to_id) + 1
     )
-    test_frequencies = test_frequencies[test_class_idxs]
+    test_frequencies = test_frequencies[test_class_idxs_np]
 
     # Translate to vocab of word ID's.
     test_word_ids = class_to_test_idxs[position_to_id[test_index]]
+
+    # For calculate_auc_roc, pass numpy arrays (it converts internally anyway)
+    word_scores_np = word_scores.cpu().numpy()
     avg_auc, train_weighted_auc, test_weighted_auc = calculate_auc_roc(
         word_scores_np,
         test_word_ids,
@@ -152,11 +152,13 @@ def compute_word_embedding_task_metrics(
     results["test_word_train_weighted_auc_roc"] = train_weighted_auc
     results["test_word_test_weighted_auc_roc"] = test_weighted_auc
 
+    # For top_k_accuracy and perplexity, use torch tensors
+    test_word_ids_tensor = torch.from_numpy(test_word_ids).to(device)
     for k_val in top_k_thresholds:
         results[f"test_word_top_{k_val}"] = top_k_accuracy(
-            word_scores_np, test_word_ids, k_val
+            word_scores, test_word_ids_tensor, k_val
         )
-    results["test_word_perplexity"] = perplexity(word_scores_np, test_word_ids)
+    results["test_word_perplexity"] = perplexity(word_scores, test_word_ids_tensor)
 
     return results
 
@@ -193,7 +195,7 @@ def build_vocabulary(words):
     return word_to_id, id_to_word, position_to_id
 
 
-def get_predictions(X, model, device, batch_size, data_info_list=None, **kwargs):
+def get_predictions(X, model, device, batch_size, extra_inputs=None, **kwargs):
     X = X.to(device)
 
     # Step 2: Get predicted embeddings for all neural data
@@ -201,15 +203,21 @@ def get_predictions(X, model, device, batch_size, data_info_list=None, **kwargs)
     for i in range(0, len(X), batch_size):
         with torch.no_grad():
             input_data = X[i : i + batch_size]
-            
+
             # Prepare kwargs for model forward
             model_kwargs = kwargs.copy()
-            
-            # Add data_info_list if available (for LIP coordinates)
-            if data_info_list is not None:
-                batch_data_info = data_info_list[i : i + batch_size]
-                model_kwargs['data_info_list'] = batch_data_info
-            
+
+            # Add extra inputs if available (includes model-specific data like data_info_list)
+            if extra_inputs is not None:
+                for key, value in extra_inputs.items():
+                    # Slice tensor inputs to match batch
+                    if torch.is_tensor(value):
+                        batch_value = value[i : i + batch_size].to(device)
+                    else:
+                        # For non-tensor values (like lists), slice directly
+                        batch_value = value[i : i + batch_size]
+                    model_kwargs[key] = batch_value
+
             pred = model(input_data, **model_kwargs)
 
         model_predictions.append(pred)
