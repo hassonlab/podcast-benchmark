@@ -216,6 +216,7 @@ class SimpleTransformer(nn.Module):
             nhead=num_heads,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            activation="gelu",
             batch_first=False,  # We use [seq_len, batch_size, features]
         )
         self.transformer_encoder = nn.TransformerEncoder(
