@@ -336,17 +336,20 @@ def set_feature_extraction_config(experiment_config, raws, _df_word):
     """
     from .config import load_config
 
-    model_dir = experiment_config.model_params["model_dir"]
+    model_params = experiment_config.model_spec.params
+    data_params = experiment_config.task_config.data_params
+
+    model_dir = model_params["model_dir"]
     config_path = os.path.join(model_dir, "config.yaml")
     foundation_config = load_config(config_path)
 
     # Set input_dim to match foundation model output
-    experiment_config.model_params["input_dim"] = foundation_config.model_dim
+    model_params["input_dim"] = foundation_config.model_dim
 
     # Set preprocessor params
-    if not experiment_config.data_params.preprocessor_params:
-        experiment_config.data_params.preprocessor_params = {}
-    experiment_config.data_params.preprocessor_params["model_dir"] = model_dir
+    if not data_params.preprocessor_params:
+        data_params.preprocessor_params = {}
+    data_params.preprocessor_params["model_dir"] = model_dir
 
     return experiment_config
 
@@ -361,14 +364,17 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     """
     from .config import load_config
 
+    model_params = experiment_config.model_spec.params
+    data_params = experiment_config.task_config.data_params
+
     # Enable STFT preprocessing in data loading (BrainBERT expects STFT features)
-    experiment_config.data_params.use_stft_preprocessing = True
-    
+    data_params.use_stft_preprocessing = True
+
     # Get sample rate from data for STFT preprocessing
     sample_rate = int(raws[0].info['sfreq']) if raws else 512
-    
+
     # Set STFT configuration in data_params (matching original PopT/BrainBERT)
-    experiment_config.data_params.stft_config = {
+    data_params.stft_config = {
         'freq_channel_cutoff': 40,
         'nperseg': 400,
         'noverlap': 350,
@@ -376,20 +382,20 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     }
     print(f"STFT preprocessing enabled in data loading for BrainBERT: fs={sample_rate}, freq_channels=40, nperseg=400, noverlap=350")
 
-    model_dir = experiment_config.model_params["model_dir"]
+    model_dir = model_params["model_dir"]
     config_path = os.path.join(model_dir, "config.yaml")
     foundation_config = load_config(config_path)
 
     # BrainBERT expects STFT features (input_channels=40)
-    experiment_config.model_params["input_channels"] = 40
+    model_params["input_channels"] = 40
     print("BrainBERT: input_channels set to 40 (STFT frequency channels)")
 
     # Set window width based on foundation model
-    experiment_config.data_params.window_width = foundation_config.window_width
+    data_params.window_width = foundation_config.window_width
 
     # Fix: Copy output_dim to embedding_dim for compatibility with compute_all_metrics
     # This ensures that confusion_matrix can correctly determine num_classes
-    if "output_dim" in experiment_config.model_params:
-        experiment_config.model_params["embedding_dim"] = experiment_config.model_params["output_dim"]
+    if "output_dim" in model_params:
+        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

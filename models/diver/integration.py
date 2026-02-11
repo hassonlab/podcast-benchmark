@@ -463,23 +463,25 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     
     # 1. Set input_channels using common utility (same as BrainBERT/PopT)
     experiment_config = set_input_channels(experiment_config, raws, _df_word)
-    experiment_config.data_params.use_stft_preprocessing = False
+    experiment_config.task_config.data_params.use_stft_preprocessing = False
     
     # 2. Get task information from podcast-benchmark
-    task_name = experiment_config.model_params.get("task_name", "word_embedding")
-    subject_id = experiment_config.model_params.get("subject_id", 1)
-    patch_sampling_rate = experiment_config.model_params.get("patch_sampling_rate", 500)
-    num_channels = experiment_config.model_params.get("input_channels")
-    
+    model_params = experiment_config.model_spec.params
+    task_name = model_params.get("task_name", "word_embedding")
+    subject_id = model_params.get("subject_id", 1)
+    patch_sampling_rate = model_params.get("patch_sampling_rate", 500)
+    num_channels = model_params.get("input_channels")
+
     # 3. Get window_width from data_params
-    window_width = getattr(experiment_config.data_params, 'window_width', None)
+    data_params = experiment_config.task_config.data_params
+    window_width = getattr(data_params, 'window_width', None)
     if window_width is None or window_width <= 0:
         window_width = 0.5
         print(f"DIVER: Using default window_width={window_width}")
-    experiment_config.data_params.window_width = window_width
-    
+    data_params.window_width = window_width
+
     # 4. Determine output_dim (podcast-benchmark task mapping)
-    if "output_dim" not in experiment_config.model_params or experiment_config.model_params["output_dim"] is None:
+    if "output_dim" not in model_params or model_params["output_dim"] is None:
         num_targets_map = {
             "word_embedding": 50,
             "gpt_surprise": 1,
@@ -490,10 +492,10 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
             "volume_level": 1,
         }
         num_targets = num_targets_map.get(task_name, 50)
-        experiment_config.model_params["output_dim"] = num_targets
+        model_params["output_dim"] = num_targets
     else:
-        num_targets = experiment_config.model_params["output_dim"]
-    
+        num_targets = model_params["output_dim"]
+
     # 5. Create task_info_dict using podcast-benchmark information
     task_info_dict = get_podcast_task_info(
         task_name=task_name,
@@ -503,12 +505,12 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
         num_targets=num_targets,
         window_width=window_width
     )
-    
+
     # 6. Store for model constructor
-    experiment_config.model_params["_task_info_dict"] = task_info_dict
-    
+    model_params["_task_info_dict"] = task_info_dict
+
     # 7. Copy output_dim to embedding_dim (same as BrainBERT/PopT)
-    experiment_config.model_params["embedding_dim"] = experiment_config.model_params["output_dim"]
+    model_params["embedding_dim"] = model_params["output_dim"]
     
     return experiment_config
 

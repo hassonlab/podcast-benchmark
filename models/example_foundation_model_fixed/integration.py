@@ -309,17 +309,20 @@ def set_feature_extraction_config(experiment_config, raws, _df_word):
     """
     from .config import load_config
 
-    model_dir = experiment_config.model_params["model_dir"]
+    model_params = experiment_config.model_spec.params
+    data_params = experiment_config.task_config.data_params
+
+    model_dir = model_params["model_dir"]
     config_path = os.path.join(model_dir, "config.yaml")
     foundation_config = load_config(config_path)
 
     # Set input_dim to match foundation model output
-    experiment_config.model_params["input_dim"] = foundation_config.model_dim
+    model_params["input_dim"] = foundation_config.model_dim
 
     # Set preprocessor params
-    if not experiment_config.data_params.preprocessor_params:
-        experiment_config.data_params.preprocessor_params = {}
-    experiment_config.data_params.preprocessor_params["model_dir"] = model_dir
+    if not data_params.preprocessor_params:
+        data_params.preprocessor_params = {}
+    data_params.preprocessor_params["model_dir"] = model_dir
 
     return experiment_config
 
@@ -337,16 +340,19 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     # First, set input_channels based on actual data
     experiment_config = set_input_channels(experiment_config, raws, _df_word)
 
-    model_dir = experiment_config.model_params["model_dir"]
+    model_params = experiment_config.model_spec.params
+    data_params = experiment_config.task_config.data_params
+
+    model_dir = model_params["model_dir"]
     config_path = os.path.join(model_dir, "config.yaml")
     foundation_config = load_config(config_path)
 
     # Set window width based on foundation model
-    experiment_config.data_params.window_width = foundation_config.window_width
+    data_params.window_width = foundation_config.window_width
 
     # Fix: Copy output_dim to embedding_dim for compatibility with compute_all_metrics
     # This ensures that confusion_matrix can correctly determine num_classes
-    if "output_dim" in experiment_config.model_params:
-        experiment_config.model_params["embedding_dim"] = experiment_config.model_params["output_dim"]
+    if "output_dim" in model_params:
+        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config
