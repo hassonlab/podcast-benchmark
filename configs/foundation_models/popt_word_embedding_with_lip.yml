@@ -48,16 +48,15 @@ training_params:
   smaller_is_better: false
   # Lag sweep (optional - set to single lag for quick testing)
   min_lag: 0
-  max_lag: 0
+  max_lag: 1
   lag_step_size: 200
 
 trial_name: popt_word_embedding_lip
 
-# Model data getter for LIP coordinates
-model_data_getter: popt_lip_coords
-
 # Model specification
 model_spec:
+  # Model data getter for LIP coordinates
+  model_data_getter: popt_lip_coords
   constructor_name: population_transformer_finetune
   params:
     # Path to pretrained model directory (contains config.yaml and checkpoint.pth)
