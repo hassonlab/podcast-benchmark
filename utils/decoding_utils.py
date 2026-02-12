@@ -1,6 +1,7 @@
 from collections import Counter
 from typing import Optional
 import os
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset, Dataset, Dataset
+from mup import MuAdam, MuAdamW
 
 # Optional TensorBoard support
 try:
@@ -194,7 +196,9 @@ def setup_metrics_and_loss(training_params: TrainingParams):
 def compute_loss(out, groundtruth, training_params, all_fns):
     loss = None
     for i, loss_name in enumerate(training_params.losses):
-        loss_val = training_params.loss_weights[i] * all_fns[loss_name](out, groundtruth)
+        loss_val = training_params.loss_weights[i] * all_fns[loss_name](
+            out, groundtruth
+        )
         if loss is None:
             loss = loss_val
         else:
@@ -326,13 +330,13 @@ def create_lr_scheduler(optimizer, training_params: TrainingParams):
         return None
 
     params = training_params.scheduler_params or {}
-    
+
     # Auto-detect mode based on smaller_is_better unless explicitly provided
     mode = params.get("mode", "min" if training_params.smaller_is_better else "max")
     factor = params.get("factor", 0.5)
     patience = params.get("patience", 10)
     min_lr = params.get("min_lr", 1e-6)
-    
+
     return lr_scheduler.ReduceLROnPlateau(
         optimizer, mode=mode, factor=factor, patience=patience, min_lr=min_lr
     )
@@ -391,6 +395,37 @@ def train_decoding_model(
     else:
         raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
 
+    # 3.25. Optionally restrict to specific folds
+    # Internal fold numbering in this file is 1..n_folds (see enumerate(start=1) below).
+    fold_nums_all = list(range(1, len(fold_indices) + 1))  # [1..n]
+    fold_ids = getattr(training_params, "fold_ids", None)
+    if fold_ids is not None:
+        if len(fold_ids) == 0:
+            raise ValueError(
+                "training_params.fold_ids is empty. Provide at least one fold id or omit it."
+            )
+
+        bad = [k for k in fold_ids if (k < 1 or k > len(fold_indices))]
+        if bad:
+            raise ValueError(
+                f"fold_ids must be 1-based integers in [1, {len(fold_indices)}]. "
+                f"Got invalid: {bad}. If you intended the first fold, use [1] (not [0])."
+            )
+        selected_fold_nums = list(fold_ids)
+
+        # Keep order as provided by user; de-duplicate while preserving order
+        seen = set()
+        selected_fold_nums = [
+            k for k in selected_fold_nums if not (k in seen or seen.add(k))
+        ]
+
+        fold_indices = [
+            fold_indices[k - 1] for k in selected_fold_nums
+        ]  # map to 0-based list index
+        fold_nums_all = (
+            selected_fold_nums  # now fold_nums_all matches fold_indices order
+        )
+
     # 3.5. Visualize fold distribution if requested
     if training_params.visualize_fold_distribution:
         from utils.analysis_utils import visualize_fold_distribution
@@ -418,6 +453,7 @@ def train_decoding_model(
     if "cross_entropy" in metric_names:
         for phase in phases:
             cv_results[f"{phase}_perplexity"] = []
+    cv_results["fold_nums"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.
     # Clean this up later. Hardcoding for now since generalizing this like other metrics would
@@ -469,7 +505,7 @@ def train_decoding_model(
         sums["loss"] = 0.0
 
         grad_steps = training_params.grad_accumulation_steps
-        
+
         if is_train:
             optimizer.zero_grad()
 
@@ -478,7 +514,10 @@ def train_decoding_model(
             Xb, inputs_dict, yb = batch_data
             Xb = Xb.to(device)
             # Move all input tensors to device (handles data_info_list and other inputs)
-            inputs_dict = {k: v.to(device) if torch.is_tensor(v) else v for k, v in inputs_dict.items()}
+            inputs_dict = {
+                k: v.to(device) if torch.is_tensor(v) else v
+                for k, v in inputs_dict.items()
+            }
             yb = yb.to(device)
 
             if is_train:
@@ -492,7 +531,17 @@ def train_decoding_model(
                 loss.backward()
 
                 if should_update_gradient_accumulation(i, len(loader), grad_steps):
+                    if (
+                        getattr(training_params, "clip_grad_norm", 0.0)
+                        and float(training_params.clip_grad_norm) > 0.0
+                    ):
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(),
+                            max_norm=float(training_params.clip_grad_norm),
+                        )
                     optimizer.step()
+                    if scheduler is not None:
+                        scheduler.step()
                     optimizer.zero_grad()
             else:
                 with torch.no_grad():
@@ -531,7 +580,18 @@ def train_decoding_model(
         return result
 
     # 6. Cross‐val loop
-    for fold, (tr_idx, va_idx, te_idx) in enumerate(fold_indices, start=1):
+    for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums_all, fold_indices):
+        print(f"Fold {fold}")
+        print(f"Train indices: {tr_idx}")
+        print(f"Validation indices: {va_idx}")
+        print(f"Test indices: {te_idx}")
+        print(f"Train size: {len(tr_idx)}")
+        print(f"Validation size: {len(va_idx)}")
+        print(f"Test size: {len(te_idx)}")
+        print(f"Train targets: {Y[tr_idx]}")
+        print(f"Validation targets: {Y[va_idx]}")
+        print(f"Test targets: {Y[te_idx]}")
+        cv_results["fold_nums"].append(fold)
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
 
         # TensorBoard writer
@@ -546,6 +606,7 @@ def train_decoding_model(
 
         # Normalize targets if requested (compute stats on training set only)
         if training_params.normalize_targets:
+            print("Normalizing targets...")
             Y_train = Y[tr_idx]
             Y_val = Y[va_idx]
             Y_test = Y[te_idx]
@@ -636,11 +697,44 @@ def train_decoding_model(
 
         # Model, optimizer, early‐stop setup
         model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=training_params.learning_rate,
-            weight_decay=training_params.weight_decay,
-        )
+
+        if training_params.optimizer == "MuAdamW":
+            print("Using MuAdamW optimizer")
+            optimizer = MuAdamW(
+                model.parameters(),
+                lr=float(training_params.learning_rate),
+                weight_decay=float(training_params.weight_decay),
+            )
+
+        else:
+            print("Using AdamW optimizer")
+            optimizer = optim.AdamW(
+                model.parameters(),
+                lr=float(training_params.learning_rate),
+                weight_decay=float(training_params.weight_decay),
+            )
+
+        # Optional LR scheduler (per optimizer update, not per epoch).
+        scheduler = None
+        if training_params.lr_scheduler:
+            print(f"Using {training_params.lr_scheduler} LR scheduler")
+            if training_params.lr_scheduler == "cosine_annealing":
+                updates_per_epoch = math.ceil(
+                    len(loaders["train"])
+                    / max(1, int(training_params.grad_accumulation_steps))
+                )
+                t_max = max(1, int(training_params.epochs) * updates_per_epoch)
+                eta_min = float(training_params.learning_rate) * float(
+                    getattr(training_params, "cosine_eta_min_factor", 1e-2)
+                )
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer, T_max=t_max, eta_min=eta_min
+                )
+            else:
+                raise ValueError(
+                    f"Unknown lr_scheduler: {training_params.lr_scheduler}. "
+                    "Supported: None, 'cosine_annealing'"
+                )
 
         # Create learning rate scheduler if specified
         scheduler = create_lr_scheduler(optimizer, training_params)
@@ -694,7 +788,7 @@ def train_decoding_model(
                 if patience >= training_params.early_stopping_patience:
                     break
 
-            # learning rate scheduler 
+            # learning rate scheduler
             if scheduler is not None:
                 scheduler.step(cur)
 
@@ -841,11 +935,23 @@ def train_decoding_model(
             "test": conf_matrix_test,
         }
 
-    for phase in phases:
+    for phase in ("train", "val", "test"):
         for name in metric_names:
             if name != "confusion_matrix":
                 vals = cv_results[f"{phase}_{name}"]
-                print(f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
+                # Individual Folds
+                print(f"--- Individual Folds ({phase}_{name}) ---")
+                fold_nums = cv_results.get("fold_nums", list(range(1, len(vals) + 1)))
+                for i, val in enumerate(vals):
+                    fold_num = fold_nums[i]
+                    print(f"Fold {fold_num}: {val:.4f}")
+
+                # Mean
+                print(
+                    f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}\n"
+                )
+
             elif name == "confusion_matrix":
                 print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
 
@@ -880,8 +986,7 @@ def run_training_over_lags(
     tensorboard_dir="event_log",
 ):
     data_params = task_config.data_params
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     filename = os.path.join(output_dir, f"lag_performance.csv")
 
@@ -938,17 +1043,30 @@ def run_training_over_lags(
         )
 
         # Aggregate metrics
-        lag_metrics = {
-            f"{metric}_mean": np.mean(values) if len(values) > 0 else np.nan
-            for metric, values in cv_results.items()
-        }
-        lag_metrics.update(
-            {
-                f"{metric}_std": np.std(values) if len(values) > 0 else np.nan
-                for metric, values in cv_results.items()
-            }
-        )
-        lag_metrics["lags"] = lag
+        lag_metrics = {}
+        lag_metrics["lags"] = lag  # lag information first
+
+        fold_nums = cv_results.get("fold_nums", None)
+        for metric, values in cv_results.items():
+            if metric == "fold_nums":
+                continue
+            if len(values) > 0:
+                # 1. 기존: 평균과 표준편차 저장
+                lag_metrics[f"{metric}_mean"] = np.mean(values)
+                lag_metrics[f"{metric}_std"] = np.std(values)
+
+                # 2. Add: Individual values for each Fold (e.g., test_acc_fold_0, test_acc_fold_1 ...)
+                for i, val in enumerate(values):
+                    fold_num = (
+                        fold_nums[i]
+                        if (fold_nums is not None and i < len(fold_nums))
+                        else (i + 1)
+                    )
+                    lag_metrics[f"{metric}_fold_{fold_num}"] = val
+            else:
+                lag_metrics[f"{metric}_mean"] = np.nan
+                lag_metrics[f"{metric}_std"] = np.nan
+        # ---------------------------------------------------------
 
         # Append new row to existing DataFrame and write to file
         existing_df = pd.concat(

@@ -14,11 +14,13 @@ def import_all_from_package(package_name, recursive=False):
     package_path = package.__path__
 
     # Exclude directories that should not be imported automatically
-    # past_diver is legacy code that conflicts with the current diver implementation
+    # past_diver: legacy code that conflicts with the current diver implementation
+    # past_brainbert: legacy BrainBERT; use models/brainbert (reference-based) instead
+    # past_popt: legacy PopT; use models/popt instead
     # Note: DIVER-1 is no longer excluded - its datasets module will fail to import
     # if lmdb is missing, but that's handled by try-except. DIVER-1's models and utils
     # modules are needed and will be imported correctly when needed.
-    exclude_dirs = {'past_diver'}
+    exclude_dirs = {'past_diver', 'past_brainbert', 'past_popt'}
 
     if recursive:
         # Recursively walk through all subpackages
