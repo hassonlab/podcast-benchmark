@@ -147,6 +147,7 @@ class TrainingParams:
     # (CBraMod uses eta_min = lr * 1e-2)
     cosine_eta_min_factor: float = 1e-2
     # Determines optimizer to use. Supported: "AdamW", "MuAdamW"
+    optimizer: str = "AdamW"
 
 
 @dataclass
