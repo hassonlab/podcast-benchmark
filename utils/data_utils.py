@@ -2,6 +2,7 @@ import os
 from typing import Optional
 
 import numpy as np
+import torch
 import mne
 from mne_bids import BIDSPath
 import pandas as pd
@@ -13,41 +14,100 @@ from core import registry
 
 def load_raws(data_params: DataParams):
     """
-    Loads raw iEEG data for multiple subjects based on specified parameters.
-
-    This function:
-    1. Iterates over subject IDs provided in the configuration.
-    2. Constructs BIDS-compliant file paths to locate preprocessed high-gamma iEEG data.
-    3. Loads each subject's data using MNE's `read_raw_fif` function.
-    4. Optionally filters channels using a regular expression (e.g., for selecting specific electrode groups).
-    5. Collects and returns a list of raw MNE objects.
-    Args:
-        data_params (DataParams): Configuration object containing subject IDs, data paths,
-        and optional channel filtering settings.
-
-    Returns:
-        List[mne.io.Raw]: A list of raw iEEG recordings for the specified subjects.
+    Loads raw iEEG data with YAML-configurable preprocessing.
+    All transformations (Resampling, Drop Bad, Scaling) happen here directly on the Raw object.
     """
     raws = []
+
     for sub_id in data_params.subject_ids:
+        if data_params.use_high_gamma:
+            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
+            description = "highgamma"
+            print(f"Loading High Gamma data for subject {sub_id}...")
+        else:
+            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
+            description = None
+            print(f"Loading Raw data for subject {sub_id}...")
+
         file_path = BIDSPath(
-            root=os.path.join(data_params.data_root, "derivatives/ecogprep"),
+            root=root_path,
             subject=f"{sub_id:02}",
             task="podcast",
             datatype="ieeg",
-            description="highgamma",
+            description=description,
             suffix="ieeg",
             extension=".fif",
         )
 
-        raw = mne.io.read_raw_fif(file_path, verbose=False)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Data file not found: {file_path}")
+
+        raw = mne.io.read_raw_fif(file_path, preload=True, verbose=False)
+
+        if data_params.target_sr is not None:
+            if int(raw.info["sfreq"]) != int(data_params.target_sr):
+                print(
+                    f"  - [Config] Resampling {raw.info['sfreq']}Hz -> {data_params.target_sr}Hz"
+                )
+                raw.resample(data_params.target_sr)
+
+        if data_params.do_drop_bads:
+            try:
+                # Build channels.tsv path via BIDSPath (avoid accidental reading of .fif)
+                ch_path = file_path.copy()
+                ch_path.update(suffix="channels", extension=".tsv")
+                tsv_path = str(ch_path)
+
+                # Some datasets omit 'description' on channels.tsv even if present on ieeg.fif
+                if not os.path.exists(tsv_path) and getattr(
+                    file_path, "description", None
+                ):
+                    ch_path2 = file_path.copy()
+                    ch_path2.update(
+                        description=None, suffix="channels", extension=".tsv"
+                    )
+                    tsv_path = str(ch_path2)
+
+                if not os.path.exists(tsv_path) and "derivatives" in str(file_path):
+                    raw_root = data_params.data_root
+                    raw_bids_path = BIDSPath(
+                        root=raw_root,
+                        subject=f"{sub_id:02}",
+                        task="podcast",
+                        datatype="ieeg",
+                        suffix="channels",
+                        extension=".tsv",
+                    )
+                    tsv_path = str(raw_bids_path)
+
+                if os.path.exists(tsv_path):
+                    df_ch = pd.read_csv(tsv_path, sep="\t")
+                    if "status" in df_ch.columns and "name" in df_ch.columns:
+                        bad_channels = df_ch[df_ch["status"] == "bad"]["name"].tolist()
+                        if bad_channels:
+                            bad_channels = [
+                                ch for ch in bad_channels if ch in raw.ch_names
+                            ]
+                            raw.info["bads"].extend(bad_channels)
+                            print(
+                                f"  - [Config] Dropping {len(bad_channels)} bad channels"
+                            )
+                            raw.drop_channels(bad_channels)
+            except Exception as e:
+                print(f"Warning: Failed to process bad channels: {e}")
+
+        if data_params.signal_unit == "uV":
+            print(f"  - [Config] Scaling data: Volt -> MicroVolt (x 1e6)")
+            raw.apply_function(lambda x: x * 1e6, channel_wise=False)
+
         if data_params.per_subject_electrodes:
             subject_electrode_names = data_params.per_subject_electrodes[sub_id]
-            picks = mne.pick_channels(raw.ch_names, subject_electrode_names)
+            picks = [ch for ch in subject_electrode_names if ch in raw.ch_names]
             raw = raw.pick(picks)
         elif data_params.channel_reg_ex:
             picks = mne.pick_channels_regexp(raw.ch_names, data_params.channel_reg_ex)
             raw = raw.pick(picks)
+
         raws.append(raw)
 
     return raws
@@ -150,6 +210,194 @@ def read_electrode_file(
         sub_elec_mapping[subject].append(electrode)
 
     return sub_elec_mapping
+
+
+def extract_subject_id_from_raw(raw: mne.io.Raw) -> int:
+    """
+    Extract subject ID from MNE Raw object.
+
+    This function extracts the subject ID from the Raw object's info.
+    The subject ID is expected to be in the format "sub-XX" in the info['subject'] field,
+    or can be extracted from the file path.
+
+    Args:
+        raw: MNE Raw object
+
+    Returns:
+        int: Subject ID as integer (e.g., 3 for "sub-03")
+
+    Raises:
+        ValueError: If subject ID cannot be extracted
+    """
+    # Try to get from info['subject']
+    if hasattr(raw.info, "subject") and raw.info["subject"] is not None:
+        subject_str = str(raw.info["subject"])
+        if subject_str.startswith("sub-"):
+            return int(subject_str.split("-")[1])
+
+    # Try to get from file path if available
+    if hasattr(raw, "filenames") and raw.filenames:
+        for filename in raw.filenames:
+            # Convert PosixPath to string if needed (mne may store paths as Path objects)
+            filename_str = str(filename)
+            if "sub-" in filename_str:
+                # Extract subject ID from path like ".../sub-03/..."
+                parts = filename_str.split("sub-")
+                if len(parts) > 1:
+                    subject_part = parts[1].split("/")[0]
+                    try:
+                        return int(subject_part)
+                    except ValueError:
+                        continue
+
+    raise ValueError(
+        f"Could not extract subject ID from Raw object. "
+        f"Info subject: {raw.info.get('subject', None)}, "
+        f"Filenames: {getattr(raw, 'filenames', None)}"
+    )
+
+
+def get_lip_coordinates(subject_id: int, data_root: str = "data") -> pd.DataFrame:
+    """
+    Load LIP coordinates from TSV file for a given subject.
+
+    This function loads LIP (Lateral, Inferior, Posterior) coordinates from
+    the BIDS-compliant TSV file: data/sub-XX/ieeg/sub-XX_space-LIP_electrodes.tsv
+
+    Args:
+        subject_id: Subject ID as integer (e.g., 3 for sub-03)
+        data_root: Root directory for data files (default: "data")
+
+    Returns:
+        pd.DataFrame: DataFrame with columns ['name', 'x', 'y', 'z', ...]
+                     where x, y, z are LIP coordinates as integers
+
+    Raises:
+        FileNotFoundError: If the TSV file does not exist
+        ValueError: If required columns are missing
+    """
+    tsv_path = os.path.join(
+        data_root,
+        f"sub-{subject_id:02}",
+        "ieeg",
+        f"sub-{subject_id:02}_space-LIP_electrodes.tsv",
+    )
+
+    if not os.path.exists(tsv_path):
+        raise FileNotFoundError(
+            f"LIP coordinates file not found: {tsv_path}. "
+            f"Make sure the file exists or set return_lip_coords=False."
+        )
+
+    df = pd.read_csv(tsv_path, sep="\t")
+
+    # Validate required columns
+    required = {"name", "x", "y", "z"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"TSV file missing required columns: {missing}")
+
+    # Clean and convert data types
+    df = df.copy()
+    df["name"] = df["name"].astype(str).str.strip()
+    for c in ["x", "y", "z"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # Remove rows with NaN coordinates
+    df = df.dropna(subset=["x", "y", "z"]).reset_index(drop=True)
+
+    return df
+
+
+def get_mni_coordinates(
+    subject_id: int, channel_names: list[str], data_root: str = "data"
+) -> np.ndarray:
+    """
+    Load MNI xyz coordinates from TSV file for specified channels.
+
+    This function loads MNI152 coordinates from the BIDS-compliant TSV file:
+    data/sub-XX/ieeg/sub-XX_space-MNI152NLin2009aSym_electrodes.tsv
+
+    The coordinates are extracted in the order specified by channel_names,
+    matching the channel order in the neural data.
+
+    Args:
+        subject_id: Subject ID as integer (e.g., 1 for sub-01)
+        channel_names: List of channel names to extract coordinates for
+                       (must match the order of channels in the neural data)
+        data_root: Root directory for data files (default: "data")
+
+    Returns:
+        np.ndarray: MNI xyz coordinates [num_channels, 3] matching channel_names order
+                    dtype=np.float32
+                    If a channel is not found in the TSV file, NaN coordinates are inserted
+
+    Raises:
+        FileNotFoundError: If the TSV file does not exist
+        ValueError: If required columns are missing
+
+    Note:
+        This function is designed for DIVER model's PositionalEncoding3D,
+        which requires xyz_id in data_info_list for each sample.
+        Podcast Benchmark uses consistent channel order across all samples,
+        so the same xyz_id can be used for all samples in a batch.
+    """
+    tsv_path = os.path.join(
+        data_root,
+        f"sub-{subject_id:02}",
+        "ieeg",
+        f"sub-{subject_id:02}_space-MNI152NLin2009aSym_electrodes.tsv",
+    )
+
+    if not os.path.exists(tsv_path):
+        raise FileNotFoundError(
+            f"MNI coordinates file not found: {tsv_path}. "
+            f"Make sure the file exists. DIVER model requires MNI coordinates for PositionalEncoding3D."
+        )
+
+    df = pd.read_csv(tsv_path, sep="\t")
+
+    # Validate required columns
+    required = {"name", "x", "y", "z"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"TSV file missing required columns: {missing}")
+
+    # Clean and convert data types
+    df = df.copy()
+    df["name"] = df["name"].astype(str).str.strip().str.upper()
+
+    # Normalize channel names for matching
+    normalized_channel_names = [ch.strip().upper() for ch in channel_names]
+
+    # Extract xyz coordinates in the order of channel_names
+    xyz_list = []
+    for ch_name in normalized_channel_names:
+        # Find matching channel in TSV
+        matching_rows = df[df["name"] == ch_name]
+        if len(matching_rows) > 0:
+            # Use first match (should be unique)
+            xyz = matching_rows[["x", "y", "z"]].iloc[0].values
+            xyz_list.append(xyz)
+        else:
+            # Channel not found - insert NaN coordinates
+            print(
+                f"Warning: Channel '{ch_name}' not found in MNI coordinates TSV. Inserting NaN coordinates."
+            )
+            xyz_list.append([np.nan, np.nan, np.nan])
+
+    # Convert to numpy array
+    xyz_id = np.array(xyz_list, dtype=np.float32)
+
+    # Check for NaN coordinates
+    nan_count = np.isnan(xyz_id).any(axis=1).sum()
+    if nan_count > 0:
+        print(
+            f"Warning: {nan_count} channels have NaN MNI coordinates. "
+            f"PositionalEncoding3D will mask these with zeros."
+        )
+
+    return xyz_id
 
 
 def _apply_preprocessing(data, preprocessing_fns, preprocessor_params):

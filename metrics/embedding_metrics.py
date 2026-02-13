@@ -64,6 +64,7 @@ def compute_word_embedding_task_metrics(
     min_train_freq_auc,
     min_test_freq_auc,
     batch_size=16,
+    extra_inputs=None,
     **kwargs,
 ):
     """
@@ -80,6 +81,7 @@ def compute_word_embedding_task_metrics(
         top_k_thresholds: List of k values for top-k accuracy
         min_train_freq_auc: Minimum training frequency for AUC calculation
         min_test_freq_auc: Minimum test frequency for AUC calculation
+        extra_inputs: Optional dict of extra input tensors to pass to model
 
     Returns:
         dict: Dictionary containing computed metrics
@@ -92,7 +94,7 @@ def compute_word_embedding_task_metrics(
     X_test, Y_test = X_test.to(device), Y_test.to(device)
 
     # Get predictions
-    predictions = get_predictions(X_test, model, device, batch_size, **kwargs)
+    predictions = get_predictions(X_test, model, device, batch_size, extra_inputs=extra_inputs, **kwargs)
 
     # Compute cosine distances
     distances = compute_cosine_distances(predictions, Y_test)
@@ -193,7 +195,7 @@ def build_vocabulary(words):
     return word_to_id, id_to_word, position_to_id
 
 
-def get_predictions(X, model, device, batch_size, **kwargs):
+def get_predictions(X, model, device, batch_size, extra_inputs=None, **kwargs):
     X = X.to(device)
 
     # Step 2: Get predicted embeddings for all neural data
@@ -201,7 +203,22 @@ def get_predictions(X, model, device, batch_size, **kwargs):
     for i in range(0, len(X), batch_size):
         with torch.no_grad():
             input_data = X[i : i + batch_size]
-            pred = model(input_data, **kwargs)
+
+            # Prepare kwargs for model forward
+            model_kwargs = kwargs.copy()
+
+            # Add extra inputs if available (includes model-specific data like data_info_list)
+            if extra_inputs is not None:
+                for key, value in extra_inputs.items():
+                    # Slice tensor inputs to match batch
+                    if torch.is_tensor(value):
+                        batch_value = value[i : i + batch_size].to(device)
+                    else:
+                        # For non-tensor values (like lists), slice directly
+                        batch_value = value[i : i + batch_size]
+                    model_kwargs[key] = batch_value
+
+            pred = model(input_data, **model_kwargs)
 
         model_predictions.append(pred)
 

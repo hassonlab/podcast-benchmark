@@ -1,5 +1,3 @@
-#!/bin/bash
-
 set -e
 
 # Cross-platform download function
@@ -143,20 +141,47 @@ else
     echo "Using system Python (local development system detected)..."
 fi
 
+# Function to find and initialize conda
+init_conda() {
+    # Try to get conda base path dynamically
+    if command -v conda >/dev/null 2>&1; then
+        CONDA_BASE=$(conda info --base 2>/dev/null)
+        if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+            source "$CONDA_BASE/etc/profile.d/conda.sh"
+            return 0
+        fi
+    fi
+    
+    # Fallback to common locations
+    for conda_path in ~/miniconda3 ~/anaconda3 /usr/anaconda3 /opt/anaconda3; do
+        if [ -f "$conda_path/etc/profile.d/conda.sh" ]; then
+            source "$conda_path/etc/profile.d/conda.sh"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Create virtual environment if it doesn't exist
 if [ ! -d "$ENV_NAME" ]; then
     echo "Creating virtual environment: $ENV_NAME"
     
     # Try conda first for better package compatibility (especially scientific packages)
-    if [ -f ~/miniconda3/etc/profile.d/conda.sh ] || [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
+    if init_conda; then
         echo "Using conda for virtual environment creation..."
-        # Initialize conda in this shell session
-        if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
-            source ~/miniconda3/etc/profile.d/conda.sh
-        elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-            source ~/anaconda3/etc/profile.d/conda.sh
+        # Remove existing venv directory if it exists (cleanup)
+        if [ -d "$ENV_NAME" ]; then
+            echo "Removing existing $ENV_NAME directory..."
+            rm -rf "$ENV_NAME"
         fi
-        conda create -n "$ENV_NAME" python=3.11 -y
+        # Try Python 3.11 first, fallback to 3.10 if it fails
+        if conda create -n "$ENV_NAME" python=3.11 -y 2>/dev/null; then
+            echo "Created conda environment with Python 3.11"
+        else
+            echo "Python 3.11 failed, trying Python 3.10..."
+            conda create -n "$ENV_NAME" python=3.10 -y
+        fi
         conda activate "$ENV_NAME"
     else
         echo "Using python venv..."
@@ -166,20 +191,17 @@ if [ ! -d "$ENV_NAME" ]; then
 else
     echo "Virtual environment $ENV_NAME already exists, using existing one."
     # Try to activate conda env first, fallback to venv
-    if [ -f ~/miniconda3/etc/profile.d/conda.sh ] || [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-        # Initialize conda in this shell session
-        if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
-            source ~/miniconda3/etc/profile.d/conda.sh
-        elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-            source ~/anaconda3/etc/profile.d/conda.sh
-        fi
+    if init_conda; then
         # Check if conda env exists and activate it
         if conda env list | grep -q "^$ENV_NAME "; then
+            echo "Activating conda environment: $ENV_NAME"
             conda activate "$ENV_NAME"
         else
+            echo "Conda env not found, using venv: $ENV_NAME"
             source "$ENV_NAME/bin/activate"
         fi
     else
+        echo "Conda not found, using venv: $ENV_NAME"
         source "$ENV_NAME/bin/activate"
     fi
 fi
@@ -199,6 +221,10 @@ else
     DEPS="[tensorboard]"
     echo "Installing base dependencies only..."
 fi
+
+# Upgrade pip, setuptools, wheel in the virtual environment
+# Use python -m pip to avoid permission issues with system Python metadata
+echo "Upgrading pip, setuptools, and wheel in virtual environment..."
 
 # Install the package in editable mode (pip will skip already installed conda packages)
 pip install -e ".$DEPS"

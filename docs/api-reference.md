@@ -10,7 +10,7 @@ The framework uses registries to discover and manage model components. Decorate 
 
 ---
 
-## `@register_model_constructor(name=None)`
+## `@register_model_constructor(name=None, required_data_getter=None)`
 
 Register a function that constructs your decoding model.
 
@@ -19,11 +19,15 @@ Creates model instances from config parameters. Called during training setup.
 
 ### Function Signature
 ```python
-def model_constructor(model_params: dict) -> nn.Module
+def model_constructor(params: dict) -> nn.Module
 ```
 
 ### Arguments
-- `model_params` (dict): Parameters from your config's `model_params` section
+- `params` (dict): Parameters from your config's `model_spec.params` section
+
+### Decorator Arguments
+- `name` (str, optional): Name to register under. Defaults to function name.
+- `required_data_getter` (str, optional): Name of a registered `model_data_getter` that this model requires. When specified, the getter is called automatically before training to add model-specific columns to the task DataFrame.
 
 ### Returns
 - PyTorch model instance
@@ -31,19 +35,80 @@ def model_constructor(model_params: dict) -> nn.Module
 ### Example
 ```python
 @registry.register_model_constructor()
-def my_model(model_params):
+def my_model(params):
     return MyModel(
-        input_dim=model_params['input_dim'],
-        output_dim=model_params['output_dim']
+        input_dim=params['input_dim'],
+        output_dim=params['output_dim']
     )
+```
+
+**With required data getter**:
+```python
+@registry.register_model_constructor(required_data_getter="diver_data_info")
+def diver_model(params):
+    return DiverModel(...)
 ```
 
 ### Usage in Config
 ```yaml
-model_constructor_name: my_model
-model_params:
-  input_dim: 256
-  output_dim: 50
+model_spec:
+  constructor_name: my_model
+  params:
+    input_dim: 256
+    output_dim: 50
+```
+
+---
+
+## `@register_model_data_getter(name=None)`
+
+Register a function that adds model-specific columns to the task DataFrame.
+
+### Purpose
+Some models require additional data beyond neural signals and task targets. Model data getters enrich the task DataFrame with model-specific columns that are automatically passed to the model's `forward()` method as keyword arguments.
+
+### Function Signature
+```python
+def model_data_getter(
+    task_df: pd.DataFrame,
+    raws: list[mne.io.Raw],
+    model_params: dict
+) -> tuple[pd.DataFrame, list[str]]
+```
+
+### Arguments
+- `task_df` (pd.DataFrame): DataFrame from the task data getter
+- `raws` (list[mne.io.Raw]): Loaded neural recordings
+- `model_params` (dict): Parameters from your config's `model_spec.params`
+
+### Returns
+- Tuple of `(enriched_df, added_column_names)` where:
+  - `enriched_df`: The DataFrame with new columns added
+  - `added_column_names`: List of column names that were added (these are automatically appended to `input_fields`)
+
+### Example
+```python
+@registry.register_model_data_getter("diver_data_info")
+def get_diver_data_info(task_df, raws, model_params):
+    task_df["data_info_list"] = compute_data_info(raws, model_params)
+    return task_df, ["data_info_list"]
+```
+
+The added columns are named to match the model's `forward()` parameter names so they can be passed automatically.
+
+### Linking to a Model Constructor
+Use `required_data_getter` on `@register_model_constructor` to automatically invoke a data getter:
+```python
+@registry.register_model_constructor(required_data_getter="diver_data_info")
+def diver_model(params):
+    ...
+```
+
+Or override in config:
+```yaml
+model_spec:
+  constructor_name: my_model
+  model_data_getter: diver_data_info  # Explicit override
 ```
 
 ---
@@ -101,14 +166,14 @@ Sets config values that depend on the data (e.g., number of channels, model dime
 def config_setter(
     experiment_config: ExperimentConfig,
     raws: list[mne.io.Raw],
-    df_word: pd.DataFrame
+    task_df: pd.DataFrame
 ) -> ExperimentConfig
 ```
 
 ### Arguments
 - `experiment_config` (ExperimentConfig): Your experiment configuration
 - `raws` (list[mne.io.Raw]): Loaded neural recordings
-- `df_word` (pd.DataFrame): Task data with event timings and targets
+- `task_df` (pd.DataFrame): Task data with event timings and targets (columns: `start`, `target`, etc.)
 
 ### Returns
 - Modified `ExperimentConfig`
@@ -116,10 +181,10 @@ def config_setter(
 ### Example
 ```python
 @registry.register_config_setter()
-def my_config_setter(experiment_config, raws, df_word):
+def my_config_setter(experiment_config, raws, task_df):
     # Set input channels based on loaded data
     num_channels = sum([len(raw.ch_names) for raw in raws])
-    experiment_config.model_params['input_channels'] = num_channels
+    experiment_config.model_spec.params['input_channels'] = num_channels
     return experiment_config
 ```
 
@@ -169,7 +234,7 @@ training_params:
 
 ---
 
-## `@register_task_data_getter(name=None)`
+## `@register_task_data_getter(name=None, config_type=None)`
 
 Register a function that loads task-specific data.
 
@@ -178,26 +243,38 @@ Loads event timings and targets for your decoding task. Called once at the start
 
 ### Function Signature
 ```python
-def task_data_getter(data_params: DataParams) -> pd.DataFrame
+def task_data_getter(task_config: TaskConfig) -> pd.DataFrame
 ```
 
+### Decorator Arguments
+- `name` (str, optional): Name to register under. Defaults to function name.
+- `config_type` (type, **required**): The dataclass type for this task's configuration. Must be a subclass of `BaseTaskConfig`.
+
 ### Arguments
-- `data_params` (DataParams): Data configuration from your config file
+- `task_config` (TaskConfig): Task configuration containing `task_name`, `data_params`, and `task_specific_config`
 
 ### Returns
 - DataFrame with required columns:
   - `start` (float): Event onset time in seconds
   - `target` (any): Prediction target (embeddings, labels, etc.)
   - `word` (str, optional): Event label (for zero-shot folds)
+  - Any columns listed in `input_fields` (will be passed to model as kwargs)
 
 ### Example
 ```python
-@registry.register_task_data_getter()
-def my_task(data_params):
-    # Load timing data
-    df = pd.read_csv(data_params.task_params['data_file'])
+from dataclasses import dataclass
+from core.config import BaseTaskConfig, TaskConfig
 
-    # Create required columns
+@dataclass
+class MyTaskConfig(BaseTaskConfig):
+    data_file: str = "processed_data/my_data.csv"
+
+@registry.register_task_data_getter(config_type=MyTaskConfig)
+def my_task(task_config: TaskConfig):
+    config: MyTaskConfig = task_config.task_specific_config
+    data_params = task_config.data_params
+
+    df = pd.read_csv(os.path.join(data_params.data_root, config.data_file))
     df['start'] = df['onset_time']
     df['target'] = df['label'].values
 
@@ -206,10 +283,13 @@ def my_task(data_params):
 
 ### Usage in Config
 ```yaml
-task_name: my_task
-data_params:
-  task_params:
-    data_file: path/to/data.csv
+task_config:
+  task_name: my_task
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+  task_specific_config:
+    data_file: processed_data/my_data.csv
 ```
 
 ---
@@ -217,7 +297,10 @@ data_params:
 ## Built-in Registered Functions
 
 ### Models
-See `models/neural_conv_decoder/decoder_model.py` and `models/example_foundation_model/integration.py` for examples.
+See `models/neural_conv_decoder/decoder_model.py` and `models/example_foundation_model/integration.py` for examples. Additional foundation model integrations are available in:
+- `models/diver/integration.py` - DIVER foundation model
+- `models/popt/integration.py` - POPT foundation model
+- `models/brainbert/integration.py` - BrainBERT foundation model
 
 ### Preprocessors
 - `window_average_neural_data` - Temporal averaging (models/neural_conv_decoder)
@@ -240,16 +323,18 @@ The metrics package is organized by task type:
 - `similarity_entropy` - Similarity distribution entropy
 
 **Classification Metrics** (`metrics/classification_metrics.py`):
-- `bce` - Binary cross-entropy (weighted)
-- `cross_entropy` - Multi-class cross-entropy
+- `bce` - Binary cross-entropy (weighted, expects probabilities)
+- `bce_with_logits` - Binary cross-entropy with logits (expects raw logits)
+- `cross_entropy` - Multi-class cross-entropy (supports sequence prediction and -100 ignore index)
+- `weighted_cross_entropy` - Weighted cross-entropy with automatic class balancing
 - `roc_auc` - ROC-AUC for binary classification
 - `roc_auc_multiclass` - ROC-AUC for multi-class classification
-- `f1` - F1 score
+- `f1` - F1 score (binary and multiclass)
+- `acc` - Accuracy (binary and multiclass)
 - `sensitivity` - Sensitivity (recall/TPR)
 - `precision` - Precision
 - `specificity` - Specificity (TNR)
 - `confusion_matrix` - Confusion matrix
-- `perplexity` - Perplexity (for LLM evaluation)
 
 **Utility Functions** (`metrics/utils.py`):
 - `compute_cosine_distances` - Cosine distance computation with ensemble support
@@ -262,13 +347,14 @@ See the `metrics/` package for complete implementations.
 
 ### Tasks
 - `word_embedding_decoding_task` - Decode word embeddings (default)
-- `placeholder_task` - Minimal example
 - `content_noncontent_task` - Content vs non-content classification
 - `gpt_surprise_task` - GPT surprisal prediction
 - `gpt_surprise_multiclass_task` - GPT surprisal multiclass classification
 - `pos_task` - Part-of-speech tagging
 - `sentence_onset_task` - Sentence onset detection
-- `volume_level_encoding_task` - Audio volume level prediction
+- `volume_level_decoding_task` - Audio volume level prediction
+- `llm_decoding_task` - LLM-based brain-to-text generation
+- `llm_embedding_pretraining_task` - Pre-train encoder for LLM decoding
 
 See `tasks/` directory for implementations.
 

@@ -280,6 +280,7 @@ See the `tasks/` directory for complete examples:
 - `tasks/pos_task.py` - Multi-class classification (PosTaskConfig)
 - `tasks/gpt_surprise.py` - Regression task (GptSurpriseConfig)
 - `tasks/volume_level.py` - Audio feature prediction (VolumeLevelConfig)
+- `tasks/llm_decoding.py` - LLM brain-to-text generation (LlmDecodingConfig)
 
 For detailed documentation on all available tasks, see the [Task Reference](task-reference.md). For baseline performance benchmarks, see [Baseline Results](baseline-results.md).
 

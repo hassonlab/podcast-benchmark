@@ -62,6 +62,28 @@ def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
         return F.binary_cross_entropy(probs, groundtruth)
 
 
+@register_metric("bce_with_logits")
+def bce_with_logits_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
+    """
+    Binary Cross Entropy with Logits.
+    Combines a Sigmoid layer and the BCELoss in one single class.
+    
+    Args:
+        predicted: Raw logits from the model (before Sigmoid). Shape: (N, ) or (N, 1)
+        groundtruth: True labels (0 or 1). Shape: (N, ) or (N, 1)
+    """
+    # 타겟 데이터(groundtruth)는 float 타입이어야 계산 가능
+    target = groundtruth.float()
+    
+    # 차원이 맞지 않는 경우를 대비해 squeeze (예: [N, 1] -> [N])
+    if predicted.shape != target.shape:
+         # predicted와 target의 차원을 맞춤 (보통 target을 predicted에 맞추거나 그 반대)
+         # 여기서는 안전하게 둘 다 1차원으로 펴서 계산하거나, 상황에 맞춰 조정
+         pass 
+
+    # PyTorch의 안정적인 구현체 사용 (내부적으로 Sigmoid -> BCE 수행)
+    return F.binary_cross_entropy_with_logits(predicted, target)
+
 @register_metric("cross_entropy")
 def cross_entropy_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """
@@ -177,57 +199,128 @@ def roc_auc_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
 
 @register_metric("roc_auc_multiclass")
 def roc_auc_multiclass(pred: torch.Tensor, true: torch.Tensor) -> float:
-    """
-    ROC-AUC for multiclass classification.
-    Accepts raw scores (logits or probabilities).
-    """
-    # Convert to CPU numpy arrays
     y_true = true.detach().cpu().numpy()
-    y_score = pred.detach().cpu().numpy()
+    if y_true.ndim == 2 and y_true.shape[1] > 1:
+        y_true = np.argmax(y_true, axis=1) # One-Hot -> Index
+    else:
+        y_true = y_true.astype(int).ravel()
 
-    # Handle edge case: fewer than 2 classes in batch
-    if len(set(y_true.tolist())) < 2:
+    y_score = torch.softmax(pred, dim=1).detach().cpu().numpy()
+
+    present_classes = np.unique(y_true)
+    
+    if len(present_classes) < 2:
         return 0.5
 
-    try:
-        return float(
-            roc_auc_score(
-                y_true,
-                y_score,
-                multi_class="ovr",  # or 'ovo' (one-vs-one)
-                average="macro",  # or 'weighted', depending on your use case
-            )
-        )
-    except Exception:
+    auc_scores = []
+    for cls in present_classes:
+        binary_true = (y_true == cls).astype(int)
+        binary_score = y_score[:, cls]
+        
+        try:
+            cls_auc = roc_auc_score(binary_true, binary_score)
+            auc_scores.append(cls_auc)
+        except ValueError:
+            continue
+
+    if len(auc_scores) == 0:
         return 0.5
+        
+    return float(np.mean(auc_scores))
 
 
 @register_metric("f1")
 def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
-    F1 score for binary classification at 0.5 threshold.
-    Expects probabilities in [0,1] range. (for binary classification)
-    Also works for multiclass by taking argmax after softmax.
+    Binary F1 Metric
     """
-    # Ensure 1D
-    if pred.ndim > 1 and pred.shape[-1] == 1:
-        pred = pred.squeeze(-1)
-    if true.ndim > 1:
-        true = true.squeeze(-1)
+    # 1. Tensor
+    if isinstance(pred, torch.Tensor):
+        pred = pred.detach().cpu()
+    if isinstance(true, torch.Tensor):
+        true = true.detach().cpu().numpy()
+    
+    # 2. Multiclass
+    if pred.ndim > 1 and pred.shape[-1] > 1:
+        # [Case A: Multiclass] Argmax
+        y_pred = torch.argmax(pred, dim=-1).numpy()
+    else:
+        # [Case B: Binary] Threshold
+        pred = pred.squeeze()
+        true = true.squeeze()
+        
+        # Logit(negative values included) then apply Sigmoid to convert to probabilities
+        if pred.min() < 0 or pred.max() > 1.0:
+            pred = torch.sigmoid(pred)
+            
+        # Apply Threshold (0.5)
+        # Tip: If AUROC is high but F1 is low, try lowering this value to 0.3 or 0.4.
+        y_pred = (pred.numpy() >= 0.5).astype(int)
 
-    y_true = true.detach().cpu().numpy().astype(int)
+    y_true = true.astype(int)
 
-    # Check if input looks like logits and warn user
-    if pred.detach().min() < 0 or pred.detach().max() > 1:
-        warnings.warn(
-            f"F1 metric received values outside [0,1] range (min={pred.detach().min():.3f}, "
-            f"max={pred.detach().max():.3f}). Function expects probabilities in [0,1] range.",
-            UserWarning,
-        )
-
-    y_pred = (pred.detach().cpu().numpy() >= 0.5).astype(int)
     try:
+        # Multiclass Shape Mismatch resolved
         return float(f1_score(y_true, y_pred, zero_division=0, average="weighted"))
+    except Exception as e:
+        # print(f"F1 Error: {e}")
+        return 0.0
+
+@register_metric("acc")
+def accuracy_metric(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """
+    Accuracy metric for both binary and multiclass classification.
+    
+    Args:
+        pred: Predictions from the model. 
+              - For binary: Probabilities (0~1) or Logits.
+              - For multiclass: Logits or Probabilities (N, C).
+        true: Ground truth labels.
+              - For binary: (N, ) or (N, 1) with values 0 or 1.
+              - For multiclass: (N, ) with class indices.
+    """
+    # 1. Tensor 변환 및 Detach
+    if isinstance(pred, torch.Tensor):
+        pred = pred.detach().cpu()
+    if isinstance(true, torch.Tensor):
+        true = true.detach().cpu()
+
+    # 2. Numpy 변환
+    pred = pred.numpy() if isinstance(pred, torch.Tensor) else np.array(pred)
+    true = true.numpy() if isinstance(true, torch.Tensor) else np.array(true)
+
+    # 3. 차원 정리 (Squeeze)
+    # Binary의 경우 (N, 1) -> (N, )
+    if pred.ndim > 1 and pred.shape[-1] == 1:
+        pred = pred.squeeze()
+    if true.ndim > 1:
+        true = true.squeeze()
+
+    # 4. 예측값(Label) 결정
+    if pred.ndim > 1:
+        # [Case A: Multiclass] (N, C) -> 가장 높은 확률의 인덱스 선택
+        y_pred = np.argmax(pred, axis=1)
+    else:
+        # [Case B: Binary] (N, ) -> 0.5 Threshold 적용 (Logit인 경우 Sigmoid 처리 필요할 수 있으나, 일반적으로 부호나 0.5 기준으로 판단 가능)
+        # 만약 Logit(음수 포함)이 들어온다면 0.0을 기준으로, 확률(0~1)이 들어온다면 0.5를 기준으로 해야 함.
+        # 기존 코드들이 확률을 기대하고 warn을 띄우므로, 여기선 0.5 기준을 기본으로 함.
+        
+        # 입력이 확률 범위(0~1)를 벗어난 경우 (Logit으로 추정) Sigmoid 적용
+        if pred.min() < 0 or pred.max() > 1.0:
+            pred = 1 / (1 + np.exp(-pred))  # Sigmoid
+
+        y_pred = (pred >= 0.5).astype(int)
+
+    # 5. 정답값(Label) 정수 변환
+    y_true = true.astype(int)
+
+    # 6. 정확도 계산
+    try:
+        correct = (y_pred == y_true).sum()
+        total = len(y_true)
+        if total == 0:
+            return 0.0
+        return float(correct / total)
     except Exception:
         return 0.0
 

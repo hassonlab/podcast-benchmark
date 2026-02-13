@@ -1,0 +1,20 @@
+# Configuration for PopulationTransformer Foundation Model
+# This config defines the architecture of the pretrained PopulationTransformer model
+# Based on actual checkpoint structure from pretrained_popt_brainbert_stft.pth
+
+# Model architecture parameters (from model_cfg in checkpoint)
+input_channels: 768  # Number of input channels
+                     # This will be overridden by config_setter based on actual data
+model_dim: 512       # Dimension of transformer embeddings (hidden_dim)
+num_layers: 6        # Number of transformer encoder layers
+num_heads: 8         # Number of attention heads
+dim_feedforward: 2048  # Dimension of feedforward network
+dropout: 0.1         # Dropout probability
+max_seq_len: 5000    # Maximum sequence length (from positional encoding)
+
+# Data parameters
+window_width: 1.0  # Window width in seconds
+sample_rate: 512     # Sample rate (Hz)
+
+# Checkpoint file name
+checkpoint_file: pretrained_popt_brainbert_stft.pth

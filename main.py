@@ -72,6 +72,32 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             config_setter_fn = registry.config_setter_registry[config_setter_name]
             experiment_config = config_setter_fn(experiment_config, raws, task_df)
 
+    # Apply model data getter if needed (adds model-specific columns to task_df)
+    model_spec = experiment_config.model_spec
+    model_info = registry.model_constructor_registry.get(model_spec.constructor_name, {})
+
+    # Resolve model_data_getter: explicit config takes precedence, else use model's required getter
+    getter_name = (
+        model_spec.model_data_getter  # Explicit override in config
+        or model_info.get("required_data_getter")  # Model's declared requirement
+    )
+
+    if getter_name:
+        if getter_name not in registry.model_data_getter_registry:
+            raise ValueError(
+                f"Model '{model_spec.constructor_name}' requires data getter "
+                f"'{getter_name}' but it is not registered. "
+                f"Available getters: {list(registry.model_data_getter_registry.keys())}"
+            )
+
+        getter_fn = registry.model_data_getter_registry[getter_name]
+        task_df, added_columns = getter_fn(task_df, raws, model_spec.params)
+
+        # Auto-extend input_fields with the added columns
+        existing_fields = experiment_config.task_config.task_specific_config.input_fields or []
+        experiment_config.task_config.task_specific_config.input_fields = existing_fields + added_columns
+        print(f"Model data getter '{getter_name}' added columns: {added_columns}")
+
     # User defined preprocessing function
     preprocessing_fns = None
     if experiment_config.task_config.data_params.preprocessing_fn_name:

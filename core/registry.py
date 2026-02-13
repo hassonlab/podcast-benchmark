@@ -1,4 +1,5 @@
 # Registry of functions for creating decoding models.
+# Structure: {name: {"constructor": fn, "required_data_getter": str|None}}
 model_constructor_registry = {}
 # Registry of functions for preprocessing data.
 data_preprocessor_registry = {}
@@ -9,9 +10,12 @@ metric_registry = {}
 # Registry of task information including data getter functions and config types.
 # Structure: {task_name: {"getter": function, "config_type": ConfigClass}}
 task_registry = {}
+# Registry of model data getter functions that add model-specific columns to task DataFrames.
+# Structure: {name: function}
+model_data_getter_registry = {}
 
 
-def register_model_constructor(name=None):
+def register_model_constructor(name=None, required_data_getter=None):
     """
     Decorator to register a model constructor function used for decoding models.
 
@@ -25,15 +29,65 @@ def register_model_constructor(name=None):
     Args:
         name (str, optional): Optional name to register the constructor under.
                               Defaults to the function's __name__.
+        required_data_getter (str, optional): Name of the model_data_getter that this model
+                              requires. When specified, the data getter will be called
+                              automatically before training to add model-specific columns
+                              to the task DataFrame. Defaults to None.
 
     Returns:
         function: A decorator that registers the model constructor in
-                  model_constructor_registry.
+                  model_constructor_registry with structure:
+                  {name: {"constructor": fn, "required_data_getter": str|None}}
     """
 
     def decorator(fn):
         model_name = name or fn.__name__
-        model_constructor_registry[model_name] = fn
+        model_constructor_registry[model_name] = {
+            "constructor": fn,
+            "required_data_getter": required_data_getter,
+        }
+        return fn
+
+    return decorator
+
+
+def register_model_data_getter(name=None):
+    """
+    Decorator to register a model data getter function that adds model-specific
+    columns to the task DataFrame.
+
+    The decorated function must follow the signature:
+        model_data_getter(task_df: pd.DataFrame, raws: list[mne.io.Raw], model_params: dict)
+            -> tuple[pd.DataFrame, list[str]]
+
+    Where:
+        - task_df: DataFrame containing task-specific data
+        - raws: List of MNE Raw objects (continuous iEEG/EEG data)
+        - model_params: Dictionary of model parameters from ModelSpec
+        - Returns: Tuple of (enriched_df, list of added column names)
+
+    The added columns should be named to match the model's forward() parameter names
+    exactly, so they can be passed automatically via **inputs_dict.
+
+    Args:
+        name (str, optional): Optional name to register the getter under.
+                              Defaults to the function's __name__.
+
+    Returns:
+        function: A decorator that registers the model data getter in
+                  model_data_getter_registry.
+
+    Example:
+        @register_model_data_getter("diver_data_info")
+        def get_diver_data_info(task_df, raws, model_params):
+            # Add data_info_list column for DIVER model
+            task_df["data_info_list"] = ...
+            return task_df, ["data_info_list"]
+    """
+
+    def decorator(fn):
+        getter_name = name or fn.__name__
+        model_data_getter_registry[getter_name] = fn
         return fn
 
     return decorator

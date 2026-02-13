@@ -61,8 +61,9 @@ def build_model_from_spec(
     for param_name, sub_spec in model_spec.sub_models.items():
         built_sub_models[param_name] = build_model_from_spec(sub_spec, lag, fold)
 
-    # Get the constructor function
-    constructor_fn = model_constructor_registry[model_spec.constructor_name]
+    # Get the constructor function from registry (registry stores {"constructor": fn, "required_data_getter": str|None})
+    model_info = model_constructor_registry[model_spec.constructor_name]
+    constructor_fn = model_info["constructor"]
 
     # Combine params and built sub-models into a single kwargs dict
     all_kwargs = {**model_spec.params, **built_sub_models}
