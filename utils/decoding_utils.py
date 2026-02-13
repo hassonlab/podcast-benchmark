@@ -588,9 +588,9 @@ def train_decoding_model(
         print(f"Train size: {len(tr_idx)}")
         print(f"Validation size: {len(va_idx)}")
         print(f"Test size: {len(te_idx)}")
-        print(f"Train targets: {Y[tr_idx]}")
-        print(f"Validation targets: {Y[va_idx]}")
-        print(f"Test targets: {Y[te_idx]}")
+        print(f"Train targets: {Y[tr_idx]}, shape: {Y[tr_idx].shape}")
+        print(f"Validation targets: {Y[va_idx]}, shape: {Y[va_idx].shape}")
+        print(f"Test targets: {Y[te_idx]}, shape: {Y[te_idx].shape}")
         cv_results["fold_nums"].append(fold)
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
 
