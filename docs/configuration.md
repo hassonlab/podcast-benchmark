@@ -116,6 +116,7 @@ The `model_spec` section specifies how to build your model:
 - **params**: Parameters passed to the constructor (fully customizable)
 - **sub_models**: Dictionary of nested models to build and pass as constructor arguments
 - **checkpoint_path**: Optional path to checkpoint for model initialization (supports placeholders)
+- **model_data_getter**: Optional name of a registered model data getter to add model-specific columns to the task DataFrame (overrides the model's default `required_data_getter`)
 
 **Simple Example**:
 ```yaml
@@ -194,15 +195,28 @@ training_params:
   # Cross-validation strategy
   fold_type: sequential_folds   # or "zero_shot_folds" for words not in training
   n_folds: 5
+  fold_ids: [0, 1, 2]          # Optional: only run specific folds
 
   # Time lags - find optimal temporal offset
   min_lag: -500      # Start 500ms before word onset
   max_lag: 1000      # End 1000ms after word onset
   lag_step_size: 100 # Test every 100ms
 
+  # Optimizer configuration
+  optimizer: AdamW              # "AdamW" (default) or "MuAdamW" (for muP models)
+  clip_grad_norm: 1.0           # Clip gradient norm (0 = disabled)
+  lr_scheduler: cosine_annealing  # Optional: "cosine_annealing" or null
+  cosine_eta_min_factor: 0.01   # eta_min = learning_rate * this factor
+
+  # Target manipulation
+  normalize_targets: false      # Normalize targets to zero mean / unit variance
+  shuffle_targets: false        # Shuffle targets (sanity check baseline)
+
   # Baseline models
   linear_regression_baseline: false    # Train and evaluate linear regression baseline
   logistic_regression_baseline: false  # Train and evaluate logistic regression baseline
+  ridge_regression_baseline: false     # Train and evaluate ridge regression baseline
+  ridge_alpha: 1.0                     # Regularization strength for ridge baseline
 ```
 
 See `core/config.py:TrainingParams` for all available fields.
@@ -271,6 +285,12 @@ task_config:
     subject_ids: [1, 2, 3]
     window_width: 0.625           # Width of neural data window (seconds)
     word_column: lemmatized_word  # For zero-shot folds
+
+    # Data loading options
+    use_high_gamma: true          # Load high-gamma data (default). Set false for raw signal.
+    target_sr: 512                # Optional: resample neural data to this rate (Hz)
+    signal_unit: uV               # Optional: scale raw data to microvolts
+    do_drop_bads: true            # Drop bad channels marked in raw.info['bads']
 
     # Preprocessing (single or list of preprocessors)
     preprocessing_fn_name: my_preprocessor  # or [preprocessor1, preprocessor2]
@@ -478,6 +498,20 @@ your_new_model:
     - config_file_2.yml
     - config_file_3.yml
 ```
+
+---
+
+## Foundation Model Configs
+
+Pre-configured foundation model experiments are available in `configs/foundation_models/`:
+
+| Config | Model | Task |
+|--------|-------|------|
+| `diver_word_embedding.yml` | DIVER | Word embedding decoding |
+| `popt_word_embedding.yml` | POPT | Word embedding decoding |
+| `popt_word_embedding_with_lip.yml` | POPT | Word embedding with lip data |
+
+These configs demonstrate the foundation model integration pattern with feature extraction and finetuning.
 
 ---
 

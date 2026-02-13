@@ -11,13 +11,20 @@ To download data and set up your local virtual environment:
 ```
 
 This will:
-- Create a Python virtual environment
+- Create a Python virtual environment (conda or venv)
 - Install all required dependencies
 - Download the necessary podcast listening data
 
+**Setup options**:
+```bash
+./setup.sh --gpu           # Install GPU dependencies (CUDA packages)
+./setup.sh --dev           # Install dev dependencies (testing), skip data download
+./setup.sh --env-name NAME # Custom environment name (default: decoding_env)
+```
+
 ## Training Your First Model
 
-The framework comes with two pre-configured models you can train immediately.
+The framework comes with several pre-configured models you can train immediately.
 
 ### 1. Neural Convolutional Decoder
 
@@ -33,6 +40,14 @@ This trains a decoder from a foundation model's latent representations to word e
 
 ```bash
 make foundation-model
+```
+
+### 3. POPT Foundation Model
+
+Evaluate the POPT foundation model on word embedding decoding:
+
+```bash
+python main.py --config configs/foundation_models/popt_word_embedding.yml
 ```
 
 ## Results
@@ -51,6 +66,8 @@ To modify data, behavior, or hyperparameters:
 Edit the relevant configuration file in `configs/`:
 - `configs/neural_conv_decoder/` - Neural convolutional decoder settings
 - `configs/example_foundation_model/` - Foundation model decoder settings
+- `configs/foundation_models/` - POPT and other foundation model configs
+- `configs/controls/` - Control experiments (e.g., no brain data baselines)
 
 Model implementations can be found in the `models/` directory.
 

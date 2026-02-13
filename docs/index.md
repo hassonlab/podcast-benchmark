@@ -26,8 +26,9 @@ A benchmarking framework for neural decoding from podcast listening data.
 
 This framework provides a flexible system for:
 - Training neural decoding models on iEEG data
+- Evaluating foundation models (POPT, DIVER, BrainBERT) on standardized tasks
 - Comparing different model architectures
 - Evaluating performance across multiple metrics
-- Running systematic hyperparameter searches
+- Multi-stage training (pretraining + finetuning) with checkpoint chaining
 
 For long updates and discussions, see [this notebook](https://docs.google.com/document/d/1IE1v_CyjZxTYaYVncxctJqZYzmYyFIgdZLXpKvEMaqc/edit?usp=sharing).

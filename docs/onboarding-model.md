@@ -10,9 +10,9 @@ To set up a new model (e.g., BrainBERT), you need to:
 2. [Define a decoding model and constructor function](#2-define-decoding-model-and-constructor)
 3. [Define a data preprocessing function](#3-define-data-preprocessing-function)
 4. [Create a config file](#4-create-config-file)
-5. [Optional: Define a config setter function](#5-optional-define-config-setter)
-6. [Import your module in main.py](#6-import-module)
-7. [Optional: Update the Makefile](#7-optional-update-makefile)
+5. [Optional: Model data getters](#5-optional-model-data-getters)
+6. [Optional: Define a config setter function](#6-optional-define-config-setter)
+7. [Import your module in main.py](#7-import-module)
 8. [Run your training code](#8-run-training)
 
 ---
@@ -67,8 +67,8 @@ def my_model_constructor(params):
 **Important**:
 - Use the `@registry.register_model_constructor()` decorator
 - The function must have signature: `constructor_fn(params: dict) -> Model`
-- The `params` dict contains both regular parameters and any built sub-models
 - By default, the registered name is the function name (can override with `@registry.register_model_constructor('custom_name')`)
+- If your model requires extra data columns, use `required_data_getter` (see [Model Data Getters](#optional-model-data-getters) below)
 
 ### Examples
 
@@ -338,7 +338,39 @@ trial_name: foundation_finetune_v1
 
 ---
 
-## 5. Optional: Define Config Setter
+## 5. Optional: Model Data Getters
+
+If your model needs additional data beyond neural signals (e.g., electrode metadata, data format info), you can define a **model data getter** that enriches the task DataFrame with model-specific columns.
+
+```python
+import core.registry as registry
+
+@registry.register_model_data_getter("my_model_data")
+def get_my_model_data(task_df, raws, model_params):
+    """Add model-specific columns to the task DataFrame."""
+    task_df["electrode_info"] = compute_electrode_info(raws, model_params)
+    return task_df, ["electrode_info"]  # Return df and list of added column names
+```
+
+Then link it to your model constructor:
+
+```python
+@registry.register_model_constructor(required_data_getter="my_model_data")
+def my_model_constructor(params):
+    return MyModel(...)
+```
+
+The added columns are automatically appended to `input_fields` and passed to your model's `forward()` method as keyword arguments. You can also override the data getter in config:
+
+```yaml
+model_spec:
+  constructor_name: my_model_constructor
+  model_data_getter: alternative_data_getter  # Override the default
+```
+
+---
+
+## 6. Optional: Define Config Setter
 
 Sometimes you need to set config values at runtime based on the loaded data.
 
@@ -346,7 +378,7 @@ Sometimes you need to set config values at runtime based on the loaded data.
 import core.registry as registry
 
 @registry.register_config_setter('my_model')
-def my_config_setter(experiment_config, raws, df_word):
+def my_config_setter(experiment_config, raws, task_df):
     # Set values based on data
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
     experiment_config.model_spec.params['input_channels'] = num_electrodes
@@ -360,7 +392,7 @@ from core.config import ExperimentConfig
 def config_setter(
     experiment_config: ExperimentConfig,
     raws: list[mne.io.Raw],
-    df_word: pd.DataFrame
+    task_df: pd.DataFrame
 ) -> ExperimentConfig
 ```
 
@@ -383,7 +415,7 @@ This is useful for:
 **Neural Conv** (set number of input channels):
 ```python
 @registry.register_config_setter('neural_conv')
-def set_config_input_channels(experiment_config, raws, _df_word):
+def set_config_input_channels(experiment_config, raws, _task_df):
     num_electrodes = sum([len(raw.ch_names) for raw in raws])
     experiment_config.model_spec.params['input_channels'] = num_electrodes
     return experiment_config
@@ -393,7 +425,7 @@ def set_config_input_channels(experiment_config, raws, _df_word):
 ```python
 @registry.register_config_setter("foundation_model_finetune_mlp")
 def foundation_model_mlp_finetune_config_setter(
-    experiment_config, raws, _df_word
+    experiment_config, raws, _task_df
 ):
     # Add channel names for preprocessing
     ch_names = sum([raw.info.ch_names for raw in raws], [])
@@ -419,7 +451,7 @@ def foundation_model_mlp_finetune_config_setter(
 
 ---
 
-## 6. Import Module
+## 7. Import Module
 
 Your module will be automatically imported! The framework recursively imports all models from the `models/` directory:
 
@@ -434,33 +466,10 @@ As long as your model is in `models/my_model/`, it will be automatically discove
 
 ---
 
-## 7. Optional: Update Makefile
-
-Add a convenient make rule for your model:
-
-```makefile
-my-model:
-	mkdir -p logs
-	$(CMD) main.py \
-		--config configs/my_model/config.yml
-```
-
-Now you can run with:
-```bash
-make my-model
-```
-
----
-
 ## 8. Run Training
 
 Run your model:
 
-```bash
-make my-model
-```
-
-Or directly:
 ```bash
 python main.py --config configs/my_model/config.yml
 ```
@@ -503,6 +512,14 @@ python main.py --config configs/example_foundation_model/finetuning.yaml
 ```
 
 See `models/example_foundation_model/README.md` for details.
+
+### Real Foundation Model Integrations
+
+For production-grade examples, see the following model integrations:
+
+- **POPT** (`models/popt/`) - Foundation model with STFT preprocessing. Configs in `configs/foundation_models/popt_*.yml`.
+- **DIVER** (`models/diver/`) - Foundation model for epidural data. Configs in `configs/foundation_models/diver_*.yml`.
+- **BrainBERT** (`models/brainbert/`) - Transformer-based foundation model.
 
 ---
 
