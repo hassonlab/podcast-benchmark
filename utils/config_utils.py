@@ -11,7 +11,13 @@ import yaml
 from typing import Any, Union
 from copy import deepcopy
 
-from core.config import ExperimentConfig, TaskConfig, DataParams, MultiTaskConfig, dict_to_config
+from core.config import (
+    ExperimentConfig,
+    TaskConfig,
+    DataParams,
+    MultiTaskConfig,
+    dict_to_config,
+)
 from core import registry
 from utils import data_utils
 
@@ -38,7 +44,7 @@ def partial_format(template: str, **kwargs) -> str:
         Formatted string with unmatched variables preserved
     """
     # Find all format variables in the template
-    format_vars = re.findall(r'\{(\w+)\}', template)
+    format_vars = re.findall(r"\{(\w+)\}", template)
 
     # Create a complete format dict: provided kwargs + self-referencing for missing vars
     format_dict = {}
@@ -93,8 +99,7 @@ def interpolate_prev_checkpoint_dir(model_spec, prev_checkpoint_dir: str):
             )
         # Use partial_format() to replace {prev_checkpoint_dir}, leaving {lag} and {fold} intact
         new_spec.checkpoint_path = partial_format(
-            new_spec.checkpoint_path,
-            prev_checkpoint_dir=prev_checkpoint_dir
+            new_spec.checkpoint_path, prev_checkpoint_dir=prev_checkpoint_dir
         )
 
     # Recursively process sub-models
@@ -155,9 +160,7 @@ def get_nested_value(obj: Union[dict, Any], path: str) -> Any:
                 index = int(field)
                 current = current[index]
             except (ValueError, IndexError) as e:
-                raise TypeError(
-                    f"Cannot access list with key '{field}': {e}"
-                )
+                raise TypeError(f"Cannot access list with key '{field}': {e}")
         else:
             raise TypeError(
                 f"Cannot access field '{field}' on non-dict, non-dataclass, non-list object: {current}"
@@ -189,9 +192,7 @@ def set_nested_attr(obj, key_path, value):
                 index = int(key)
                 target = target[index]
             except (ValueError, IndexError) as e:
-                raise TypeError(
-                    f"Cannot access list with key '{key}': {e}"
-                )
+                raise TypeError(f"Cannot access list with key '{key}': {e}")
         else:
             raise TypeError(
                 f"Unsupported type {type(target)} for intermediate key: {key}"
@@ -208,9 +209,7 @@ def set_nested_attr(obj, key_path, value):
             index = int(final_key)
             target[index] = value
         except (ValueError, IndexError) as e:
-            raise TypeError(
-                f"Cannot set list element with key '{final_key}': {e}"
-            )
+            raise TypeError(f"Cannot set list element with key '{final_key}': {e}")
     else:
         raise TypeError(f"Unsupported type {type(target)} for final key: {final_key}")
 
@@ -262,7 +261,9 @@ def load_experiment_config(
         )
 
     # Finalize the experiment config (electrode files, config setters)
-    experiment_config = _finalize_experiment_config(experiment_config, subject_mapping_file)
+    experiment_config = _finalize_experiment_config(
+        experiment_config, subject_mapping_file
+    )
 
     return experiment_config
 
@@ -287,7 +288,7 @@ def validate_multi_task_config(config: MultiTaskConfig):
 
 def _finalize_experiment_config(
     experiment_config: ExperimentConfig,
-    subject_mapping_file: str = "data/participants.tsv"
+    subject_mapping_file: str = "data/participants.tsv",
 ) -> ExperimentConfig:
     """Finalize an experiment config by processing task_config and electrode files.
 
@@ -309,9 +310,11 @@ def _finalize_experiment_config(
             experiment_config.task_config.data_params.electrode_file_path,
             subject_mapping=subject_id_map,
         )
-        experiment_config.task_config.data_params.subject_ids = list(
-            subject_electrode_map.keys()
-        )
+        # If subject id's not configured, use all of the subject from the electrode file.
+        if not experiment_config.task_config.data_params.subject_ids:
+            experiment_config.task_config.data_params.subject_ids = list(
+                subject_electrode_map.keys()
+            )
         experiment_config.task_config.data_params.per_subject_electrodes = (
             subject_electrode_map
         )

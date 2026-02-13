@@ -5,8 +5,6 @@ task_config:
     data_root: data
     word_column: word
     electrode_file_path: processed_data/all_subject_sig.csv
-    subject_ids:
-    - 9
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
