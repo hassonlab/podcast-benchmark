@@ -14,7 +14,7 @@ import pandas as pd
 from pathlib import Path
 from unittest.mock import Mock
 
-from core.config import ExperimentConfig, dict_to_config
+from core.config import ExperimentConfig, MultiTaskConfig, TaskConfig, DataParams, dict_to_config
 from core.registry import task_registry
 from utils.module_loader_utils import import_all_from_package
 
@@ -119,7 +119,13 @@ class TestTrainingMatrixConfigs:
         assert len(invalid_configs) == 0, f"Invalid YAML configs: {invalid_configs}"
 
     def test_all_configs_load_as_experiment_config(self, training_matrix, configs_dir):
-        """Test that all config files can be converted to ExperimentConfig."""
+        """Test that all config files can be converted to ExperimentConfig.
+
+        Follows the same loading path as config_utils.load_experiment_config:
+        - Pops task_config before converting to ExperimentConfig
+        - Uses the task registry to get the correct task-specific config class
+        - Handles MultiTaskConfig files (those with 'tasks' key)
+        """
         config_paths = get_all_config_paths(training_matrix, configs_dir)
 
         failed_conversions = []
@@ -127,8 +133,20 @@ class TestTrainingMatrixConfigs:
             try:
                 with open(config_path, "r") as f:
                     config_dict = yaml.safe_load(f)
-                experiment_config = dict_to_config(config_dict, ExperimentConfig)
-                assert isinstance(experiment_config, ExperimentConfig)
+
+                if "tasks" in config_dict:
+                    # MultiTaskConfig: validate each task separately
+                    for task_dict in config_dict["tasks"]:
+                        task_config_dict = task_dict.pop("task_config", {})
+                        exp_config = dict_to_config(task_dict, ExperimentConfig)
+                        assert isinstance(exp_config, ExperimentConfig)
+                        self._validate_task_config_dict(task_config_dict)
+                else:
+                    # Single ExperimentConfig: pop task_config first (like the real loader)
+                    task_config_dict = config_dict.pop("task_config", {})
+                    experiment_config = dict_to_config(config_dict, ExperimentConfig)
+                    assert isinstance(experiment_config, ExperimentConfig)
+                    self._validate_task_config_dict(task_config_dict)
             except Exception as e:
                 failed_conversions.append(
                     (model_name, task_name, str(config_path), str(e))
@@ -137,6 +155,26 @@ class TestTrainingMatrixConfigs:
         assert (
             len(failed_conversions) == 0
         ), f"Failed config conversions: {failed_conversions}"
+
+    @staticmethod
+    def _validate_task_config_dict(task_config_dict):
+        """Validate a task_config dict using the task registry for the correct config class."""
+        if not task_config_dict:
+            return
+        task_name = task_config_dict["task_name"]
+        task_info = task_registry[task_name]
+
+        # Validate data_params
+        if "data_params" in task_config_dict:
+            data_params = dict_to_config(task_config_dict["data_params"], DataParams)
+            assert isinstance(data_params, DataParams)
+
+        # Validate task_specific_config with the correct class from the registry
+        config_class = task_info["config_type"]
+        task_specific_config = dict_to_config(
+            task_config_dict.get("task_specific_config", {}), config_class
+        )
+        assert isinstance(task_specific_config, config_class)
 
 
 class TestTrainingMatrixTaskDataGetters:

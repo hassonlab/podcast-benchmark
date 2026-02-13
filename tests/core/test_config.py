@@ -132,19 +132,16 @@ class TestDictToConfig:
         assert config.model_spec.constructor_name == ""
         assert config.training_params.batch_size == 32
 
-    def test_invalid_field_ignored(self):
-        """Test that invalid fields in dictionary are ignored."""
+    def test_invalid_field_raises_error(self):
+        """Test that invalid fields in dictionary raise ValueError."""
         data_dict = {
             "window_width": 0.5,
             "invalid_field": "should_be_ignored",
             "another_invalid": 42,
         }
 
-        params = dict_to_config(data_dict, DataParams)
-
-        assert params.window_width == 0.5
-        assert not hasattr(params, "invalid_field")
-        assert not hasattr(params, "another_invalid")
+        with pytest.raises(ValueError, match="Unknown keys found in config"):
+            dict_to_config(data_dict, DataParams)
 
 
 class TestYAMLIntegration:

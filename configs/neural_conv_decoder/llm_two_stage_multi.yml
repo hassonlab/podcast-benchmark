@@ -24,7 +24,6 @@ tasks:
         prepend_space: true
         model_name: gpt2
         cache_dir: ./model_cache
-        gpt2_embedding_dim: 768
 
     training_params:
       batch_size: 32
