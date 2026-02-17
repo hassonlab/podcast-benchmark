@@ -1,7 +1,6 @@
 config_setter_name: neural_conv
-
 task_config:
-  task_name: word_embedding_decoding_task
+  task_name: whisper_embedding_decoding_task
   data_params:
     data_root: data
     word_column: word
@@ -11,19 +10,7 @@ task_config:
     preprocessor_params:
       num_average_samples: 32
   task_specific_config:
-    embedding_type: glove
-    embedding_layer: 24
-    # embedding_pca_dim: 50
-
-model_spec:
-  constructor_name: ensemble_pitom_model
-  params:
-    conv_filters: 128
-    dropout: 0.2
-    num_models: 10
-    embedding_dim: 50
-  sub_models: {}
-
+    embedding_pca_dim: 50
 training_params:
   batch_size: 32
   epochs: 100
@@ -34,8 +21,19 @@ training_params:
   min_lag: -1000
   max_lag: 1000
   lag_step_size: 200
+  losses:
+    - mse
   metrics:
-    - nll_embedding
     - cosine_sim
     - pairwise_accuracy
-trial_name: ensemble_model_10_gpt2
+  early_stopping_metric: cosine_sim
+  smaller_is_better: false
+trial_name: neural_conv_whisper_embedding
+model_spec:
+  constructor_name: ensemble_pitom_model
+  params:
+    conv_filters: 128
+    dropout: 0.2
+    num_models: 10
+    embedding_dim: 50
+  sub_models: {}

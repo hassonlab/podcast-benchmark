@@ -22,6 +22,10 @@ training_params:
   min_lag: -1000
   max_lag: 1000
   lag_step_size: 200
+  metrics:
+    - nll_embedding
+    - cosine_sim
+    - pairwise_accuracy
 trial_name: ensemble_model_10_glove
 model_spec:
   constructor_name: ensemble_pitom_model
