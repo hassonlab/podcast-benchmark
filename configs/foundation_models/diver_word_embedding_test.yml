@@ -35,6 +35,7 @@ training_params:
     - 1.0
   metrics:
     - cosine_sim
+    - pairwise_accuracy
   early_stopping_metric: cosine_sim
   smaller_is_better: false
   min_lag: 0

@@ -25,6 +25,7 @@ download_file() {
 # Parse command line arguments first
 INSTALL_GPU=false
 INSTALL_DEV=false
+FORCE_VENV=false
 ENV_NAME="decoding_env"
 
 while [[ $# -gt 0 ]]; do
@@ -37,14 +38,19 @@ while [[ $# -gt 0 ]]; do
             INSTALL_DEV=true
             shift
             ;;
+        --venv)
+            FORCE_VENV=true
+            shift
+            ;;
         --env-name)
             ENV_NAME="$2"
             shift 2
             ;;
         --help)
-            echo "Usage: $0 [--gpu] [--dev] [--env-name NAME]"
+            echo "Usage: $0 [--gpu] [--dev] [--venv] [--env-name NAME]"
             echo "  --gpu       Install GPU dependencies (CUDA packages)"
             echo "  --dev       Install development dependencies (testing)"
+            echo "  --venv      Force using python venv instead of conda"
             echo "  --env-name  Specify virtual environment name (default: decoding_env)"
             exit 0
             ;;
@@ -167,8 +173,8 @@ init_conda() {
 if [ ! -d "$ENV_NAME" ]; then
     echo "Creating virtual environment: $ENV_NAME"
     
-    # Try conda first for better package compatibility (especially scientific packages)
-    if init_conda; then
+    # Try conda first for better package compatibility (unless --venv is set)
+    if [ "$FORCE_VENV" = false ] && init_conda; then
         echo "Using conda for virtual environment creation..."
         # Remove existing venv directory if it exists (cleanup)
         if [ -d "$ENV_NAME" ]; then
@@ -191,7 +197,7 @@ if [ ! -d "$ENV_NAME" ]; then
 else
     echo "Virtual environment $ENV_NAME already exists, using existing one."
     # Try to activate conda env first, fallback to venv
-    if init_conda; then
+    if [ "$FORCE_VENV" = false ] && init_conda; then
         # Check if conda env exists and activate it
         if conda env list | grep -q "^$ENV_NAME "; then
             echo "Activating conda environment: $ENV_NAME"

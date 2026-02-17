@@ -66,6 +66,36 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ---
 
+## Whisper Embedding Decoding
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_whisper_embedding.yml`
+
+**Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-13-29-51/lag_performance.csv`
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **Pairwise Accuracy:** 0.7893
+
+---
+
+## Multimodal Score
+
+The multimodal score combines word embedding decoding (GPT-2) and whisper embedding decoding using the harmonic mean of their pairwise accuracies. Both metrics have chance level 0.5 and range [0, 1], so the harmonic mean is well-calibrated. Computed using `scripts/multimodal_score.py`.
+
+![Multimodal Score](baseline_plots/multimodal_score.png)
+
+**Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2026-02-17-14-01-23/multimodal_score.csv`
+
+**Best Performance:**
+
+- **Lag:** 400ms
+- **Word Pairwise Accuracy:** 0.5930
+- **Whisper Pairwise Accuracy:** 0.7893
+- **Multimodal Score:** 0.6772
+
+---
+
 ## GPT Surprisal (Regression)
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise.yml`

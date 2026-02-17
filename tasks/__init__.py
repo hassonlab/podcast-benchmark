@@ -9,6 +9,7 @@ from tasks.volume_level import (
     volume_level_config_setter,
 )
 from tasks.word_embedding import word_embedding_decoding_task
+from tasks.whisper_embedding import whisper_embedding_decoding_task
 
 __all__ = [
     "content_noncontent_task",
@@ -18,5 +19,6 @@ __all__ = [
     "sentence_onset_task",
     "volume_level_decoding_task",
     "volume_level_config_setter",
+    "whisper_embedding_decoding_task",
     "word_embedding_decoding_task",
 ]

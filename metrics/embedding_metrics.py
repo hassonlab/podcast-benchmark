@@ -45,6 +45,29 @@ def compute_nll_contextual(predicted_embeddings, actual_embeddings):
     return F.cross_entropy(logits, targets)
 
 
+@register_metric("pairwise_accuracy")
+def pairwise_accuracy(pred: torch.Tensor, true: torch.Tensor) -> float:
+    n = pred.shape[0]
+    # Precompute all cosine similarities: pred_i vs true_j
+    pred_norm = F.normalize(pred, dim=-1)
+    true_norm = F.normalize(true, dim=-1)
+    sim_matrix = pred_norm @ true_norm.T  # (n, n)
+
+    # For each pair (i, j), check:
+    # sim(pred_i, true_i) + sim(pred_j, true_j) > sim(pred_i, true_j) + sim(pred_j, true_i)
+    correct_sims = sim_matrix.diagonal()  # (n,)
+    # Broadcasting: correct_i + correct_j vs cross_ij + cross_ji
+    correct_sum = correct_sims.unsqueeze(0) + correct_sims.unsqueeze(1)  # (n, n)
+    cross_sum = sim_matrix + sim_matrix.T  # (n, n)
+
+    # Only count upper triangle (unique pairs, exclude diagonal)
+    mask = torch.triu(
+        torch.ones(n, n, device=pred.device, dtype=torch.bool), diagonal=1
+    )
+    wins = ((correct_sum - cross_sum)[mask] > 0).float()
+    return wins.mean().item()
+
+
 @register_metric("similarity_entropy")
 def similarity_entropy(predicted_embeddings, actual_embeddings):
     logits = 1 - compute_cosine_distances(predicted_embeddings, actual_embeddings)
@@ -94,7 +117,9 @@ def compute_word_embedding_task_metrics(
     X_test, Y_test = X_test.to(device), Y_test.to(device)
 
     # Get predictions
-    predictions = get_predictions(X_test, model, device, batch_size, extra_inputs=extra_inputs, **kwargs)
+    predictions = get_predictions(
+        X_test, model, device, batch_size, extra_inputs=extra_inputs, **kwargs
+    )
 
     # Compute cosine distances
     distances = compute_cosine_distances(predictions, Y_test)
@@ -104,7 +129,9 @@ def compute_word_embedding_task_metrics(
     for k_val in top_k_thresholds:
         # Labels are in order of test set since we are hoping the ith example is predicted as the ith class.
         results[f"test_occurence_top_{k_val}"] = top_k_accuracy(
-            occurence_scores, torch.arange(occurence_scores.shape[0], device=device), k_val
+            occurence_scores,
+            torch.arange(occurence_scores.shape[0], device=device),
+            k_val,
         )
     results["test_occurence_perplexity"] = perplexity(
         occurence_scores, torch.arange(occurence_scores.shape[0], device=device)

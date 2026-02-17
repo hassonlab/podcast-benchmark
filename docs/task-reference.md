@@ -15,6 +15,7 @@ For performance benchmarks on each task, see [Baseline Results](baseline-results
 ## Task List
 
 - [word_embedding_decoding_task](#word_embedding_decoding_task)
+- [whisper_embedding_decoding_task](#whisper_embedding_decoding_task)
 - [sentence_onset_task](#sentence_onset_task)
 - [content_noncontent_task](#content_noncontent_task)
 - [pos_task](#pos_task)
@@ -84,6 +85,46 @@ task_config:
     embedding_type: gpt-2xl
     embedding_layer: 24
     embedding_pca_dim: 50  # Optional: reduce from 1600 to 50 dims
+```
+
+---
+
+## whisper_embedding_decoding_task
+
+**File**: `tasks/whisper_embedding.py`
+
+**Description**: Decode Whisper speech model embeddings from neural data. Uses word-level embeddings extracted from Whisper Medium, with optional PCA dimensionality reduction.
+
+**Task Type**: Regression (high-dimensional continuous targets)
+
+**Output**:
+- `start`: Word start time in seconds
+- `target`: Whisper embedding vector (list or array)
+
+### Configuration Parameters
+
+Configured via `WhisperEmbeddingConfig` in `task_specific_config`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `embedding_pca_dim` | int | `None` | Optional: reduce dimensionality with PCA |
+
+### Data Requirements
+
+- Transcript at `{data_root}/stimuli/whisper-medium/transcript.tsv`
+- Embeddings at `{data_root}/stimuli/whisper-medium/features.hdf5` (HDF5 key: `vectors`)
+
+### Example Config
+
+```yaml
+task_config:
+  task_name: whisper_embedding_decoding_task
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    embedding_pca_dim: 50  # Optional: reduce dimensionality
 ```
 
 ---
