@@ -72,6 +72,12 @@ TASK_METRICS = {
         'secondary': None,
         'higher_is_better': True,
         'ylabel': 'Test Correlation'
+    },
+    'whisper_embedding': {
+        'primary': 'test_pairwise_accuracy_mean',
+        'secondary': None,
+        'higher_is_better': True,
+        'ylabel': 'Test Pairwise Accuracy'
     }
 }
 
@@ -83,7 +89,8 @@ TASK_TYPE_NAMES = {
     'gpt_surprise_multiclass': 'GPT Surprisal (Multiclass)',
     'pos_task': 'Part of Speech',
     'sentence_onset': 'Sentence Onset Detection',
-    'volume_level': 'Volume Level Prediction'
+    'volume_level': 'Volume Level Prediction',
+    'whisper_embedding': 'Whisper Embedding Decoding'
 }
 
 # Define human-readable names for metrics
@@ -92,7 +99,8 @@ METRIC_DISPLAY_NAMES = {
     'test_roc_auc_multiclass_mean': 'ROC-AUC (Multiclass)',
     'test_word_avg_auc_roc_mean': 'AUC-ROC',
     'test_word_top_5_mean': 'Top-5 Accuracy',
-    'test_corr_mean': 'Correlation'
+    'test_corr_mean': 'Correlation',
+    'test_pairwise_accuracy_mean': 'Pairwise Accuracy'
 }
 
 
@@ -115,6 +123,8 @@ def identify_task_type(task_name, config):
         return 'sentence_onset'
     elif 'volume_level' in task_name:
         return 'volume_level'
+    elif 'whisper_embedding' in task_name or 'whisper_embedding' in config_task_name:
+        return 'whisper_embedding'
     else:
         return None
 
@@ -192,7 +202,7 @@ def process_baseline_result(result_dir):
     with open(config_file, 'r') as f:
         config = yaml.load(f, Loader=SafeLoaderIgnoreUnknown)
 
-    task_name = result_dir.name.rsplit('_2025', 1)[0]  # Remove timestamp
+    task_name = re.sub(r'_\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$', '', result_dir.name)  # Remove timestamp
     trial_name = config.get('trial_name', task_name)
     task_type = identify_task_type(task_name, config)
 

@@ -72,6 +72,8 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-13-29-51/lag_performance.csv`
 
+![Whisper Embedding Decoding](baseline_plots/neural_conv_whisper_embedding_2026-02-17-13-29-51_lag_performance.png)
+
 **Best Performance:**
 
 - **Lag:** 400ms
