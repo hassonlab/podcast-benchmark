@@ -47,25 +47,21 @@ def compute_nll_contextual(predicted_embeddings, actual_embeddings):
 
 @register_metric("pairwise_accuracy")
 def pairwise_accuracy(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """All-pairs 2AFC accuracy. For each pair (i, j), check whether pred_i
+    is closer to true_i than to true_j (by cosine similarity).
+    Chance level is 0.5. Collapse-proof: a constant prediction yields 0.5."""
     n = pred.shape[0]
-    # Precompute all cosine similarities: pred_i vs true_j
     pred_norm = F.normalize(pred, dim=-1)
     true_norm = F.normalize(true, dim=-1)
     sim_matrix = pred_norm @ true_norm.T  # (n, n)
 
-    # For each pair (i, j), check:
-    # sim(pred_i, true_i) + sim(pred_j, true_j) > sim(pred_i, true_j) + sim(pred_j, true_i)
-    correct_sims = sim_matrix.diagonal()  # (n,)
-    # Broadcasting: correct_i + correct_j vs cross_ij + cross_ji
-    correct_sum = correct_sims.unsqueeze(0) + correct_sims.unsqueeze(1)  # (n, n)
-    cross_sum = sim_matrix + sim_matrix.T  # (n, n)
+    correct_sims = sim_matrix.diagonal().unsqueeze(1)  # (n, 1)
+    # For each pair (i, j): is sim(pred_i, true_i) > sim(pred_i, true_j)?
+    wins = correct_sims > sim_matrix  # (n, n)
 
-    # Only count upper triangle (unique pairs, exclude diagonal)
-    mask = torch.triu(
-        torch.ones(n, n, device=pred.device, dtype=torch.bool), diagonal=1
-    )
-    wins = ((correct_sum - cross_sum)[mask] > 0).float()
-    return wins.mean().item()
+    # Exclude diagonal (i == j)
+    mask = ~torch.eye(n, dtype=torch.bool, device=pred.device)
+    return wins[mask].float().mean().item()
 
 
 @register_metric("similarity_entropy")
