@@ -57,12 +57,12 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml`
 
-**Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2025-12-19-00-17-43/lag_performance.csv`
+**Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2026-02-17-19-54-55/lag_performance.csv`
 
 **Best Performance:**
 
 - **Lag:** 400ms
-- **AUC-ROC:** 0.6057
+- **AUC-ROC:** 0.6050
 
 ---
 
@@ -70,14 +70,14 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 **Config:** `configs/neural_conv_decoder/neural_conv_decoder_whisper_embedding.yml`
 
-**Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-13-29-51/lag_performance.csv`
+**Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-19-25-13/lag_performance.csv`
 
 ![Whisper Embedding Decoding](baseline_plots/neural_conv_whisper_embedding_2026-02-17-13-29-51_lag_performance.png)
 
 **Best Performance:**
 
 - **Lag:** 400ms
-- **Pairwise Accuracy:** 0.7893
+- **Pairwise Accuracy:** 0.7074
 
 ---
 
@@ -92,9 +92,9 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 **Best Performance:**
 
 - **Lag:** 400ms
-- **Word Pairwise Accuracy:** 0.5930
-- **Whisper Pairwise Accuracy:** 0.7893
-- **Multimodal Score:** 0.6772
+- **Word Pairwise Accuracy:** 0.5116
+- **Whisper Pairwise Accuracy:** 0.7074
+- **Multimodal Score:** 0.5938
 
 ---
 
