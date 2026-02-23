@@ -28,5 +28,9 @@ authors:
     family-names: Peeper
     email: gidonpeeper@gmail.com
     affiliation: Princeton University
+  - given-names: Jinmo
+    family-names: Han
+    email: mukss0909056@snu.ac.kr
+    affiliation: Seoul National University
 repository-code: 'https://www.github.com/hassonlab/podcast-benchmark'
 license: MIT
