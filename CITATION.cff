@@ -32,5 +32,9 @@ authors:
     family-names: Han
     email: mukss0909056@snu.ac.kr
     affiliation: Seoul National University
+  - given-names: Uri
+    family-names: Hasson
+    email: hasson@princeton.edu
+    affiliation: Princeton University
 repository-code: 'https://www.github.com/hassonlab/podcast-benchmark'
 license: MIT
