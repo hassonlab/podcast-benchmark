@@ -17,6 +17,7 @@ For performance benchmarks on each task, see [Baseline Results](baseline-results
 - [word_embedding_decoding_task](#word_embedding_decoding_task)
 - [whisper_embedding_decoding_task](#whisper_embedding_decoding_task)
 - [sentence_onset_task](#sentence_onset_task)
+- [iu_boundary_task](#iu_boundary_task)
 - [content_noncontent_task](#content_noncontent_task)
 - [pos_task](#pos_task)
 - [gpt_surprise_task](#gpt_surprise_task)
@@ -295,6 +296,53 @@ task_config:
     sentence_csv_path: processed_data/all_sentences_podcast.csv
     negatives_per_positive: 5
     negative_margin_s: 0.75
+```
+
+---
+
+## iu_boundary_task
+
+**File**: `tasks/iu_boundaries.py`
+
+**Description**: Binary classification for detecting intonation unit (IU) boundaries — the prosodic boundaries that mark where a speaker groups speech into coherent chunks of information. IU boundaries are identified automatically from the podcast audio using the [PSST model](https://github.com/Nathan-Roll1/PSST) (a fine-tuned Whisper model), with boundary times inferred by aligning the PSST word sequence to the reference word-level transcript.
+
+**Task Type**: Binary classification
+
+**Output**:
+- `start`: Time in seconds (midpoint of the gap between the last word of one IU and the first word of the next)
+- `target`: `1.0` at an IU boundary, `0.0` for negative examples sampled from IU interiors
+
+### Negative Sampling
+
+Negatives are drawn uniformly at random from within each IU segment (the interval between two consecutive boundaries), subject to a margin on both sides so that the neural window does not overlap with any boundary. Segments shorter than `2 × negative_margin_s + window_width` are skipped.
+
+### Configuration Parameters
+
+Configured via `IUBoundaryConfig`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `iu_boundaries_csv_path` | string | `"processed_data/iu_boundaries.csv"` | Path to IU boundary CSV with a `time` column |
+| `negatives_per_positive` | int | `1` | Number of negative samples per IU segment |
+| `negative_margin_s` | float | `1.0` | Minimum seconds between a negative sample and either adjacent boundary |
+
+### Data Requirements
+
+- `processed_data/iu_boundaries.csv`: produced by `transcribe_prosody.py` (PSST + reference transcript alignment). Columns: `time`, `prev_word`, `next_word`.
+
+### Example Config
+
+```yaml
+task_config:
+  task_name: iu_boundary_task
+  data_params:
+    data_root: data
+    subject_ids: [1, 2, 3]
+    window_width: 0.625
+  task_specific_config:
+    iu_boundaries_csv_path: processed_data/iu_boundaries.csv
+    negatives_per_positive: 1
+    negative_margin_s: 0.5
 ```
 
 ---
