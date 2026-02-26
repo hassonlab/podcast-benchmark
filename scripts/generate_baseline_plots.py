@@ -61,6 +61,12 @@ TASK_METRICS = {
         'higher_is_better': True,
         'ylabel': 'Test ROC AUC (Multiclass)'
     },
+    'iu_boundary': {
+        'primary': 'test_roc_auc_mean',
+        'secondary': None,
+        'higher_is_better': True,
+        'ylabel': 'Test ROC AUC'
+    },
     'sentence_onset': {
         'primary': 'test_roc_auc_mean',
         'secondary': None,
@@ -88,6 +94,7 @@ TASK_TYPE_NAMES = {
     'gpt_surprise': 'GPT Surprisal (Regression)',
     'gpt_surprise_multiclass': 'GPT Surprisal (Multiclass)',
     'pos_task': 'Part of Speech',
+    'iu_boundary': 'Intonation Unit Boundary Detection',
     'sentence_onset': 'Sentence Onset Detection',
     'volume_level': 'Volume Level Prediction',
     'whisper_embedding': 'Whisper Embedding Decoding'
@@ -119,6 +126,8 @@ def identify_task_type(task_name, config):
         return 'gpt_surprise'
     elif 'pos_task' in task_name or 'pos' in config_task_name:
         return 'pos_task'
+    elif 'iu_boundary' in task_name or 'iu_boundary' in config_task_name:
+        return 'iu_boundary'
     elif 'sentence_onset' in task_name:
         return 'sentence_onset'
     elif 'volume_level' in task_name:

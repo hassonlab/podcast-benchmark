@@ -158,6 +158,21 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ---
 
+## Intonation Unit Boundary Detection
+
+**Config:** `configs/neural_conv_decoder/neural_conv_decoder_iu_boundaries.yml`
+
+**Detailed Results:** `baseline-results/iu_boundary_lr_2026-02-26-09-46-13/lag_performance.csv`
+
+![Intonation Unit Boundary Detection](baseline_plots/iu_boundary_lr_2026-02-26-09-46-13_lag_performance.png)
+
+**Best Performance:**
+
+- **Lag:** -200ms
+- **ROC-AUC:** 0.5151
+
+---
+
 ## Volume Level Prediction
 
 **Config:** `configs/time_pooling_model/simple_model.yml`
