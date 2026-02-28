@@ -1,0 +1,56 @@
+# neural_conv_decoder with VAE preprocessing
+# 1. Train the VAE first:
+#    python shared_space/scripts/train_vae.py --config shared_space/configs/podcast_vae.yml
+# 2. Then run evaluation:
+#    python main.py --config configs/neural_conv_decoder/neural_conv_decoder_vae_gpt2.yml
+
+# Uses neural_conv_vae config setter (extends neural_conv + injects patient_electrode_indices)
+config_setter_name: neural_conv_vae
+
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    electrode_file_path: processed_data/all_subject_sig.csv
+    window_width: 0.625
+    # Two-step preprocessing:
+    #   1. Bin into 10 windows of 32 samples each (same as baseline)
+    #   2. Apply VAE reconstruction (shared_space registers vae_reconstruct)
+    preprocessing_fn_name:
+      - window_average_neural_data
+      - vae_reconstruct
+    preprocessor_params:
+      - num_average_samples: 32
+      - vae_checkpoint_path: shared_space/checkpoints/vae_podcast.pt
+        # patient_electrode_indices is injected here automatically by neural_conv_vae config setter
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
+
+model_spec:
+  constructor_name: ensemble_pitom_model
+  params:
+    conv_filters: 128
+    dropout: 0.2
+    num_models: 10
+    embedding_dim: 50
+  sub_models: {}
+
+training_params:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -500
+  max_lag: 300
+  lag_step_size: 700
+  metrics:
+    - nll_embedding
+    - cosine_sim
+    - pairwise_accuracy
+
+trial_name: ensemble_model_10_gpt2_vae
