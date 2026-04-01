@@ -12,6 +12,47 @@ import warnings
 from core.registry import register_metric
 
 
+def _binary_probabilities_from_logits(pred: torch.Tensor) -> torch.Tensor:
+    """Convert binary logits to probabilities for logits-aware metrics."""
+    if pred.ndim > 1:
+        if pred.shape[-1] == 1:
+            pred = pred.squeeze(-1)
+        elif pred.shape[-1] == 2:
+            return torch.softmax(pred, dim=-1)[..., 1]
+        else:
+            raise ValueError(
+                f"Binary logits metric received unsupported prediction shape {tuple(pred.shape)}"
+            )
+    return torch.sigmoid(pred)
+
+
+def _numpy_binary_predictions_from_logits(pred: torch.Tensor) -> np.ndarray:
+    probs = _binary_probabilities_from_logits(pred)
+    return probs.detach().cpu().numpy()
+
+
+def _flatten_valid_llm_tokens(
+    pred: torch.Tensor, true: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Flatten sequence logits/targets and drop ignore_index tokens."""
+    if pred.ndim != 3:
+        raise ValueError(
+            f"LLM metric expected prediction shape [batch, seq_len, vocab], got {tuple(pred.shape)}"
+        )
+    if true.ndim != 2:
+        raise ValueError(
+            f"LLM metric expected target shape [batch, seq_len], got {tuple(true.shape)}"
+        )
+
+    batch_size, seq_len, vocab_size = pred.shape
+    pred_flat = pred.reshape(batch_size * seq_len, vocab_size)
+    true_flat = true.reshape(batch_size * seq_len)
+    valid_mask = true_flat != -100
+    if not valid_mask.any():
+        return pred_flat[:0], true_flat[:0]
+    return pred_flat[valid_mask], true_flat[valid_mask]
+
+
 @register_metric("bce")
 def bce_metric(predicted: torch.Tensor, groundtruth: torch.Tensor) -> float:
     """Weighted BCE loss for binary classification using PyTorch's built-in functionality.
@@ -266,6 +307,22 @@ def f1_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         # print(f"F1 Error: {e}")
         return 0.0
 
+
+@register_metric("f1_logits")
+def f1_binary_logits(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Binary F1 for raw logits."""
+    if isinstance(true, torch.Tensor):
+        true = true.detach().cpu().numpy()
+
+    y_pred = (_numpy_binary_predictions_from_logits(pred) >= 0.5).astype(int)
+    y_true = np.array(true).squeeze().astype(int)
+
+    try:
+        return float(f1_score(y_true, y_pred, zero_division=0, average="weighted"))
+    except Exception:
+        return 0.0
+
+
 @register_metric("acc")
 def accuracy_metric(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
@@ -325,6 +382,28 @@ def accuracy_metric(pred: torch.Tensor, true: torch.Tensor) -> float:
         return 0.0
 
 
+@register_metric("acc_logits")
+def accuracy_metric_logits(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Accuracy for raw binary logits."""
+    if isinstance(true, torch.Tensor):
+        true = true.detach().cpu()
+
+    pred_np = _numpy_binary_predictions_from_logits(pred)
+    true_np = true.numpy() if isinstance(true, torch.Tensor) else np.array(true)
+
+    y_pred = (pred_np >= 0.5).astype(int)
+    y_true = np.array(true_np).squeeze().astype(int)
+
+    try:
+        correct = (y_pred == y_true).sum()
+        total = len(y_true)
+        if total == 0:
+            return 0.0
+        return float(correct / total)
+    except Exception:
+        return 0.0
+
+
 @register_metric("sensitivity")
 def sensitivity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
@@ -364,6 +443,25 @@ def sensitivity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
 
         sensitivity = tp / (tp + fn)
         return float(sensitivity)
+    except Exception:
+        return 0.0
+
+
+@register_metric("sensitivity_logits")
+def sensitivity_binary_logits(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Sensitivity for raw binary logits."""
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    y_pred = (_numpy_binary_predictions_from_logits(pred) >= 0.5).astype(int)
+
+    try:
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fn = ((y_pred == 0) & (y_true == 1)).sum()
+        if tp + fn == 0:
+            return 0.0
+        return float(tp / (tp + fn))
     except Exception:
         return 0.0
 
@@ -411,6 +509,25 @@ def precision_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         return 0.0
 
 
+@register_metric("precision_logits")
+def precision_binary_logits(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Precision for raw binary logits."""
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    y_pred = (_numpy_binary_predictions_from_logits(pred) >= 0.5).astype(int)
+
+    try:
+        tp = ((y_pred == 1) & (y_true == 1)).sum()
+        fp = ((y_pred == 1) & (y_true == 0)).sum()
+        if tp + fp == 0:
+            return 0.0
+        return float(tp / (tp + fp))
+    except Exception:
+        return 0.0
+
+
 @register_metric("specificity")
 def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
@@ -454,6 +571,25 @@ def specificity_binary(pred: torch.Tensor, true: torch.Tensor) -> float:
         return 0.0
 
 
+@register_metric("specificity_logits")
+def specificity_binary_logits(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Specificity for raw binary logits."""
+    if true.ndim > 1:
+        true = true.squeeze(-1)
+
+    y_true = true.detach().cpu().numpy().astype(int)
+    y_pred = (_numpy_binary_predictions_from_logits(pred) >= 0.5).astype(int)
+
+    try:
+        tn = ((y_pred == 0) & (y_true == 0)).sum()
+        fp = ((y_pred == 1) & (y_true == 0)).sum()
+        if tn + fp == 0:
+            return 0.0
+        return float(tn / (tn + fp))
+    except Exception:
+        return 0.0
+
+
 @register_metric("confusion_matrix")
 def conf_matrix(
     predictions: np.ndarray, ground_truth: np.ndarray, num_classes=None
@@ -483,6 +619,27 @@ def conf_matrix(
 
     # if num_classes is None:
     #     num_classes = max(ground_truth.max(), pred_labels.max()) + 1
+
+    return confusion_matrix(ground_truth, pred_labels, labels=np.arange(num_classes))
+
+
+@register_metric("confusion_matrix_logits")
+def conf_matrix_logits(
+    predictions: np.ndarray, ground_truth: np.ndarray, num_classes=None
+) -> np.ndarray:
+    """Confusion matrix for raw binary logits."""
+    if isinstance(predictions, torch.Tensor):
+        pred_labels = (_numpy_binary_predictions_from_logits(predictions) >= 0.5).astype(int)
+    else:
+        pred_arr = np.array(predictions)
+        if pred_arr.ndim > 1 and pred_arr.shape[-1] == 2:
+            pred_arr = torch.softmax(torch.tensor(pred_arr), dim=-1)[..., 1].numpy()
+        else:
+            pred_arr = 1 / (1 + np.exp(-pred_arr))
+        pred_labels = (pred_arr >= 0.5).astype(int)
+
+    if isinstance(ground_truth, torch.Tensor):
+        ground_truth = ground_truth.detach().cpu().numpy()
 
     return confusion_matrix(ground_truth, pred_labels, labels=np.arange(num_classes))
 
@@ -521,3 +678,48 @@ def perplexity(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
 
     # Perplexity = exp(cross_entropy)
     return torch.exp(cross_entropy).item()
+
+
+@register_metric("acc_llm")
+def accuracy_llm(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Masked token accuracy for sequence logits used in llm_decoding."""
+    pred_valid, true_valid = _flatten_valid_llm_tokens(pred, true)
+    if pred_valid.shape[0] == 0:
+        return 0.0
+    pred_labels = pred_valid.argmax(dim=-1)
+    return float((pred_labels == true_valid.long()).float().mean().item())
+
+
+@register_metric("perplexity_llm")
+def perplexity_llm(pred: torch.Tensor, true: torch.Tensor) -> float:
+    """Per-token perplexity for llm_decoding with ignore_index masking."""
+    if pred.ndim != 3 or true.ndim != 2:
+        raise ValueError(
+            "perplexity_llm expects prediction shape [batch, seq_len, vocab] and target shape [batch, seq_len]"
+        )
+    return float(perplexity(pred, true))
+
+
+def _top_k_acc_llm(pred: torch.Tensor, true: torch.Tensor, k: int) -> float:
+    pred_valid, true_valid = _flatten_valid_llm_tokens(pred, true)
+    if pred_valid.shape[0] == 0:
+        return 0.0
+    top_k = min(k, pred_valid.shape[-1])
+    top_k_indices = torch.topk(pred_valid, k=top_k, dim=-1).indices
+    correct = (top_k_indices == true_valid.long().unsqueeze(-1)).any(dim=-1)
+    return float(correct.float().mean().item())
+
+
+@register_metric("top_1_acc_llm")
+def top_1_acc_llm(pred: torch.Tensor, true: torch.Tensor) -> float:
+    return _top_k_acc_llm(pred, true, 1)
+
+
+@register_metric("top_5_acc_llm")
+def top_5_acc_llm(pred: torch.Tensor, true: torch.Tensor) -> float:
+    return _top_k_acc_llm(pred, true, 5)
+
+
+@register_metric("top_10_acc_llm")
+def top_10_acc_llm(pred: torch.Tensor, true: torch.Tensor) -> float:
+    return _top_k_acc_llm(pred, true, 10)

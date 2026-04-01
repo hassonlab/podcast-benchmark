@@ -473,10 +473,10 @@ This is useful when you need to:
 The `training_matrix.yaml` file enables running multiple experiments at once. Define model/task/config combinations:
 
 ```yaml
-neural_conv_decoder:
+baselines/neural_conv_decoder:
   word_embedding_decoding_task:
-    - neural_conv_decoder_base.yml
-    - neural_conv_decoder_binary.yml
+    - gpt2.yml
+    - glove.yml
 ```
 
 **Usage**:
@@ -507,11 +507,11 @@ Pre-configured foundation model experiments are available in `configs/foundation
 
 | Config | Model | Task |
 |--------|-------|------|
-| `diver_word_embedding.yml` | DIVER | Word embedding decoding |
-| `popt_word_embedding.yml` | POPT | Word embedding decoding |
-| `popt_word_embedding_with_lip.yml` | POPT | Word embedding with lip data |
+| `brainbert/word_embedding/supersubject.yml` | BrainBERT | Word embedding decoding |
+| `popt/word_embedding/supersubject.yml` | POPT | Word embedding decoding |
+| `diver/word_embedding/supersubject.yml` | DIVER | Word embedding decoding |
 
-These configs demonstrate the foundation model integration pattern with feature extraction and finetuning.
+Legacy flat configs now live under `configs/foundation_models/legacy/`.
 
 ---
 

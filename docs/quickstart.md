@@ -47,7 +47,7 @@ make foundation-model
 Evaluate the POPT foundation model on word embedding decoding:
 
 ```bash
-python main.py --config configs/foundation_models/popt_word_embedding.yml
+python main.py --config configs/foundation_models/popt/word_embedding/supersubject.yml
 ```
 
 ## Results
@@ -64,10 +64,12 @@ See [Baseline Results](baseline-results.md) for performance benchmarks across al
 To modify data, behavior, or hyperparameters:
 
 Edit the relevant configuration file in `configs/`:
-- `configs/neural_conv_decoder/` - Neural convolutional decoder settings
-- `configs/example_foundation_model/` - Foundation model decoder settings
-- `configs/foundation_models/` - POPT and other foundation model configs
-- `configs/controls/` - Control experiments (e.g., no brain data baselines)
+- `configs/baselines/neural_conv_decoder/` - Neural convolutional decoder baselines
+- `configs/baselines/time_pooling_model/` - Time-pooling regression baselines
+- `configs/examples/example_foundation_model/` - Example foundation-model configs
+- `configs/foundation_models/` - Production foundation-model configs
+- `configs/controls/llm_decoding/` - Control runs for LLM decoding
+- `configs/hpo/` - Hyperparameter search grids
 
 Model implementations can be found in the `models/` directory.
 

@@ -14,7 +14,7 @@ CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
 # Specify model and a single config to use.
 # Usage:
-#   make train MODEL_NAME=neural_conv_decoder CONFIG=neural_conv_decoder_base.yml
+#   make train MODEL_NAME=baselines/neural_conv_decoder CONFIG=gpt2.yml
 train-config:
 	mkdir -p logs
 	$(CMD) main.py \
@@ -23,9 +23,9 @@ train-config:
 # Train all configs from training_matrix.yaml, optionally filtered by MODELS and/or TASKS
 # Usage:
 #   make train-all                                                    # Run all configs
-#   make train-all MODELS=example_foundation_model                    # Run only example_foundation_model configs
+#   make train-all MODELS=baselines/neural_conv_decoder               # Run only neural conv baseline configs
 #   make train-all TASKS=sentence_onset_task                          # Run only sentence_onset_task configs
-#   make train-all MODELS=example_foundation_model,neural_conv_decoder TASKS=word_embedding_decoding_task
+#   make train-all MODELS=baselines/neural_conv_decoder,baselines/time_pooling_model TASKS=word_embedding_decoding_task
 # To run locally instead of with slurm, comment out CMD in this file to use python directly
 train-all:
 	@mkdir -p logs

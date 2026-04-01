@@ -180,7 +180,9 @@ class GPT2Brain(nn.Module):
 
         return target_logits
 
-    def _convert_to_embeddings(self, neural_data, input_ids, attention_mask):
+    def _convert_to_embeddings(
+        self, neural_data, input_ids, attention_mask, **encoder_inputs
+    ):
         """
         Convert neural data and input_ids to combined embedding sequence.
 
@@ -200,8 +202,10 @@ class GPT2Brain(nn.Module):
         num_neural_tokens = 0
 
         if not self.no_brain_encoder:
+            encoder_kwargs = dict(self.encoder_forward_kwargs)
+            encoder_kwargs.update(encoder_inputs)
             neural_embedding = self.encoder_model(
-                neural_data, **self.encoder_forward_kwargs
+                neural_data, **encoder_kwargs
             )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
 
             if neural_embedding.ndim == 2:
@@ -257,6 +261,7 @@ class GPT2Brain(nn.Module):
         all_attention_mask,
         target_attention_mask=None,
         return_all_preds=False,
+        **encoder_inputs,
     ):
         """
         Forward pass through the model.
@@ -282,7 +287,7 @@ class GPT2Brain(nn.Module):
             )
 
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
-            neural_data, all_input_ids, all_attention_mask
+            neural_data, all_input_ids, all_attention_mask, **encoder_inputs
         )
 
         output = self.lm_model(

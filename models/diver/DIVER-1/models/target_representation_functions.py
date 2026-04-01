@@ -122,7 +122,6 @@ def single_stft_transform(x: torch.Tensor, n_fft: int, hop_length: int,
             onesided=True, 
             return_complex=True
         )
-    stft_result = stft_result.to(x.dtype)
     
     if cutofffreq != None:
         cutofffreq_index = min(int(cutofffreq // (sr/n_fft)),stft_result.shape[-2])
@@ -179,9 +178,6 @@ def fft_transform(x: torch.Tensor, n_fft: int = 256,
     x_float32 = x_detached.float()
     
     fft_result = torch.fft.rfft(x_float32, n=n_fft, dim=-1, norm="backward") 
-    
-    fft_result = fft_result.to(x.dtype)
-
 
     if cutofffreq != None:
         cutofffreq_index = min(int(cutofffreq // (sr/n_fft)),fft_result.shape[-1])
@@ -195,6 +191,7 @@ def fft_transform(x: torch.Tensor, n_fft: int = 256,
     elif loss_type == "amplitude":
         fft_result = torch.abs(fft_result)
         fft_result = compressor_transform(fft_result, comp_func=compress_func)
+        fft_result = fft_result.to(x.dtype)
     elif loss_type == "phase":
         fft_result = torch.angle(fft_result)
         if compress_func != "identity":

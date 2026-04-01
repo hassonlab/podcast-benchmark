@@ -1,0 +1,52 @@
+config_setter_name: diver_finetune
+task_config:
+  task_name: gpt_surprise_multiclass_task
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    use_high_gamma: false
+    target_sr: 500
+    signal_unit: uV
+    do_drop_bads: true
+    window_width: 1.0
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 4
+  epochs: 100
+  learning_rate: 1.0e-05
+  weight_decay: 1.0e-05
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -1000
+  max_lag: 1500
+  lag_step_size: 500
+  losses:
+  - cross_entropy
+  loss_weights:
+  - 1.0
+  metrics:
+  - roc_auc_multiclass
+  - f1
+  - acc
+  early_stopping_metric: roc_auc_multiclass
+  smaller_is_better: false
+  fold_ids:
+  - 1
+  - 5
+trial_name: diver_supersubject_gpt_surprise_multiclass
+model_spec:
+  constructor_name: diver_finetune
+  params:
+    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    patch_sampling_rate: 500
+    patch_size: 50
+    d_model: 256
+    e_layer: 12
+    ft_config: flatten_linear
+    deepspeed_pth_format: true
+    output_dim: 3
+    freeze_foundation: true
+    mup_weights: true
+    ft_mup: false
+  sub_models: {}

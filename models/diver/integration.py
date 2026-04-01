@@ -62,12 +62,21 @@ def get_podcast_task_info(
     if num_targets is None:
         num_targets_map = {
             "word_embedding": 50,  # Default PCA dim
+            "word_embedding_decoding_task": 50,
+            "whisper_embedding_decoding_task": 50,
+            "whisper_embedding": 50,
             "gpt_surprise": 1,
+            "gpt_surprise_task": 1,
             "sentence_onset": 1,  # Binary classification: output_dim=1 for BCE loss compatibility
+            "sentence_onset_task": 1,
             "content_noncontent": 1,  # Binary classification: output_dim=1 for BCE loss compatibility
+            "content_noncontent_task": 1,
             "gpt_surprise_multiclass": 3,
+            "gpt_surprise_multiclass_task": 3,
             "pos": 5,
+            "pos_task": 5,
             "volume_level": 1,
+            "volume_level_decoding_task": 1,
         }
         num_targets = num_targets_map.get(task_name, 50)
     
@@ -99,9 +108,8 @@ def create_diver1_params(model_params: dict):
             for k, v in d.items():
                 setattr(self, k, v)
     
-    # Extract only parameters needed for DIVER-1 model loading
-    params = Params({
-        'foundation_dir': model_params["foundation_dir"],
+    params_dict = {
+        'foundation_dir': model_params.get("foundation_dir", None),
         'patch_size': model_params.get("patch_size", 500),
         'width': model_params.get("width") or model_params.get("d_model", 512),
         'depth': model_params.get("depth") or model_params.get("e_layer", 12),
@@ -109,12 +117,182 @@ def create_diver1_params(model_params: dict):
         'ft_mup': model_params.get("ft_mup", False),
         'ft_config': model_params.get("ft_config", "flatten_linear"),
         'deepspeed_pth_format': model_params.get("deepspeed_pth_format", True),
-        'model_dir': model_params.get("model_dir") or \
-                    os.path.dirname(model_params["foundation_dir"]) if model_params.get("foundation_dir") else None,
+        'model_dir': model_params.get("model_dir")
+        or (
+            os.path.dirname(model_params["foundation_dir"])
+            if model_params.get("foundation_dir")
+            else None
+        ),
         'num_mlp_layers': model_params.get("num_mlp_layers", 2),
-    })
+        'load_adapter_weights': model_params.get("load_adapter_weights", False),
+        'adapter_path': model_params.get("adapter_path", None),
+    }
+
+    for key, value in model_params.items():
+        if key not in params_dict:
+            params_dict[key] = value
+
+    params = Params(params_dict)
     
     return params
+
+
+def _resolve_training_losses(model_params):
+    losses = model_params.get("_training_losses")
+    if losses:
+        return list(losses)
+    loss_name = model_params.get("_loss_name")
+    if loss_name:
+        return [loss_name]
+    return []
+
+
+def _resolve_output_activation(model_params):
+    explicit = model_params.get("output_activation")
+    if explicit is not None:
+        return explicit
+
+    losses = set(_resolve_training_losses(model_params))
+    if "bce" in losses or "soft_bce" in losses:
+        return "sigmoid"
+    if "softmax_output" in losses:
+        return "softmax"
+    return "linear"
+
+
+def _find_first_model_spec_by_constructor(model_spec, constructor_name):
+    if model_spec.constructor_name == constructor_name:
+        return model_spec
+    for sub_model_spec in model_spec.sub_models.values():
+        found = _find_first_model_spec_by_constructor(sub_model_spec, constructor_name)
+        if found is not None:
+            return found
+    return None
+
+
+def _default_output_dim_for_task(task_name, task_specific_config):
+    if task_name in (
+        "word_embedding_decoding_task",
+        "whisper_embedding_decoding_task",
+        "whisper_embedding",
+    ):
+        return getattr(task_specific_config, "embedding_pca_dim", None) or 50
+    if task_name in (
+        "gpt_surprise_task",
+        "sentence_onset_task",
+        "content_noncontent_task",
+        "volume_level_decoding_task",
+    ):
+        return 1
+    if task_name == "gpt_surprise_multiclass_task":
+        return 3
+    if task_name == "pos_task":
+        return 5
+    return None
+
+
+def _candidate_diver_strategy_dirs(model_params):
+    strategy_base_dir = model_params.get("strategy_base_dir")
+    if strategy_base_dir:
+        return [strategy_base_dir]
+
+    local_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pretrained_model")
+    reference_base = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)).replace(
+            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip"
+        ),
+        "pretrained_model",
+    )
+    reference_flatten_diveronly = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)).replace(
+            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip_flatten"
+        ),
+        "pretrained_model",
+        "diveronly",
+    )
+    reference_attn_diveronly = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)).replace(
+            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip_attn"
+        ),
+        "pretrained_model",
+        "diveronly",
+    )
+    candidates = [local_base]
+    if os.path.isdir(reference_base):
+        candidates.append(reference_base)
+    if os.path.isdir(reference_flatten_diveronly):
+        candidates.append(reference_flatten_diveronly)
+    if os.path.isdir(reference_attn_diveronly):
+        candidates.append(reference_attn_diveronly)
+    return candidates
+
+
+def _resolve_diver_foundation_dir(model_params):
+    foundation_dir = model_params.get("foundation_dir")
+    if foundation_dir:
+        return foundation_dir
+
+    strategy = model_params.get("pretrained_strategy") or model_params.get("strategy")
+    if not strategy:
+        return foundation_dir
+
+    file_map = {
+        "divertri": "diver_triplet_dev.pth",
+        "diverbiaudio": "diver_bi_audio_dev.pth",
+        "diverbitext": "diver_bi_text_dev.pth",
+        "randomtri": "random_triplet_dev.pth",
+        "randombiaudio": "random_bi_audio_dev.pth",
+        "randombitext": "random_bi_text_dev.pth",
+        "diveronly": "diveronly_converted.pth",
+    }
+    subject_id = model_params.get("subject_id")
+    config_signature = model_params.get("config_signature")
+
+    for base_dir in _candidate_diver_strategy_dirs(model_params):
+        if strategy in ("default", "legacy"):
+            for candidate in (
+                os.path.join(base_dir, "legacy", "256_mp_rank_00_model_states.pt"),
+                os.path.join(base_dir, "256_mp_rank_00_model_states.pt"),
+            ):
+                if os.path.exists(candidate):
+                    return candidate
+            continue
+
+        strategy_dir = os.path.join(base_dir, strategy)
+        if not os.path.isdir(strategy_dir):
+            continue
+        if subject_id is not None and config_signature is not None:
+            subject_path = os.path.join(
+                strategy_dir,
+                f"sub-{int(subject_id):02d}",
+                config_signature,
+                "backbone.pt",
+            )
+            if os.path.exists(subject_path):
+                return subject_path
+        filename = file_map.get(strategy)
+        if filename:
+            candidate = os.path.join(strategy_dir, filename)
+            if os.path.exists(candidate):
+                return candidate
+
+    raise FileNotFoundError(f"Could not resolve DIVER pretrained checkpoint for strategy='{strategy}'")
+
+
+def _resolve_diver_adapter_path(model_params):
+    adapter_path = model_params.get("adapter_path")
+    if adapter_path or not model_params.get("load_adapter_weights", False):
+        return adapter_path
+
+    strategy = model_params.get("pretrained_strategy") or model_params.get("strategy")
+    if not strategy:
+        return None
+
+    for base_dir in _candidate_diver_strategy_dirs(model_params):
+        candidate = os.path.join(base_dir, strategy, "diver_adapter_best.pt")
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 
 def create_data_info_list(batch_size: int, num_channels: int, channel_names: list = None, xyz_id: np.ndarray = None):
@@ -258,14 +436,18 @@ def get_diver_data_info(task_df, raws, model_params):
     """
     from utils.data_utils import extract_subject_id_from_raw, get_mni_coordinates
 
-    # Extract subject ID and channel names from first raw
-    subject_id = extract_subject_id_from_raw(raws[0])
-    channel_names = raws[0].ch_names
-
-    # Load MNI coordinates
     data_root = model_params.get("data_root", "data")
-    mni_coords = get_mni_coordinates(subject_id, channel_names, data_root)
-    print(f"DIVER: Loaded MNI coordinates for subject {subject_id}: shape {mni_coords.shape}")
+    coord_blocks = []
+    for raw in raws:
+        subject_id = extract_subject_id_from_raw(raw)
+        channel_names = raw.ch_names
+        coords = get_mni_coordinates(subject_id, channel_names, data_root)
+        coord_blocks.append(coords)
+
+    if not coord_blocks:
+        raise ValueError("DIVER: No raws available to construct xyz_id")
+
+    mni_coords = np.concatenate(coord_blocks, axis=0)
 
     # Add xyz_id column - same coords for all samples
     num_samples = len(task_df)
@@ -300,7 +482,12 @@ def create_diver_finetuning_model(model_params):
         - num_mlp_layers: Number of MLP layers for flatten_mlp (default: 2)
     """
     # Required parameters
-    foundation_dir = model_params["foundation_dir"]
+    foundation_dir = _resolve_diver_foundation_dir(model_params)
+    if foundation_dir is not None:
+        model_params["foundation_dir"] = foundation_dir
+    adapter_path = _resolve_diver_adapter_path(model_params)
+    if adapter_path is not None:
+        model_params["adapter_path"] = adapter_path
     output_dim = model_params["output_dim"]
     task_name = model_params.get("task_name", "word_embedding")
     subject_id = model_params.get("subject_id", 1)
@@ -404,6 +591,9 @@ def create_diver_finetuning_model(model_params):
             gc.collect()
             torch.cuda.empty_cache()
 
+        original_foundation_dir = getattr(params, "foundation_dir", None)
+        params.foundation_dir = None
+
         if ft_config == "flatten_linear":
             diver_model = flatten_linear_finetune(params, task_info_dict)
         elif ft_config == "flatten_mlp":
@@ -413,6 +603,14 @@ def create_diver_finetuning_model(model_params):
 
         if base_shapes_path is not None:
             mup_set_base_shapes(diver_model, base_shapes_path, rescale_params=False)
+
+        if original_foundation_dir:
+            params.foundation_dir = original_foundation_dir
+            diver_model.load_backbone_checkpoint(
+                original_foundation_dir,
+                device="cpu",
+                deepspeed_pth_format=params.deepspeed_pth_format,
+            )
     
     
     finally:
@@ -431,18 +629,7 @@ def create_diver_finetuning_model(model_params):
             p.requires_grad = False
         print("DIVER backbone frozen")
     
-    # Auto-determine output_activation based on output_dim (same as BrainBERT)
-    output_activation = model_params.get("output_activation", None)
-    if output_activation is None:
-        if output_dim == 1:
-            # Binary classification: use sigmoid for BCE loss compatibility
-            output_activation = "sigmoid"
-        elif output_dim > 1:
-            # Multiclass classification: use softmax for cross_entropy loss
-            output_activation = "softmax"
-        else:
-            # Regression or other: no activation
-            output_activation = "linear"
+    output_activation = _resolve_output_activation(model_params)
     
     # Wrap in DIVERDecoder for Podcast benchmark interface
     decoder = DIVERDecoder(diver_model, output_activation=output_activation)
@@ -460,17 +647,27 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     Config setter for DIVER finetuning.
     """
     from models.shared_config_setters import set_input_channels
-    
+
     # 1. Set input_channels using common utility (same as BrainBERT/PopT)
-    experiment_config = set_input_channels(experiment_config, raws, _df_word)
+    experiment_config = set_input_channels(
+        experiment_config, raws, _df_word, ["diver_finetune"]
+    )
     experiment_config.task_config.data_params.use_stft_preprocessing = False
-    
+
+    diver_model_spec = _find_first_model_spec_by_constructor(
+        experiment_config.model_spec, "diver_finetune"
+    )
+    if diver_model_spec is None:
+        raise ValueError("Could not find diver_finetune model spec.")
+
     # 2. Get task information from podcast-benchmark
-    model_params = experiment_config.model_spec.params
-    task_name = model_params.get("task_name", "word_embedding")
+    model_params = diver_model_spec.params
+    task_name = model_params.get("task_name") or experiment_config.task_config.task_name
+    model_params["task_name"] = task_name
     subject_id = model_params.get("subject_id", 1)
     patch_sampling_rate = model_params.get("patch_sampling_rate", 500)
     num_channels = model_params.get("input_channels")
+    task_specific_config = experiment_config.task_config.task_specific_config
 
     # 3. Get window_width from data_params
     data_params = experiment_config.task_config.data_params
@@ -480,18 +677,13 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
         print(f"DIVER: Using default window_width={window_width}")
     data_params.window_width = window_width
 
+    if experiment_config.model_spec.constructor_name == "gpt2_brain":
+        experiment_config.model_spec.model_data_getter = "diver_data_info"
+        experiment_config.model_spec.params["data_root"] = data_params.data_root
+
     # 4. Determine output_dim (podcast-benchmark task mapping)
     if "output_dim" not in model_params or model_params["output_dim"] is None:
-        num_targets_map = {
-            "word_embedding": 50,
-            "gpt_surprise": 1,
-            "sentence_onset": 1,
-            "content_noncontent": 1,
-            "gpt_surprise_multiclass": 3,
-            "pos": 5,
-            "volume_level": 1,
-        }
-        num_targets = num_targets_map.get(task_name, 50)
+        num_targets = _default_output_dim_for_task(task_name, task_specific_config) or 50
         model_params["output_dim"] = num_targets
     else:
         num_targets = model_params["output_dim"]
@@ -509,10 +701,17 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     # 6. Store for model constructor
     model_params["_task_info_dict"] = task_info_dict
 
+    losses = experiment_config.training_params.losses or []
+    if not losses and experiment_config.training_params.loss_name:
+        losses = [experiment_config.training_params.loss_name]
+    model_params["_training_losses"] = losses
+    model_params["_loss_name"] = experiment_config.training_params.loss_name
+    model_params["output_activation"] = _resolve_output_activation(model_params)
+
+    if model_params.get("ft_mup") and experiment_config.training_params.optimizer == "AdamW":
+        experiment_config.training_params.optimizer = "MuAdamW"
+
     # 7. Copy output_dim to embedding_dim (same as BrainBERT/PopT)
     model_params["embedding_dim"] = model_params["output_dim"]
-    
+
     return experiment_config
-
-
-

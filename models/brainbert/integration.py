@@ -13,6 +13,9 @@ Both patterns are registered with the framework's registry system.
 """
 
 import os
+import sys
+import types
+import yaml
 import numpy as np
 import torch
 import torch.nn as nn
@@ -20,7 +23,10 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from core import registry
-from .simple_transformer import load_pretrained_model, SimpleTransformer
+from .simple_transformer import (
+    load_pretrained_model as load_simple_pretrained_model,
+    SimpleTransformer,
+)
 
 
 # =============================================================================
@@ -52,7 +58,7 @@ def extract_foundation_features(data, preprocessor_params):
 
     # Load pretrained model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_pretrained_model(model_dir, device=device)
+    model = load_simple_pretrained_model(model_dir, device=device)
     model.eval()
     model.freeze()
 
@@ -135,6 +141,368 @@ class MLPDecoder(nn.Module):
             x = x.squeeze(-1)
         
         return x
+
+
+@registry.register_data_preprocessor("stft_preprocessing")
+def stft_preprocessing(data, preprocessor_params):
+    from models.popt.preprocessors.stft import STFTPreprocessor
+
+    stft_preprocessor = STFTPreprocessor(**preprocessor_params)
+    stft_preprocessor.eval()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    datas_torch = torch.from_numpy(data).to(device)
+    stft_preprocessor = stft_preprocessor.to(device)
+
+    with torch.no_grad():
+        stft_output = stft_preprocessor(datas_torch)
+
+    datas = stft_output.cpu().numpy()
+    print(
+        f"Applied STFT preprocessing ({'GPU' if device.type == 'cuda' else 'CPU'}): "
+        f"input shape {datas_torch.shape} -> output shape {datas.shape}"
+    )
+    return datas
+
+
+def _resolve_training_losses(model_params):
+    losses = model_params.get("_training_losses")
+    if losses:
+        return list(losses)
+    loss_name = model_params.get("_loss_name")
+    if loss_name:
+        return [loss_name]
+    return []
+
+
+def _resolve_output_activation(model_params, output_dim):
+    explicit = model_params.get("output_activation")
+    if explicit is not None:
+        return explicit
+
+    losses = set(_resolve_training_losses(model_params))
+    if "bce" in losses:
+        return "sigmoid"
+    if "soft_bce" in losses:
+        return "sigmoid"
+    if output_dim > 1 and "softmax_output" in losses:
+        return "softmax"
+    return "linear"
+
+
+def _append_preprocessor(data_params, fn_name, params):
+    existing_names = data_params.preprocessing_fn_name
+    existing_params = data_params.preprocessor_params
+
+    if existing_names is None:
+        data_params.preprocessing_fn_name = [fn_name]
+        data_params.preprocessor_params = [params]
+        return
+
+    if not isinstance(existing_names, list):
+        existing_names = [existing_names]
+    if existing_params is None:
+        existing_params = [None] * len(existing_names)
+    elif not isinstance(existing_params, list):
+        existing_params = [existing_params]
+
+    if fn_name in existing_names:
+        idx = existing_names.index(fn_name)
+        while len(existing_params) <= idx:
+            existing_params.append(None)
+        existing_params[idx] = params
+    else:
+        existing_names.append(fn_name)
+        existing_params.append(params)
+
+    data_params.preprocessing_fn_name = existing_names
+    data_params.preprocessor_params = existing_params
+
+
+def _default_output_dim_for_task(task_name, task_specific_config):
+    if task_name in (
+        "word_embedding_decoding_task",
+        "whisper_embedding_decoding_task",
+        "whisper_embedding",
+    ):
+        return getattr(task_specific_config, "embedding_pca_dim", None) or 50
+    if task_name in (
+        "gpt_surprise_task",
+        "sentence_onset_task",
+        "content_noncontent_task",
+        "volume_level_decoding_task",
+    ):
+        return 1
+    if task_name == "gpt_surprise_multiclass_task":
+        return 3
+    if task_name == "pos_task":
+        return 5
+    return None
+
+
+def _find_first_model_spec_by_constructor(model_spec, constructor_name):
+    if model_spec.constructor_name == constructor_name:
+        return model_spec
+    for sub_model_spec in model_spec.sub_models.values():
+        found = _find_first_model_spec_by_constructor(sub_model_spec, constructor_name)
+        if found is not None:
+            return found
+    return None
+
+
+def _setup_brainbert_path():
+    brainbert_root = os.path.dirname(os.path.abspath(__file__))
+    brainbert_wrapper = os.path.join(brainbert_root, "BrainBERT")
+    if brainbert_wrapper not in sys.path:
+        sys.path.insert(0, brainbert_wrapper)
+    return brainbert_wrapper
+
+
+def _dict_to_cfg(d):
+    cfg = types.SimpleNamespace()
+    for k, v in d.items():
+        setattr(cfg, k, v)
+    return cfg
+
+
+def _load_config_yaml(model_dir):
+    config_path = os.path.join(model_dir, "config.yaml")
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"BrainBERT config not found: {config_path}")
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def _config_dict_to_upstream_cfg(config_dict):
+    return _dict_to_cfg(
+        {
+            "name": "masked_tf_model",
+            "hidden_dim": config_dict.get("model_dim", 768),
+            "layer_dim_feedforward": config_dict.get("dim_feedforward", 3072),
+            "layer_activation": config_dict.get("layer_activation", "gelu"),
+            "nhead": config_dict.get("num_heads", 12),
+            "encoder_num_layers": config_dict.get("num_layers", 6),
+            "input_dim": config_dict.get("input_channels", 40),
+        }
+    )
+
+
+def _model_params_to_upstream_cfg(model_params):
+    return _dict_to_cfg(
+        {
+            "name": "masked_tf_model",
+            "hidden_dim": model_params.get("model_dim", 768),
+            "layer_dim_feedforward": model_params.get("dim_feedforward", 3072),
+            "layer_activation": model_params.get("layer_activation", "gelu"),
+            "nhead": model_params.get("num_heads", 12),
+            "encoder_num_layers": model_params.get("num_layers", 6),
+            "input_dim": model_params.get("input_channels", 40),
+        }
+    )
+
+
+def _find_checkpoint_path(model_dir):
+    for name in ("stft_large_pretrained.pth", "checkpoint.pth"):
+        path = os.path.join(model_dir, name)
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"BrainBERT checkpoint not found in {model_dir}. "
+        "Expected stft_large_pretrained.pth or checkpoint.pth"
+    )
+
+
+def _resolve_checkpoint_and_config_dir(model_params):
+    foundation_dir = model_params.get("foundation_dir") or model_params.get(
+        "checkpoint_path"
+    )
+    model_dir = model_params.get("model_dir")
+
+    if foundation_dir and os.path.isfile(foundation_dir):
+        foundation_dir = os.path.abspath(foundation_dir)
+        return foundation_dir, os.path.dirname(foundation_dir)
+    if model_dir and os.path.isdir(model_dir):
+        return _find_checkpoint_path(model_dir), model_dir
+    return None, None
+
+
+def _extract_state_dict(ckpt):
+    if isinstance(ckpt, dict):
+        if "model" in ckpt:
+            return ckpt["model"]
+        if "model_state_dict" in ckpt:
+            return ckpt["model_state_dict"]
+    return ckpt
+
+
+def _remap_state_dict_to_reference(state_dict):
+    new_state = {}
+    for k, v in state_dict.items():
+        if k.startswith("spec_prediction_head."):
+            new_state[k] = v
+        elif k.startswith("transformer_encoder."):
+            new_state["transformer." + k[len("transformer_encoder.") :]] = v
+        elif k.startswith("input_projection."):
+            new_state["input_encoding.in_proj." + k[len("input_projection.") :]] = v
+        elif k == "pos_encoder.pe" or k.startswith("pos_encoder.pe"):
+            v = v.clone()
+            if v.dim() == 3 and v.shape[1] == 1:
+                v = v.transpose(0, 1)
+            new_state["input_encoding.positional_encoding.pe"] = v
+        elif k.startswith("layer_norm."):
+            new_state["input_encoding.layer_norm." + k[len("layer_norm.") :]] = v
+        else:
+            new_state[k] = v
+    return new_state
+
+
+def _get_upstream_cfg_from_checkpoint(ckpt):
+    if not isinstance(ckpt, dict) or "model_cfg" not in ckpt:
+        return None
+    cfg = ckpt["model_cfg"]
+    if hasattr(cfg, "name"):
+        if getattr(cfg, "name") == "debug_model":
+            cfg.name = "masked_tf_model"
+        return cfg
+    return _dict_to_cfg(cfg) if isinstance(cfg, dict) else None
+
+
+def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    _setup_brainbert_path()
+
+    if foundation_dir_or_model_dir and os.path.isfile(foundation_dir_or_model_dir):
+        ckpt_path = foundation_dir_or_model_dir
+        config_dir = os.path.dirname(ckpt_path)
+    elif foundation_dir_or_model_dir and os.path.isdir(foundation_dir_or_model_dir):
+        ckpt_path = _find_checkpoint_path(foundation_dir_or_model_dir)
+        config_dir = foundation_dir_or_model_dir
+    else:
+        raise FileNotFoundError(
+            "BrainBERT load_reference_pretrained_model requires foundation_dir or model_dir."
+        )
+
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    upstream_cfg = _get_upstream_cfg_from_checkpoint(ckpt)
+    if upstream_cfg is None:
+        upstream_cfg = _config_dict_to_upstream_cfg(_load_config_yaml(config_dir))
+
+    original_modules = {}
+    for name in list(sys.modules.keys()):
+        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
+            "utils."
+        ):
+            original_modules[name] = sys.modules[name]
+            del sys.modules[name]
+
+    try:
+        from models import build_model
+
+        upstream = build_model(upstream_cfg)
+        states = _extract_state_dict(ckpt)
+        try:
+            upstream.load_state_dict(states, strict=True)
+        except Exception:
+            upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
+        upstream.to(device)
+        return upstream
+    finally:
+        for name, mod in original_modules.items():
+            sys.modules[name] = mod
+
+
+load_pretrained_model = load_reference_pretrained_model
+
+
+class ReferenceBrainBERTDecoder(nn.Module):
+    def __init__(
+        self,
+        finetune_model,
+        output_dim=1,
+        num_electrodes=None,
+        hidden_dim=768,
+        mlp_layer_sizes=None,
+        dropout=0.0,
+        output_activation="linear",
+    ):
+        super().__init__()
+        self.finetune_model = finetune_model
+        self.output_dim = output_dim
+        self.num_electrodes = num_electrodes
+        self.hidden_dim = hidden_dim
+        self.output_activation = output_activation
+
+        if self.num_electrodes is not None and self.hidden_dim is not None:
+            input_dim = self.num_electrodes * self.hidden_dim
+            if mlp_layer_sizes:
+                layers = []
+                curr_dim = input_dim
+                for h_dim in mlp_layer_sizes:
+                    layers.append(nn.Linear(curr_dim, h_dim))
+                    layers.append(nn.ReLU())
+                    if dropout > 0:
+                        layers.append(nn.Dropout(dropout))
+                    curr_dim = h_dim
+                layers.append(nn.Linear(curr_dim, 1 if output_dim == 1 else output_dim))
+                self.projector = nn.Sequential(*layers)
+            else:
+                self.projector = nn.Linear(input_dim, output_dim)
+                nn.init.normal_(self.projector.weight, mean=0.0, std=0.001)
+                nn.init.zeros_(self.projector.bias)
+        else:
+            self.projector = None
+
+    def forward(self, x, **kwargs):
+        if x.ndim != 4:
+            raise ValueError(
+                "BrainBERT finetuning expects STFT input with shape [batch, channels, time, freq]."
+            )
+
+        batch_size, num_channels, time_steps, freq_channels = x.shape
+        inputs = x.contiguous().view(batch_size * num_channels, time_steps, freq_channels)
+        pad_mask = None
+
+        if self.projector is not None:
+            if self.finetune_model.frozen_upstream:
+                self.finetune_model.upstream.eval()
+                with torch.no_grad():
+                    features = self.finetune_model.upstream(
+                        inputs, pad_mask, intermediate_rep=True
+                    )
+            else:
+                features = self.finetune_model.upstream(
+                    inputs, pad_mask, intermediate_rep=True
+                )
+
+            if features.shape[0] == batch_size * num_channels:
+                seq_len = features.shape[1]
+                middle = seq_len // 2
+                start = max(0, middle - 5)
+                end = min(seq_len, middle + 5)
+                if end <= start:
+                    pooled = features.mean(dim=1)
+                else:
+                    pooled = features[:, start:end, :].mean(dim=1)
+            else:
+                pooled = features.mean(dim=0)
+
+            pooled = pooled.view(batch_size, num_channels, -1)
+            flattened = pooled.reshape(batch_size, -1)
+            out = self.projector(flattened)
+        else:
+            out = self.finetune_model(inputs, pad_mask)
+            out = out.view(batch_size, num_channels, -1).mean(dim=1)
+
+        if self.output_activation == "sigmoid":
+            out = torch.sigmoid(out)
+        elif self.output_activation == "softmax":
+            out = F.softmax(out, dim=-1)
+
+        if self.output_dim == 1 and out.shape[-1] == 1:
+            out = out.squeeze(-1)
+        return out
 
 
 @registry.register_model_constructor("brainbert_mlp")
@@ -295,32 +663,98 @@ def create_finetuning_decoder(model_params):
         - input_channels: Number of input channels (optional, will be set by config setter)
         - output_activation: Output activation function (optional, auto-determined if not provided)
     """
-    output_dim = model_params["output_dim"]
-    
-    # Auto-determine output_activation based on output_dim and task type
-    # Binary classification (output_dim=1) with BCE loss should use sigmoid
-    output_activation = model_params.get("output_activation", None)
-    if output_activation is None:
-        if output_dim == 1:
-            # Binary classification: use sigmoid for BCE loss compatibility
-            output_activation = "sigmoid"
-        elif output_dim > 1:
-            # Multiclass classification: use softmax for cross_entropy loss
-            output_activation = "softmax"
-        else:
-            # Regression or other: no activation
-            output_activation = "linear"
-    
-    return BrainBERTDecoder(
-        model_dir=model_params["model_dir"],
-        output_dim=output_dim,
-        mlp_layer_sizes=model_params.get("mlp_layer_sizes", [128]),
-        freeze_foundation=model_params.get("freeze_foundation", False),
-        num_frozen_layers=model_params.get("num_frozen_layers", 0),
-        dropout=model_params.get("dropout", 0.1),
-        input_channels=model_params.get("input_channels", None),
-        output_activation=output_activation,
+    output_dim = model_params.get("output_dim", 1)
+    frozen_upstream = model_params.get("frozen_upstream", False) or model_params.get(
+        "freeze_foundation", False
     )
+    mlp_layer_sizes = model_params.get("mlp_layer_sizes", [])
+    dropout = model_params.get("dropout", 0.0)
+    num_electrodes = model_params.get("num_electrodes")
+
+    ckpt_path, config_dir = _resolve_checkpoint_and_config_dir(model_params)
+    random_init = ckpt_path is None
+    _setup_brainbert_path()
+
+    if random_init:
+        if not any(
+            model_params.get(k) is not None for k in ("model_dim", "num_layers", "num_heads")
+        ):
+            raise ValueError(
+                "BrainBERT random init requires model_dim, num_layers, and num_heads in model_params."
+            )
+        upstream_cfg = _model_params_to_upstream_cfg(model_params)
+        ckpt = None
+    else:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        upstream_cfg = _get_upstream_cfg_from_checkpoint(ckpt)
+        if upstream_cfg is None:
+            if any(
+                model_params.get(k) is not None for k in ("model_dim", "num_layers", "num_heads")
+            ):
+                upstream_cfg = _model_params_to_upstream_cfg(model_params)
+            elif config_dir:
+                upstream_cfg = _config_dict_to_upstream_cfg(_load_config_yaml(config_dir))
+            else:
+                raise ValueError(
+                    "BrainBERT checkpoint has no model_cfg and no config.yaml/model_params were provided."
+                )
+
+    original_modules = {}
+    for name in list(sys.modules.keys()):
+        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
+            "utils."
+        ):
+            original_modules[name] = sys.modules[name]
+            del sys.modules[name]
+
+    try:
+        from models import build_model
+
+        upstream = build_model(upstream_cfg)
+        if ckpt is not None:
+            states = _extract_state_dict(ckpt)
+            try:
+                upstream.load_state_dict(states, strict=True)
+            except Exception:
+                upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
+
+        finetune_cfg = _dict_to_cfg(
+            {
+                "name": "finetune_model",
+                "frozen_upstream": frozen_upstream,
+                "hidden_dim": getattr(upstream_cfg, "hidden_dim", 768),
+            }
+        )
+        finetune_model = build_model(finetune_cfg, upstream)
+
+        hidden_dim = getattr(upstream_cfg, "hidden_dim", 768)
+        if not num_electrodes:
+            if mlp_layer_sizes:
+                finetune_model.linear_out = MLPDecoder(
+                    input_dim=hidden_dim,
+                    layer_sizes=mlp_layer_sizes + [output_dim],
+                    dropout=dropout,
+                    use_layer_norm=True,
+                    output_activation="linear",
+                )
+            else:
+                finetune_model.linear_out = nn.Linear(hidden_dim, output_dim)
+
+        decoder = ReferenceBrainBERTDecoder(
+            finetune_model,
+            output_dim=output_dim,
+            num_electrodes=num_electrodes,
+            hidden_dim=hidden_dim,
+            mlp_layer_sizes=mlp_layer_sizes,
+            dropout=dropout,
+            output_activation=_resolve_output_activation(model_params, output_dim),
+        )
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        decoder.to(device)
+        return decoder
+    finally:
+        for name, mod in original_modules.items():
+            sys.modules[name] = mod
 
 
 # =============================================================================
@@ -362,40 +796,84 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     Sets the output_dim and loads foundation model config.
     BrainBERT expects STFT features (input_channels=40), so STFT preprocessing is enabled.
     """
-    from .config import load_config
+    from models.shared_config_setters import set_input_channels
 
-    model_params = experiment_config.model_spec.params
+    experiment_config = set_input_channels(
+        experiment_config, raws, _df_word, ["brainbert_finetune"]
+    )
+
+    target_spec = _find_first_model_spec_by_constructor(
+        experiment_config.model_spec, "brainbert_finetune"
+    )
+    if target_spec is None:
+        raise ValueError("Could not find brainbert_finetune model spec.")
+
+    model_params = target_spec.params
     data_params = experiment_config.task_config.data_params
+    task_name = experiment_config.task_config.task_name
+    task_specific_config = experiment_config.task_config.task_specific_config
 
-    # Enable STFT preprocessing in data loading (BrainBERT expects STFT features)
+    original_channels = model_params.get("input_channels")
+    if original_channels is not None:
+        model_params["num_electrodes"] = original_channels
+
+    sample_rate = (
+        data_params.target_sr
+        or model_params.get("sample_rate")
+        or int(raws[0].info["sfreq"])
+        if raws
+        else 512
+    )
+    stft_config = dict(
+        model_params.get("stft_config")
+        or data_params.stft_config
+        or {
+            "freq_channel_cutoff": 40,
+            "nperseg": 400,
+            "noverlap": 350,
+            "normalizing": "zscore",
+        }
+    )
+    stft_config.setdefault("fs", int(sample_rate))
+
+    _append_preprocessor(data_params, "stft_preprocessing", stft_config)
     data_params.use_stft_preprocessing = True
+    data_params.stft_config = stft_config
 
-    # Get sample rate from data for STFT preprocessing
-    sample_rate = int(raws[0].info['sfreq']) if raws else 512
+    foundation_dir = model_params.get("foundation_dir") or model_params.get("checkpoint_path")
+    model_dir = model_params.get("model_dir")
+    config_dir = None
+    if foundation_dir and os.path.isfile(foundation_dir):
+        config_dir = os.path.dirname(foundation_dir)
+    elif model_dir and os.path.isdir(model_dir):
+        config_dir = model_dir
 
-    # Set STFT configuration in data_params (matching original PopT/BrainBERT)
-    data_params.stft_config = {
-        'freq_channel_cutoff': 40,
-        'nperseg': 400,
-        'noverlap': 350,
-        'normalizing': 'zscore'
-    }
-    print(f"STFT preprocessing enabled in data loading for BrainBERT: fs={sample_rate}, freq_channels=40, nperseg=400, noverlap=350")
+    if data_params.window_width is None or data_params.window_width <= 0:
+        window_width = model_params.get("window_width")
+        if window_width is None and config_dir:
+            try:
+                window_width = _load_config_yaml(config_dir).get("window_width")
+            except FileNotFoundError:
+                window_width = None
+        data_params.window_width = window_width or 1.0
 
-    model_dir = model_params["model_dir"]
-    config_path = os.path.join(model_dir, "config.yaml")
-    foundation_config = load_config(config_path)
+    if model_params.get("output_dim") is None:
+        output_dim = _default_output_dim_for_task(task_name, task_specific_config)
+        if output_dim is not None:
+            model_params["output_dim"] = output_dim
 
-    # BrainBERT expects STFT features (input_channels=40)
-    model_params["input_channels"] = 40
-    print("BrainBERT: input_channels set to 40 (STFT frequency channels)")
+    losses = experiment_config.training_params.losses or []
+    if not losses and experiment_config.training_params.loss_name:
+        losses = [experiment_config.training_params.loss_name]
+    model_params["_training_losses"] = losses
+    model_params["_loss_name"] = experiment_config.training_params.loss_name
+    model_params["output_activation"] = _resolve_output_activation(
+        model_params, model_params.get("output_dim", 1)
+    )
 
-    # Set window width based on foundation model
-    data_params.window_width = foundation_config.window_width
-
-    # Fix: Copy output_dim to embedding_dim for compatibility with compute_all_metrics
-    # This ensures that confusion_matrix can correctly determine num_classes
-    if "output_dim" in model_params:
+    model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
+    model_params["sample_rate"] = int(sample_rate)
+    if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

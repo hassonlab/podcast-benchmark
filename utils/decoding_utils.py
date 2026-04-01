@@ -450,9 +450,6 @@ def train_decoding_model(
     }
 
     cv_results["num_epochs"] = []
-    if "cross_entropy" in metric_names:
-        for phase in phases:
-            cv_results[f"{phase}_perplexity"] = []
     cv_results["fold_nums"] = []
 
     # Hardcode embedding task metrics for now since they need to be handled a bit differently.
@@ -958,8 +955,11 @@ def train_decoding_model(
 
     if "cross_entropy" in metric_names:
         for phase in phases:
-            vals = cv_results[f"{phase}_perplexity"]
-            print(f"Mean {phase} perplexity: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+            ce_vals = cv_results[f"{phase}_cross_entropy"]
+            ppl_vals = np.exp(ce_vals)
+            print(
+                f"Mean {phase} perplexity: {np.mean(ppl_vals):.4f} ± {np.std(ppl_vals):.4f}"
+            )
 
     if is_word_embedding_decoding_task:
         for metric_name in embedding_metrics:

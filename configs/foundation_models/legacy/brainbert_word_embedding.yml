@@ -1,0 +1,48 @@
+config_setter_name: brainbert_finetune
+
+task_config:
+  task_name: word_embedding_decoding_task
+  data_params:
+    data_root: data
+    word_column: word
+    electrode_file_path: processed_data/all_subject_sig.csv
+    subject_ids:
+      - 1
+  task_specific_config:
+    embedding_type: gpt-2xl
+    embedding_layer: 24
+    embedding_pca_dim: 50
+
+training_params:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  n_folds: 5
+  losses:
+    - mse
+  loss_weights:
+    - 1.0
+  metrics:
+    - cosine_sim
+    - pairwise_accuracy
+  early_stopping_metric: cosine_sim
+  smaller_is_better: false
+  min_lag: 0
+  max_lag: 1
+  lag_step_size: 200
+
+trial_name: brainbert_word_embedding
+
+model_spec:
+  constructor_name: brainbert_finetune
+  params:
+    model_dir: models/brainbert/pretrained_model
+    output_dim: 50
+    mlp_layer_sizes:
+      - 256
+      - 128
+    dropout: 0.1
+    freeze_foundation: false
+  sub_models: {}

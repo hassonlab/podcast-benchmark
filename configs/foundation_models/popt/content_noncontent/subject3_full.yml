@@ -1,0 +1,57 @@
+config_setter_name: popt_finetune
+model_spec:
+  constructor_name: popt_finetune
+  params:
+    brainbert_model_dir: models/brainbert/pretrained_model
+    dropout: 0.0
+    freeze_foundation: true
+    max_coord_value: 5000
+    mlp_layer_sizes: []
+    model_dir: models/popt/pretrained_model
+    num_frozen_layers: 0
+    output_dim: 1
+    use_brainbert: true
+    use_lip_coords: true
+  sub_models: {}
+task_config:
+  data_params:
+    data_root: data
+    electrode_file_path: null
+    target_sr: 2048
+    use_high_gamma: false
+    use_lip_coords: true
+    window_width: 1.0
+    subject_ids:
+    - 3
+    channel_reg_ex: null
+    per_subject_electrodes: null
+  task_name: content_noncontent_task
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 4
+  early_stopping_metric: roc_auc
+  early_stopping_patience: 10
+  epochs: 100
+  lag_step_size: 500
+  learning_rate: 1.0e-05
+  loss_weights:
+  - 1.0
+  losses:
+  - bce_with_logits
+  max_lag: 1500
+  metrics:
+  - roc_auc
+  - sensitivity_logits
+  - specificity_logits
+  - f1_logits
+  - precision_logits
+  - acc_logits
+  min_lag: -1000
+  n_folds: 5
+  smaller_is_better: false
+  weight_decay: 1.0e-05
+  fold_ids:
+  - 1
+  - 5
+trial_name: popt_subject3_full_content_noncontent

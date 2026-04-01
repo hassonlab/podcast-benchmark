@@ -50,6 +50,14 @@ class DataParams:
     # A user defined configuration for their specific models preprocessor function.  Can provide either a single value or a
     # list of parameters to apply in order. Should align with desired function in preprocessing_fn_name.
     preprocessor_params: Optional[dict | list[dict]] = None
+    # Reference foundation-model configs may toggle this explicitly even though the
+    # current root pipeline routes STFT through preprocessing_fn_name.
+    use_stft_preprocessing: bool = False
+    # Optional STFT configuration used by foundation-model config setters.
+    stft_config: Optional[dict] = None
+    # Optional flag for models that consume electrode coordinates in their own
+    # model_data_getter / forward kwargs path.
+    use_lip_coords: bool = False
     # The name of the column in the DataFrame returned by the task data getter that specifies the word for each
     # example. Optional if your task does not involve words.
     word_column: Optional[str] = None

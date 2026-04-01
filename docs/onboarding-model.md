@@ -505,10 +505,10 @@ This example shows exactly how all the pieces fit together for foundation models
 
 ```bash
 # Run feature extraction example
-python main.py --config configs/example_foundation_model/feature_extraction.yaml
+python main.py --config configs/examples/example_foundation_model/feature_extraction.yml
 
 # Run finetuning example
-python main.py --config configs/example_foundation_model/finetuning.yaml
+python main.py --config configs/examples/example_foundation_model/finetuning.yml
 ```
 
 See `models/example_foundation_model/README.md` for details.
@@ -517,8 +517,8 @@ See `models/example_foundation_model/README.md` for details.
 
 For production-grade examples, see the following model integrations:
 
-- **POPT** (`models/popt/`) - Foundation model with STFT preprocessing. Configs in `configs/foundation_models/popt_*.yml`.
-- **DIVER** (`models/diver/`) - Foundation model for epidural data. Configs in `configs/foundation_models/diver_*.yml`.
+- **POPT** (`models/popt/`) - Foundation model with STFT preprocessing. Configs in `configs/foundation_models/popt/<task>/<variant>.yml`.
+- **DIVER** (`models/diver/`) - Foundation model for epidural data. Configs in `configs/foundation_models/diver/<task>/<variant>.yml`.
 - **BrainBERT** (`models/brainbert/`) - Transformer-based foundation model.
 
 ---

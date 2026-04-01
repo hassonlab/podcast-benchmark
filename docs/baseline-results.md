@@ -10,7 +10,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ## Content/Non-Content Classification
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_content_noncontent.yml`
+**Config:** `configs/baselines/neural_conv_decoder/content_noncontent.yml`
 
 **Detailed Results:** `baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv`
 
@@ -33,7 +33,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### Arbitrary
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_arbitrary.yml`
+**Config:** `configs/baselines/neural_conv_decoder/arbitrary.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv`
 
@@ -44,7 +44,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### GloVe
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_glove.yml`
+**Config:** `configs/baselines/neural_conv_decoder/glove.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv`
 
@@ -55,7 +55,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### GPT-2
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt2.yml`
+**Config:** `configs/baselines/neural_conv_decoder/gpt2.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2026-02-17-19-54-55/lag_performance.csv`
 
@@ -68,7 +68,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ## Whisper Embedding Decoding
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_whisper_embedding.yml`
+**Config:** `configs/baselines/neural_conv_decoder/whisper_embedding.yml`
 
 **Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-19-25-13/lag_performance.csv`
 
@@ -100,7 +100,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## GPT Surprisal (Regression)
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise.yml`
+**Config:** `configs/baselines/neural_conv_decoder/gpt_surprise.yml`
 
 **Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv`
 
@@ -115,7 +115,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## GPT Surprisal (Multiclass)
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_gpt_surprise_multiclass.yml`
+**Config:** `configs/baselines/neural_conv_decoder/gpt_surprise_multiclass.yml`
 
 **Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv`
 
@@ -130,7 +130,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Part of Speech
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_pos.yml`
+**Config:** `configs/baselines/neural_conv_decoder/pos.yml`
 
 **Detailed Results:** `baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv`
 
@@ -145,7 +145,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Sentence Onset Detection
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_sentence_onset.yml`
+**Config:** `configs/baselines/neural_conv_decoder/sentence_onset.yml`
 
 **Detailed Results:** `baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv`
 
@@ -160,7 +160,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Intonation Unit Boundary Detection
 
-**Config:** `configs/neural_conv_decoder/neural_conv_decoder_iu_boundaries.yml`
+**Config:** `configs/baselines/neural_conv_decoder/iu_boundaries.yml`
 
 **Detailed Results:** `baseline-results/iu_boundary_lr_2026-02-26-09-46-13/lag_performance.csv`
 
@@ -175,7 +175,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Volume Level Prediction
 
-**Config:** `configs/time_pooling_model/simple_model.yml`
+**Config:** `configs/baselines/time_pooling_model/simple_model.yml`
 
 **Detailed Results:** `baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv`
 
@@ -196,7 +196,7 @@ This section compares two approaches to LLM-based decoding from brain activity: 
 
 ### LLM Token Finetuning (Brain Data)
 
-**Config:** `configs/neural_conv_decoder/llm_two_stage_multi.yml`
+**Config:** `configs/baselines/neural_conv_decoder/llm_two_stage_multi.yml`
 
 **Detailed Results:** `baseline-results/llm_token_finetune_2025-12-26-12-44-36/lag_performance.csv`
 
@@ -207,7 +207,7 @@ This section compares two approaches to LLM-based decoding from brain activity: 
 
 ### LLM Decoding (No Brain Data - Control)
 
-**Config:** `configs/controls/llm_decoding_no_brain_data.yml`
+**Config:** `configs/controls/llm_decoding/no_brain_data.yml`
 
 **Detailed Results:** `baseline-results/llm_decoding_control_2025-12-28-15-55-38/lag_performance.csv`
 
