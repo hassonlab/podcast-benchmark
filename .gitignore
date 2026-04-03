@@ -203,6 +203,7 @@ commands/experimental/lazy_volume_level/*
 !commands/experimental/lazy_volume_level/internal/
 !commands/experimental/lazy_volume_level/internal/**
 commands/experimental/lazy_volume_level/*.tsv
+!commands/run-local.sh
 
 # cursor docs
 cursor_docs/
