@@ -3,13 +3,15 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-import mne
-
 
 class RawNeuralDataset:
     """
-    Loads neural data from MNE Raw objects once into a tensor and provides fast
-    access to any lag by slicing — no mne.Epochs call per lag.
+    Stores raw electrode arrays and word onset indices to provide fast lag-based
+    slicing without mne.Epochs calls and without redundant per-word storage.
+
+    Rather than pre-extracting a wide window per word (which wastes RAM when words
+    are densely packed in time), we store each subject's full raw array and compute
+    lag windows on the fly by indexing into it.
 
     Args:
         raws: List of preloaded MNE Raw objects (one per subject).
@@ -29,12 +31,10 @@ class RawNeuralDataset:
         preprocessing_fns=None,
         preprocessor_params=None,
     ):
-        from utils.data_utils import _apply_preprocessing
-
         min_lag = min(lags)
         max_lag = max(lags)
 
-        self.tmin_full = min_lag / 1000 - window_width / 2
+        tmin_full = min_lag / 1000 - window_width / 2
         tmax_full = max_lag / 1000 + window_width / 2 - 2e-3
         self.window_width = window_width
         self.preprocessing_fns = preprocessing_fns
@@ -47,7 +47,7 @@ class RawNeuralDataset:
             sfreq = raw.info["sfreq"]
             data_duration = raw.times[-1]
             valid_mask = valid_mask & (
-                (task_df.start + self.tmin_full >= 0)
+                (task_df.start + tmin_full >= 0)
                 & (task_df.start + tmax_full <= data_duration)
             )
 
@@ -62,26 +62,20 @@ class RawNeuralDataset:
             targets = np.stack(targets)
         self.targets_tensor = torch.FloatTensor(targets)
 
-        n_full_samples = int(round((tmax_full - self.tmin_full) * sfreq)) + 1
-        self.n_full_samples = n_full_samples
+        # Precompute onset sample indices (same for all raws)
+        self.onset_samples = np.array(
+            [int(round(onset * sfreq)) for onset in self.task_df.start]
+        )
 
-        # Extract windows for each raw and concatenate along electrode axis
-        datas = []
-        for raw in raws:
-            raw_array = raw.get_data()  # [n_electrodes, n_time]
-            windows = []
-            for onset in self.task_df.start:
-                start_sample = int(round((onset + self.tmin_full) * sfreq))
-                windows.append(raw_array[:, start_sample : start_sample + n_full_samples])
-            datas.append(np.stack(windows, axis=0))  # [n_words, n_elec, n_samples]
-
-        # [n_words, n_total_electrodes, n_full_samples]
-        self.neural_data = torch.FloatTensor(np.concatenate(datas, axis=1))
+        # Store the full raw arrays — one per subject
+        self.raw_arrays = [raw.get_data() for raw in raws]
 
     def get_data_for_lag(
         self, lag: int
     ) -> tuple[torch.Tensor, torch.Tensor, pd.DataFrame]:
         """Return neural data sliced for the given lag, targets, and valid task_df.
+
+        Slices each subject's raw array at onset + lag offset for every word.
 
         Args:
             lag: Lag in milliseconds.
@@ -92,20 +86,23 @@ class RawNeuralDataset:
         """
         from utils.data_utils import _apply_preprocessing
 
-        lag_tmin = lag / 1000 - self.window_width / 2
-        start_sample = int(round((lag_tmin - self.tmin_full) * self.sfreq))
+        lag_offset = int(round((lag / 1000 - self.window_width / 2) * self.sfreq))
         n_window_samples = int(round((self.window_width - 2e-3) * self.sfreq)) + 1
 
-        neural_slice = self.neural_data[:, :, start_sample : start_sample + n_window_samples]
+        windows_per_raw = []
+        for raw_array in self.raw_arrays:
+            windows = np.stack([
+                raw_array[:, onset + lag_offset : onset + lag_offset + n_window_samples]
+                for onset in self.onset_samples
+            ])  # [n_words, n_elec, n_window_samples]
+            windows_per_raw.append(windows)
+
+        neural = np.concatenate(windows_per_raw, axis=1)  # [n_words, n_total_elec, n_window_samples]
 
         if self.preprocessing_fns:
-            neural_np = neural_slice.numpy()
-            neural_np = _apply_preprocessing(
-                neural_np, self.preprocessing_fns, self.preprocessor_params
-            )
-            neural_slice = torch.FloatTensor(neural_np)
+            neural = _apply_preprocessing(neural, self.preprocessing_fns, self.preprocessor_params)
 
-        return neural_slice, self.targets_tensor, self.task_df
+        return torch.FloatTensor(neural), self.targets_tensor, self.task_df
 
 
 class NeuralDictDataset(Dataset):
