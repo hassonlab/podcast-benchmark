@@ -37,6 +37,7 @@ from core.registry import metric_registry
 from sklearn.linear_model import LogisticRegression
 
 from sklearn.linear_model import LinearRegression, Ridge
+import time
 
 
 def train_logistic_regression(X_train, y_train):
@@ -753,6 +754,19 @@ def train_decoding_model(
         history["num_epochs"] = None
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
+        
+        #if feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
+        if getattr(model_spec, "feature_cache", False): 
+            cache_loader_generation_start_time = time.time()
+            loaders = {
+                "train" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["train"], device), training_params.batch_size, shuffle=False), #*training already shuffled we assume
+                "val" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["val"], device), training_params.batch_size, shuffle=False),
+                "test" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["test"], device), training_params.batch_size, shuffle=False),
+            }
+            print(f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}")
+            model = SqueezeWrapper(feature_head = model.projector, output_dim=model.output_dim).to(device)
+        
+        loop_start_time = time.time() #! remove later 
         for epoch in loop:
             train_mets = run_epoch(model, loaders["train"], optimizer)
             val_mets = run_epoch(model, loaders["val"])
@@ -802,6 +816,7 @@ def train_decoding_model(
                     **{f"val_{name}": val for name, val in val_mets.items()},
                 }
             )
+        print(f"Time taken for training loop: {time.time() - loop_start_time}") #! remove later
 
         history["num_epochs"] = best_epoch + 1
 
@@ -1074,3 +1089,67 @@ def run_training_over_lags(
             [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
         )
         existing_df.to_csv(filename, index=False)
+
+
+### below : are stuff for feature caching! 
+def extract_features_for_caching(model, loader, device):
+    model.eval()
+    
+    #feature aggregation
+    all_features, input_dicts, y_bs = [], [], []
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, y_b = batch_data
+            Xb = Xb.to(device)
+            inputs_dict = {
+                k: v.to(device) if torch.is_tensor(v) else v
+                for k, v in inputs_dict.items()
+            }
+            features = model(Xb, **inputs_dict, return_feature_emb_instead_of_projection=True) 
+            #TODO the return_feature_emb_instead_of_projection flag is important!! must be implemented for each integration.py of the FM model 
+            #* BrainBERt => done, PopT/DIVER => NO! 
+            all_features.append(features)
+            input_dicts.append(inputs_dict)
+            y_bs.append(y_b)
+    return torch.cat(all_features, dim=0), input_dicts, torch.cat(y_bs, dim=0)
+
+def generate_loaders_from_features(features, input_dicts, y_bs, batch_size, shuffle = False):
+    def _merge_input_dicts(batch_dicts):
+        if not batch_dicts:
+            return {}
+        merged = {}
+        for key in batch_dicts[0].keys():
+            vals = [d[key] for d in batch_dicts if torch.is_tensor(d[key])]
+            merged[key] = torch.cat(vals, dim=0) if vals else [d[key] for d in batch_dicts]
+        return merged
+
+    def _make_loader(feat, inp, y, shuffle):
+        if isinstance(inp, list):
+            inp = _merge_input_dicts(inp)
+        ds = NeuralDictDataset(feat, inp, y)
+        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+
+    if isinstance(features, dict):
+        return {
+            phase: _make_loader(
+                features[phase],
+                input_dicts[phase],
+                y_bs[phase],
+                shuffle=shuffle,
+            )
+            for phase in features
+        }
+
+    return _make_loader(features, input_dicts, y_bs, shuffle=shuffle)
+
+class SqueezeWrapper(nn.Module):
+    def __init__(self, feature_head : nn.Module, output_dim = None):
+        super().__init__()
+        self.feature_head = feature_head
+        self.output_dim = output_dim
+
+    def forward(self, x, **kwargs):
+        out = self.feature_head(x, **kwargs)
+        if self.output_dim == 1 and out.shape[-1] == 1:
+            out = out.squeeze(-1)
+        return out
