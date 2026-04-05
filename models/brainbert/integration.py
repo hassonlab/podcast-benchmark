@@ -83,6 +83,86 @@ def extract_foundation_features(data, preprocessor_params):
     return embeddings
 
 
+@registry.register_data_preprocessor("brainbert_per_subject_feature_extraction")
+def extract_per_subject_features(data, preprocessor_params):
+    """
+    Extract frozen features from BrainBERT independently per subject,
+    then concatenate embeddings.
+
+    Per subject:
+      1. STFT (reusing STFTPreprocessor): [N, Ci, T] -> [N, Ci, time_stft, freq]
+      2. Reshape each channel as independent sample: [N*Ci, freq, time_stft]
+      3. Frozen BrainBERT: [N*Ci, freq, time_stft] -> [N*Ci, model_dim]
+      4. Mean-pool over channels: [N, model_dim]
+
+    Args:
+        data: list of [N, Ci, T] arrays (one per subject).
+        preprocessor_params: Dictionary with:
+            - model_dir: Path to pretrained model directory
+            - stft_config: STFT parameters for STFTPreprocessor
+            - batch_size: Batch size for FM forward (default: 32)
+
+    Returns:
+        embeddings: Numpy array of shape [N, model_dim * num_subjects]
+    """
+    from models.popt.preprocessors.stft import STFTPreprocessor
+
+    model_dir = preprocessor_params["model_dir"]
+    batch_size = preprocessor_params.get("batch_size", 32)
+    stft_config = dict(preprocessor_params.get("stft_config", {}))
+    stft_chunk_size = stft_config.pop("stft_chunk_size", 4)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_simple_pretrained_model(model_dir, device=device)
+    model.eval()
+    model.freeze()
+
+    stft = STFTPreprocessor(**stft_config).to(device).eval()
+
+    num_subjects = len(data)
+    print(f"Per-subject feature extraction: {num_subjects} subjects")
+    print(f"Loaded foundation model from {model_dir}")
+    print(f"Model has {model.get_num_params():,} parameters (all frozen)")
+
+    all_subject_embeddings = []
+    for subj_idx, subject_data in enumerate(data):
+        N, Ci, T = subject_data.shape
+
+        # 1. STFT in chunks: [N, Ci, T] -> [N, Ci, time_stft, freq]
+        stft_chunks = []
+        for start in range(0, N, stft_chunk_size):
+            chunk = torch.from_numpy(subject_data[start : start + stft_chunk_size]).to(device)
+            with torch.no_grad():
+                stft_chunks.append(stft(chunk).cpu())
+        stft_data = torch.cat(stft_chunks, dim=0)  # [N, Ci, time_stft, freq]
+        _, _, time_stft, freq = stft_data.shape
+
+        # 2. Each channel as independent sample: [N*Ci, freq, time_stft]
+        stft_data = stft_data.view(N * Ci, time_stft, freq).permute(0, 2, 1)
+
+        # 3. Frozen BrainBERT in batches
+        embeddings = []
+        with torch.no_grad():
+            for i in tqdm(
+                range(0, len(stft_data), batch_size),
+                desc=f"Subject {subj_idx + 1}/{num_subjects} ({Ci}ch)",
+            ):
+                batch = stft_data[i : i + batch_size].float().to(device)
+                emb = model(batch, return_sequence=False)  # [batch, model_dim]
+                embeddings.append(emb.cpu())
+
+        # 4. Mean-pool over channels: [N*Ci, model_dim] -> [N, model_dim]
+        all_emb = torch.cat(embeddings, dim=0).view(N, Ci, -1)
+        subject_emb = all_emb.mean(dim=1).numpy()
+
+        print(f"  Subject {subj_idx + 1}: [{N}, {Ci}ch, {T}t] -> embedding {subject_emb.shape}")
+        all_subject_embeddings.append(subject_emb)
+
+    result = np.concatenate(all_subject_embeddings, axis=1)  # [N, model_dim * num_subjects]
+    print(f"Concatenated per-subject embeddings: {result.shape}")
+    return result
+
+
 # Simple MLP decoder to use on top of frozen features
 class MLPDecoder(nn.Module):
     """
@@ -787,6 +867,63 @@ def set_feature_extraction_config(experiment_config, raws, _df_word):
     if not data_params.preprocessor_params:
         data_params.preprocessor_params = {}
     data_params.preprocessor_params["model_dir"] = model_dir
+
+    return experiment_config
+
+
+@registry.register_config_setter("brainbert_per_subject")
+def set_per_subject_config(experiment_config, raws, _df_word):
+    """
+    Config setter for per-subject feature extraction + linear probe.
+
+    Sets input_dim = model_dim * num_subjects so the linear probe has the
+    correct input size for concatenated per-subject embeddings.
+    Enables per_subject_preprocessing so get_data() passes a list of
+    per-subject arrays to the preprocessor instead of concatenating channels.
+    """
+    from .config import load_config
+
+    model_params = experiment_config.model_spec.params
+    data_params = experiment_config.task_config.data_params
+
+    # Load foundation model config to get model_dim
+    model_dir = model_params["model_dir"]
+    config_path = os.path.join(model_dir, "config.yaml")
+    foundation_config = load_config(config_path)
+    model_dim = foundation_config.model_dim
+
+    # input_dim = model_dim * num_subjects
+    num_subjects = len(raws)
+    model_params["input_dim"] = model_dim * num_subjects
+    print(
+        f"Per-subject config: {num_subjects} subjects, model_dim={model_dim}, "
+        f"input_dim={model_dim * num_subjects}"
+    )
+
+    # Enable per-subject preprocessing
+    data_params.per_subject_preprocessing = True
+
+    # Set preprocessor params (including STFT config for per-subject processing)
+    sample_rate = data_params.target_sr or int(raws[0].info["sfreq"]) if raws else 512
+    stft_config = {
+        "freq_channel_cutoff": 40,
+        "nperseg": 400,
+        "noverlap": 350,
+        "normalizing": "zscore",
+        "fs": int(sample_rate),
+    }
+    if not data_params.preprocessor_params:
+        data_params.preprocessor_params = {}
+    data_params.preprocessor_params["model_dir"] = model_dir
+    data_params.preprocessor_params["stft_config"] = stft_config
+
+    # Set output dim from task
+    task_name = experiment_config.task_config.task_name
+    task_specific_config = experiment_config.task_config.task_specific_config
+    if model_params.get("output_dim") is None:
+        output_dim = _default_output_dim_for_task(task_name, task_specific_config)
+        if output_dim is not None:
+            model_params["output_dim"] = output_dim
 
     return experiment_config
 

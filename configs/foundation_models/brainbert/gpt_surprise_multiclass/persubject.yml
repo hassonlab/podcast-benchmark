@@ -1,0 +1,45 @@
+config_setter_name: brainbert_per_subject
+model_spec:
+  constructor_name: brainbert_mlp
+  params:
+    model_dir: models/brainbert/pretrained_model
+    layer_sizes:
+    - 3
+    dropout: 0.0
+task_config:
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    target_sr: 2048
+    use_high_gamma: false
+    window_width: 1.0
+    per_subject_preprocessing: true
+    preprocessing_fn_name:
+    - brainbert_per_subject_feature_extraction
+  task_name: gpt_surprise_multiclass_task
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 32
+  early_stopping_metric: roc_auc_multiclass
+  early_stopping_patience: 10
+  epochs: 100
+  fold_ids:
+  - 1
+  - 5
+  lag_step_size: 500
+  learning_rate: 0.001
+  loss_weights:
+  - 1.0
+  losses:
+  - cross_entropy
+  max_lag: 1500
+  metrics:
+  - roc_auc_multiclass
+  - f1
+  - acc
+  min_lag: -1000
+  n_folds: 5
+  smaller_is_better: false
+  weight_decay: 1.0e-05
+trial_name: brainbert_persubject_gpt_surprise_multiclass
