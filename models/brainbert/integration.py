@@ -490,6 +490,9 @@ class ReferenceBrainBERTDecoder(nn.Module):
 
             pooled = pooled.view(batch_size, num_channels, -1)
             flattened = pooled.reshape(batch_size, -1)
+            if kwargs.get('return_feature_emb_instead_of_projection', False):
+                #* used for feature caching
+                return flattened
             out = self.projector(flattened)
         else:
             out = self.finetune_model(inputs, pad_mask)
