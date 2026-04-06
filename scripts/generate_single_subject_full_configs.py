@@ -10,19 +10,11 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_CONFIG_ROOT = REPO_ROOT / "configs" / "foundation_models"
 
-# Per-subject variant mappings. Models not listed here are skipped.
-PERSUBJECT_CONFIG_SETTER = {
-    "brainbert": "brainbert_per_subject",
-    "popt": "popt_per_subject",
-}
-PERSUBJECT_PREPROCESSOR = {
-    "brainbert": "brainbert_per_subject_feature_extraction",
-    "popt": "popt_per_subject_feature_extraction",
-}
-PERSUBJECT_MLP_CONSTRUCTOR = {
-    "brainbert": "brainbert_mlp",
-    "popt": "population_transformer_mlp",
-}
+# Models that support per-subject variant. Convention-based naming:
+#   config_setter:  {model}_per_subject
+#   preprocessor:   {model}_per_subject_feature_extraction
+#   constructor:    linear_probe  (shared, model-agnostic)
+PERSUBJECT_MODELS = {"brainbert", "popt"}
 
 
 def iter_supersubject_templates() -> list[Path]:
@@ -46,21 +38,21 @@ def build_subject_variant_config(template_cfg: dict, model: str, task: str, subj
 
 def build_persubject_variant_config(template_cfg: dict, model: str, task: str) -> dict | None:
     """Generate a persubject variant from a supersubject template."""
-    if model not in PERSUBJECT_MLP_CONSTRUCTOR:
+    if model not in PERSUBJECT_MODELS:
         return None
 
     cfg = yaml.safe_load(yaml.safe_dump(template_cfg))
 
-    cfg["config_setter_name"] = PERSUBJECT_CONFIG_SETTER[model]
+    cfg["config_setter_name"] = f"{model}_per_subject"
 
     task_config = cfg.setdefault("task_config", {})
     data_params = task_config.setdefault("data_params", {})
     data_params["per_subject_preprocessing"] = True
-    data_params["preprocessing_fn_name"] = [PERSUBJECT_PREPROCESSOR[model]]
+    data_params["preprocessing_fn_name"] = [f"{model}_per_subject_feature_extraction"]
 
     # Linear probe on concatenated per-subject embeddings
     model_spec = cfg.setdefault("model_spec", {})
-    model_spec["constructor_name"] = PERSUBJECT_MLP_CONSTRUCTOR[model]
+    model_spec["constructor_name"] = "linear_probe"
     old_params = model_spec.get("params", {})
     model_spec["params"] = {
         "model_dir": old_params.get("model_dir"),

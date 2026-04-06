@@ -1,6 +1,6 @@
 config_setter_name: popt_per_subject
 model_spec:
-  constructor_name: population_transformer_mlp
+  constructor_name: linear_probe
   params:
     model_dir: models/popt/pretrained_model
     layer_sizes:
