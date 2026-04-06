@@ -701,6 +701,10 @@ class ReferencePOPTDecoder(nn.Module):
             cls_repr = encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
 
         cls_repr = self.classifier_norm(cls_repr)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            #* used for feature caching
+            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
+            return cls_repr
         return self.head(cls_repr)
 
 

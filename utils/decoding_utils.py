@@ -758,13 +758,24 @@ def train_decoding_model(
         #if feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
         if getattr(model_spec, "feature_cache", False): 
             cache_loader_generation_start_time = time.time()
+            #redfining loaders (with cached model)
             loaders = {
-                "train" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["train"], device), training_params.batch_size, shuffle=False), #*training already shuffled we assume
+                "train" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["train"], device), training_params.batch_size, shuffle=True), #training already shuffled but we still shuffle since each epoch should see data in different order for better convergence
                 "val" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["val"], device), training_params.batch_size, shuffle=False),
                 "test" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["test"], device), training_params.batch_size, shuffle=False),
             }
             print(f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}")
-            model = SqueezeWrapper(feature_head = model.projector, output_dim=model.output_dim).to(device)
+                
+            #redefining model
+            model_name = str(model.__class__.__name__)
+            if model_name == "ReferenceBrainBERTDecoder":  #*brainbert
+                model = SqueezeWrapper(feature_head = model.projector, output_dim=model.output_dim).to(device)
+            elif model_name == "ReferencePOPTDecoder" : #*popt
+                model = MakeIgnoreKwargsDuringForward(model.head).to(device) 
+            elif model_name == "DIVERDecoder" : #*DIVFER
+                model = DIVERCachedFeatureAdapterModel(model.diver_model.ft_core_model, model.diver_model.ft_model_output_adapter).to(device)
+            else :
+                raise NotImplementedError(f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}")
         
         loop_start_time = time.time() #! remove later 
         for epoch in loop:
@@ -1153,3 +1164,24 @@ class SqueezeWrapper(nn.Module):
         if self.output_dim == 1 and out.shape[-1] == 1:
             out = out.squeeze(-1)
         return out
+    
+class MakeIgnoreKwargsDuringForward(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, x, **kwargs):
+        return self.module(x)
+    
+class DIVERCachedFeatureAdapterModel(nn.Module):
+    def __init__(self, core_module, output_adapter):
+        super().__init__()
+        self.core_module = core_module
+        self.output_adapter = output_adapter
+        
+    def forward(self, x, **kwargs):
+        core_out = self.core_module(x) #*ignores kwargs as not needed.. kinda adhoc 
+        adapted_out = self.output_adapter(core_out)
+        if adapted_out.shape[-1] == 1:
+            adapted_out = adapted_out.squeeze(-1)
+        return adapted_out
