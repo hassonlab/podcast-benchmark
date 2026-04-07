@@ -571,6 +571,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
             pooled = pooled.view(batch_size, num_channels, -1)
             flattened = pooled.reshape(batch_size, -1)
             if kwargs.get('return_feature_emb_instead_of_projection', False):
+                assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
                 #* used for feature caching
                 return flattened
             out = self.projector(flattened)

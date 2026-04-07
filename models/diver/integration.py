@@ -395,8 +395,18 @@ class DIVERDecoder(nn.Module):
         elif data_info_list is None:
             # Fallback: create default data_info_list without coordinates
             data_info_list = create_data_info_list(batch_size, num_channels)
-
-        # DIVER model forward (outputs logits)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            # DIVER model forward (outputs logits)
+            # for ref : model.diver_model.backbone/ft_core_model/ft_core_model/ft_model_output_adapter
+            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
+            return self.diver_model.ft_model_input_adapter(
+                self.diver_model.feature_extraction_func(
+                    self.diver_model.backbone(
+                        x, data_info_list=data_info_list, use_mask=False, return_encoder_output=True
+                        ), 
+                    data_info_list=data_info_list), 
+                data_info_list=data_info_list)
+        
         output = self.diver_model(x, data_info_list=data_info_list)
         
         # Apply output activation to convert logits to probabilities
