@@ -215,17 +215,16 @@ fi
 # Build dependency installation string
 DEPS=""
 if [ "$INSTALL_GPU" = true ] && [ "$INSTALL_DEV" = true ]; then
-    DEPS="[all]"
-    echo "Installing with GPU and development dependencies..."
+    DEPS="[gpu,dev]"
+    echo "Installing base, GPU, and development dependencies..."
 elif [ "$INSTALL_GPU" = true ]; then
     DEPS="[gpu]"
-    echo "Installing with GPU dependencies..."
+    echo "Installing base and GPU dependencies..."
 elif [ "$INSTALL_DEV" = true ]; then
     DEPS="[dev]"
-    echo "Installing with development dependencies..."
+    echo "Installing base and development dependencies..."
 else
-    DEPS="[tensorboard]"
-    echo "Installing base dependencies only..."
+    echo "Installing base dependencies..."
 fi
 
 # Upgrade pip, setuptools, wheel in the virtual environment

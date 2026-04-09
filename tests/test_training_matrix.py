@@ -59,7 +59,8 @@ def get_all_config_paths(training_matrix, configs_dir):
                 continue
 
             for config_file in config_files:
-                # Assume configs are in configs/{model_name}/ directory
+                # MODEL keys may include nested category paths such as
+                # "baselines/neural_conv_decoder" or "controls/llm_decoding".
                 config_path = configs_dir / model_name / config_file
                 config_paths.append((model_name, task_name, config_path))
 

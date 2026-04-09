@@ -65,8 +65,11 @@ def build_model_from_spec(
     model_info = model_constructor_registry[model_spec.constructor_name]
     constructor_fn = model_info["constructor"]
 
-    # Combine params and built sub-models into a single kwargs dict
+    # Combine params and built sub-models into a single kwargs dict.
+    # Forward top-level flags into model params for convenience/compatibility.
     all_kwargs = {**model_spec.params, **built_sub_models}
+    if "feature_cache" not in all_kwargs:
+        all_kwargs["feature_cache"] = model_spec.feature_cache
 
     # Build the model
     model = constructor_fn(all_kwargs)

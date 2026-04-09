@@ -1,0 +1,48 @@
+config_setter_name: brainbert_finetune
+model_spec:
+  constructor_name: brainbert_finetune
+  params:
+    dropout: 0.0
+    freeze_foundation: true
+    mlp_layer_sizes: []
+    model_dir: models/brainbert/pretrained_model
+    output_dim: 1
+  sub_models: {}
+task_config:
+  data_params:
+    data_root: data
+    electrode_file_path: null
+    target_sr: 2048
+    use_high_gamma: false
+    window_width: 1.0
+    subject_ids:
+    - 6
+    channel_reg_ex: null
+    per_subject_electrodes: null
+  task_name: gpt_surprise_task
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 4
+  early_stopping_metric: mse
+  early_stopping_patience: 10
+  epochs: 100
+  lag_step_size: 500
+  learning_rate: 1.0e-05
+  loss_weights:
+  - 1.0
+  losses:
+  - mse
+  max_lag: 1500
+  metrics:
+  - mse
+  - corr
+  - r2
+  min_lag: -1000
+  n_folds: 5
+  smaller_is_better: true
+  weight_decay: 1.0e-05
+  fold_ids:
+  - 1
+  - 5
+trial_name: brainbert_subject6_full_gpt_surprise

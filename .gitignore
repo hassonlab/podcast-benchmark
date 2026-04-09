@@ -183,6 +183,27 @@ checkpoints/
 results/
 logs/
 event_logs/
+commands/*
+!commands/README.md
+!commands/submit-task.sh
+!commands/job-status.sh
+!commands/job-cancel.sh
+!commands/debug/
+!commands/debug/**
+!commands/internal/
+!commands/internal/**
+!commands/experimental/
+commands/experimental/*
+!commands/experimental/lazy_volume_level/
+commands/experimental/lazy_volume_level/*
+!commands/experimental/lazy_volume_level/README.md
+!commands/experimental/lazy_volume_level/submit-task.sh
+!commands/experimental/lazy_volume_level/debug/
+!commands/experimental/lazy_volume_level/debug/**
+!commands/experimental/lazy_volume_level/internal/
+!commands/experimental/lazy_volume_level/internal/**
+commands/experimental/lazy_volume_level/*.tsv
+!commands/run-local.sh
 
 # cursor docs
 cursor_docs/

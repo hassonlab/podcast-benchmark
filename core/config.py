@@ -50,6 +50,14 @@ class DataParams:
     # A user defined configuration for their specific models preprocessor function.  Can provide either a single value or a
     # list of parameters to apply in order. Should align with desired function in preprocessing_fn_name.
     preprocessor_params: Optional[dict | list[dict]] = None
+    # Reference foundation-model configs may toggle this explicitly even though the
+    # current root pipeline routes STFT through preprocessing_fn_name.
+    use_stft_preprocessing: bool = False
+    # Optional STFT configuration used by foundation-model config setters.
+    stft_config: Optional[dict] = None
+    # Optional flag for models that consume electrode coordinates in their own
+    # model_data_getter / forward kwargs path.
+    use_lip_coords: bool = False
     # The name of the column in the DataFrame returned by the task data getter that specifies the word for each
     # example. Optional if your task does not involve words.
     word_column: Optional[str] = None
@@ -172,6 +180,8 @@ class ModelSpec:
     Attributes:
         constructor_name: Name of the registered model constructor function
         params: Dictionary of parameters to pass to the constructor (excluding sub-models)
+        feature_cache: Optional flag to enable feature caching paths in model integrations.
+                      This is forwarded into constructor params as `feature_cache`.
         sub_models: Dictionary mapping parameter names to ModelSpec objects.
                    The keys indicate the keyword argument names that will receive
                    the built sub-models when constructing the parent model.
@@ -196,6 +206,7 @@ class ModelSpec:
 
     constructor_name: str
     params: Dict[str, Any] = field(default_factory=dict)
+    feature_cache: bool = False
     sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
     checkpoint_path: Optional[str] = None
     # Optional model_data_getter name. If specified, this getter will be called to
