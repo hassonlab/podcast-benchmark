@@ -17,15 +17,22 @@ def neural_conv_config_setter(
         relevant_model_constructors,
     )
 
+    pp = experiment_config.task_config.data_params.preprocessor_params
+    if isinstance(pp, list):
+        num_average_samples = next(
+            (p.get("num_average_samples") for p in pp if isinstance(p, dict) and "num_average_samples" in p),
+            None,
+        )
+    else:
+        num_average_samples = pp.get("num_average_samples") if pp else None
+
     set_model_spec_fields(
         experiment_config.model_spec,
         {
             "input_timesteps": np.floor(
                 experiment_config.task_config.data_params.window_width * 512
             )
-            // experiment_config.task_config.data_params.preprocessor_params.get(
-                "num_average_samples"
-            )
+            // num_average_samples
         },
         relevant_model_constructors,
     )

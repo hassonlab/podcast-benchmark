@@ -1,0 +1,22 @@
+# Global PCA training configuration — k=8 components (for fair comparison with SRM k=8)
+# Run with: python shared_space/scripts/train_global_pca.py --config shared_space/configs/podcast_global_pca_k8.yml
+
+# --- Data ---
+data_params:
+  data_root: data
+  electrode_file_path: processed_data/all_subject_sig.csv
+  use_high_gamma: true
+  window_width: 0.625
+  num_average_samples: 32
+
+# --- PCA ---
+pca_params:
+  features: 8
+
+# --- Training ---
+training_params:
+  vae_stride_ms: 50
+  transcript_path: data/stimuli/podcast_transcript.csv
+
+# --- Output ---
+checkpoint_path: shared_space/checkpoints/global_pca_podcast_k8.pkl

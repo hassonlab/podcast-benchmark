@@ -1,0 +1,29 @@
+# Train MultiPatientTemporalVAE on Raider movie fMRI (first half; half 2 held out for TSM).
+#
+#   python fmri_raiders/train_temporal_vae.py --config fmri_raiders/configs/raider_temporal_vae.yml
+#
+# k=256, enc/dec=512 (batch 32) — if CUDA OOM use batch_size 16 or enc/dec 384.
+
+data_params:
+  raider_dir: data/raider
+  movie_split_for_training: first_half
+  half_tr: 15
+  num_average_samples: 3
+  stride_tr: 3
+
+tvae_params:
+  shared_channels: 256
+  enc_ch: 512
+  dec_ch: 512
+  input_timesteps: 10
+  beta: 0.1
+  alpha: 1.0
+
+training_params:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  grad_clip_norm: 5.0
+
+checkpoint_path: fmri_raiders/checkpoints/raider_temporal_vae.pt

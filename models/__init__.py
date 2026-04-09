@@ -1,2 +1,1 @@
 from models import neural_conv_decoder
-from models import example_foundation_model

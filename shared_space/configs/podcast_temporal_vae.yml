@@ -1,0 +1,31 @@
+# MultiPatientTemporalVAE training configuration
+# Temporal latent (k, T) + cross-reconstruction loss to enforce shared space
+# Run with: python shared_space/scripts/train_temporal_vae.py --config shared_space/configs/podcast_temporal_vae.yml
+
+# --- Data ---
+data_params:
+  data_root: data
+  electrode_file_path: processed_data/all_subject_sig.csv
+  use_high_gamma: true
+  window_width: 0.625
+  num_average_samples: 32
+
+# --- TemporalVAE architecture ---
+tvae_params:
+  shared_channels: 8    # k — same as SRM k=8 for fair comparison
+  enc_ch: 32            # intermediate encoder channels
+  dec_ch: 32            # intermediate decoder channels
+  input_timesteps: 10   # floor(0.625 * 512) // 32
+  beta: 0.1             # KL weight
+  alpha: 1.0            # cross-reconstruction weight
+
+# --- Training ---
+training_params:
+  vae_stride_ms: 50
+  batch_size: 128
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+# --- Output ---
+checkpoint_path: shared_space/checkpoints/temporal_vae_podcast.pt

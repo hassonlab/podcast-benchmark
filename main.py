@@ -22,6 +22,11 @@ import_all_from_package("models", recursive=True)
 import_all_from_package("tasks", recursive=True)
 import_all_from_package("metrics", recursive=True)
 
+try:
+    import shared_space.vae_pipeline  # noqa: registers vae_reconstruct preprocessor and neural_conv_vae config setter
+except ImportError:
+    pass
+
 
 def set_seed(seed=42, cudnn_deterministic=False):
     """

@@ -1,0 +1,23 @@
+# Global PCA training configuration
+# Run with: python shared_space/scripts/train_global_pca.py --config shared_space/configs/podcast_global_pca.yml
+#
+# Fits PCA on all subjects' electrodes concatenated into one big vector.
+# Reconstruction: x_rec = W @ W^T @ x  (same formula as SRM, but W from PCA not SRM)
+
+# --- Data ---
+data_params:
+  data_root: data
+  electrode_file_path: processed_data/all_subject_sig.csv
+  use_high_gamma: true
+  window_width: 0.625
+
+# --- PCA ---
+pca_params:
+  features: 50          # number of principal components (not limited by min electrodes)
+
+# --- Training (timepoint sampling) ---
+training_params:
+  vae_stride_ms: 50
+
+# --- Output ---
+checkpoint_path: shared_space/checkpoints/global_pca_podcast.pkl
