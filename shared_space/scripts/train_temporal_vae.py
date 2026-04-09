@@ -110,6 +110,7 @@ def main():
     input_timesteps  = tvae_cfg.get("input_timesteps", 10)
     beta             = tvae_cfg.get("beta", 0.1)
     alpha            = tvae_cfg.get("alpha", 1.0)
+    dropout_p        = float(tvae_cfg.get("dropout_p", 0.0))
     num_avg_samples  = data_cfg.get("num_average_samples", 32)
 
     # ------------------------------------------------------------------
@@ -177,6 +178,7 @@ def main():
         dec_ch=dec_ch,
         shared_channels=shared_channels,
         input_timesteps=input_timesteps,
+        dropout_p=dropout_p,
     ).to(device)
 
     model.set_normalization_stats(norm_means, norm_stds)
@@ -222,7 +224,7 @@ def main():
                 raw_arrays, batch_centers, half_win, num_avg_samples, device
             )
 
-            x_recs_norm, xs_norm, mu_avg, logvar_avg, cross_recs = model(xs_batch)
+            x_recs_norm, xs_norm, mu_avg, logvar_avg, cross_recs, _mus = model(xs_batch)
 
             # L_recon: reconstruction from z_avg
             l_recon = torch.stack([

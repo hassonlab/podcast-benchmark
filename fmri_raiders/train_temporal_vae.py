@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""
+Train ``MultiPatientTemporalVAE`` on Raider movie data (numpy).
+
+Uses the same model as podcast iEEG (``shared_space.models.patient_temporal_vae``), with
+voxel × TR windows: ``2 * half_tr`` TRs pooled to ``input_timesteps`` channels.
+
+Training objective matches ``shared_space/scripts/train_temporal_vae.py`` (podcast)::
+
+    L_recon + alpha * L_cross + beta * L_kl
+
+Voxel normalization: mean/std over the same TR span as ``movie_split_for_training`` (half 1 or
+full movie). No val split, input noise, or encoder dropout.
+
+Run from repo root (defaults to **GPU**; fails if CUDA is unavailable)::
+
+    python fmri_raiders/train_temporal_vae.py --config fmri_raiders/configs/raider_temporal_vae.yml
+
+Use ``--device auto`` or ``--device cpu`` only if you intentionally avoid the GPU.
+
+Requires: torch (no BrainIAK).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+import yaml
+
+from fmri_raiders import raider_data
+from fmri_raiders import cli_style
+from fmri_raiders.torch_device import pick_device
+from fmri_raiders.vae_windows import assert_window_shapes, extract_batch_windows_fmri
+from shared_space.models.patient_temporal_vae import MultiPatientTemporalVAE
+
+
+def _batch_losses(
+    model: MultiPatientTemporalVAE,
+    xs_batch: list[torch.Tensor],
+    N: int,
+    alpha: float,
+    beta: float,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    x_recs_norm, xs_norm, mu_avg, logvar_avg, cross_recs, _mus = model(xs_batch)
+    l_recon = torch.stack(
+        [F.mse_loss(rec, xn) for rec, xn in zip(x_recs_norm, xs_norm)]
+    ).mean()
+    cross_list = [
+        F.mse_loss(cross_recs[(j, i)], xs_norm[j])
+        for i in range(N)
+        for j in range(N)
+        if i != j
+    ]
+    l_cross = torch.stack(cross_list).mean() if cross_list else torch.tensor(0.0, device=device)
+    l_kl = -0.5 * (1 + logvar_avg - mu_avg.pow(2) - logvar_avg.exp()).mean()
+    loss = l_recon + alpha * l_cross + beta * l_kl
+    return loss, l_recon, l_cross, l_kl
+
+
+def _parse_overrides(unknown_args: list) -> dict:
+    overrides = {}
+    for arg in unknown_args:
+        if arg.startswith("--") and "=" in arg:
+            key, val = arg[2:].split("=", 1)
+            if key and val:
+                overrides[key] = yaml.safe_load(val)
+    return overrides
+
+
+def _apply_overrides(cfg: dict, overrides: dict) -> dict:
+    for key_path, value in overrides.items():
+        parts = key_path.split(".")
+        node = cfg
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return cfg
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train temporal VAE on Raider fMRI")
+    parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--device",
+        choices=("cuda", "cpu", "auto"),
+        default="cuda",
+        help="cuda (default): require GPU; auto: GPU if available else CPU; cpu: CPU only",
+    )
+    parser.add_argument("--cpu", action="store_true", help=argparse.SUPPRESS)
+    args, unknown_args = parser.parse_known_args()
+    if args.cpu:
+        args.device = "cpu"
+    overrides = _parse_overrides(unknown_args)
+
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+    if overrides:
+        cli_style.rule(title="CLI overrides")
+        for k, v in overrides.items():
+            print(f"  {cli_style.dim(k)} → {v}")
+        print()
+        _apply_overrides(cfg, overrides)
+
+    data_cfg = cfg["data_params"]
+    tvae_cfg = cfg["tvae_params"]
+    train_cfg = cfg["training_params"]
+    ckpt_path = cfg["checkpoint_path"]
+
+    rd = data_cfg.get("raider_dir", "data/raider")
+    raider_dir = rd if os.path.isabs(rd) else os.path.join(_PROJECT_ROOT, rd)
+
+    movie_data, vox_num, n_tr, num_subs = raider_data.load_movie(raider_dir)
+    split_mode = data_cfg.get("movie_split_for_training", "first_half")
+    if split_mode == "first_half":
+        half_movie = n_tr // 2
+        movie_slice = movie_data[:, :half_movie, :]
+        n_tr_use = half_movie
+    elif split_mode == "full":
+        movie_slice = movie_data
+        n_tr_use = n_tr
+    else:
+        raise ValueError("movie_split_for_training must be 'first_half' or 'full'")
+
+    raw_arrays = [movie_slice[:, :, sub].astype(np.float32, copy=False) for sub in range(num_subs)]
+
+    half_tr = int(data_cfg["half_tr"])
+    num_average_samples = int(data_cfg["num_average_samples"])
+    stride_tr = int(data_cfg.get("stride_tr", 5))
+    shared_channels = int(tvae_cfg.get("shared_channels", 8))
+    enc_ch = int(tvae_cfg.get("enc_ch", 32))
+    dec_ch = int(tvae_cfg.get("dec_ch", 32))
+    input_timesteps = int(tvae_cfg.get("input_timesteps", 10))
+    beta = float(tvae_cfg.get("beta", 0.1))
+    alpha = float(tvae_cfg.get("alpha", 1.0))
+
+    assert_window_shapes(half_tr, num_average_samples, input_timesteps)
+
+    norm_means, norm_stds = [], []
+    for arr in raw_arrays:
+        mean = arr.mean(axis=1)
+        std = arr.std(axis=1).clip(min=1e-6)
+        norm_means.append(torch.tensor(mean, dtype=torch.float32))
+        norm_stds.append(torch.tensor(std, dtype=torch.float32))
+
+    center_trs = list(range(half_tr, n_tr_use - half_tr, stride_tr))
+    if not center_trs:
+        raise ValueError(
+            f"No window centers: n_TR_use={n_tr_use}, half_tr={half_tr}. "
+            "Reduce half_tr or use more TRs."
+        )
+
+    n_electrodes_list = [arr.shape[0] for arr in raw_arrays]
+    device = pick_device(args.device)
+    cli_style.banner("training")
+    _protocol = (
+        "BrainIAK tutorial: movie TSM/ISC use 1st half for training only (2nd half held out)"
+        if split_mode == "first_half"
+        else "Full movie (tutorial image exercise); not for held-out movie TSM"
+    )
+    _norm_label = (
+        "full movie (all training TRs)"
+        if split_mode == "full"
+        else "first-half TRs only (voxel μ/σ; half 2 excluded)"
+    )
+    cli_style.key_value_block(
+        [
+            ("Device", str(device)),
+            ("Protocol", _protocol),
+            ("Voxels × TR × subjects", f"{vox_num} × {n_tr} × {num_subs}"),
+            ("Training span", f"{n_tr_use} TR ({split_mode})"),
+            ("Window centers", str(len(center_trs))),
+            ("Stride (TR)", str(stride_tr)),
+            ("Norm scope", _norm_label),
+            ("Latent k × T", f"{shared_channels} × {input_timesteps}"),
+            ("Channels enc / dec", f"{enc_ch} / {dec_ch}"),
+        ]
+    )
+    cli_style.rule()
+    print(
+        f"  {cli_style.dim('Loss')}  "
+        f"L_recon + {alpha}·L_cross + {beta}·L_kl (same as podcast temporal VAE trainer)"
+    )
+    cli_style.rule()
+
+    model = MultiPatientTemporalVAE(
+        n_electrodes_list=n_electrodes_list,
+        enc_ch=enc_ch,
+        dec_ch=dec_ch,
+        shared_channels=shared_channels,
+        input_timesteps=input_timesteps,
+        dropout_p=0.0,
+    ).to(device)
+    model.set_normalization_stats(norm_means, norm_stds)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(train_cfg.get("learning_rate", 1e-3)),
+        weight_decay=float(train_cfg.get("weight_decay", 1e-4)),
+    )
+    batch_size = int(train_cfg.get("batch_size", 64))
+    n_epochs = int(train_cfg.get("epochs", 50))
+    grad_clip = float(train_cfg.get("grad_clip_norm", 5.0))
+    N = num_subs
+
+    for epoch in range(1, n_epochs + 1):
+        model.train()
+        total_loss = l_recon_acc = l_cross_acc = l_kl_acc = 0.0
+        n_batches = 0
+        shuffled = [center_trs[i] for i in np.random.permutation(len(center_trs))]
+
+        for batch_start in range(0, len(shuffled), batch_size):
+            batch_centers = shuffled[batch_start : batch_start + batch_size]
+            if not batch_centers:
+                continue
+            xs_batch = extract_batch_windows_fmri(
+                raw_arrays, batch_centers, half_tr, num_average_samples, device
+            )
+
+            loss, l_recon, l_cross, l_kl = _batch_losses(
+                model, xs_batch, N, alpha, beta, device
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+
+            total_loss += loss.item()
+            l_recon_acc += l_recon.item()
+            l_cross_acc += l_cross.item()
+            l_kl_acc += l_kl.item()
+            n_batches += 1
+
+        if n_batches == 0:
+            continue
+
+        cli_style.epoch_line(
+            epoch,
+            n_epochs,
+            total_loss / n_batches,
+            l_recon_acc / n_batches,
+            l_cross_acc / n_batches,
+            l_kl_acc / n_batches,
+        )
+
+    os.makedirs(os.path.dirname(os.path.abspath(ckpt_path)) or ".", exist_ok=True)
+    out_path = ckpt_path if os.path.isabs(ckpt_path) else os.path.join(_PROJECT_ROOT, ckpt_path)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+
+    bundle = {
+        "state_dict": model.state_dict(),
+        "config": model._config,
+        "raider_window": {
+            "half_tr": half_tr,
+            "num_average_samples": num_average_samples,
+            "stride_tr": stride_tr,
+            "movie_split_for_training": split_mode,
+        },
+    }
+    torch.save(bundle, out_path)
+    cli_style.done_line(f"Checkpoint saved → {out_path}")
+
+
+if __name__ == "__main__":
+    main()

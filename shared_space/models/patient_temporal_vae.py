@@ -55,17 +55,33 @@ from typing import Optional
 class TemporalPatientEncoder(nn.Module):
     """Per-patient encoder: (n_elec_i, T) → mu (k, T), logvar (k, T)."""
 
-    def __init__(self, n_electrodes: int, enc_ch: int, shared_channels: int):
+    def __init__(
+        self,
+        n_electrodes: int,
+        enc_ch: int,
+        shared_channels: int,
+        dropout_p: float = 0.0,
+    ):
         super().__init__()
         k = shared_channels
-        self.backbone = nn.Sequential(
+        b1: list[nn.Module] = [
             nn.Conv1d(n_electrodes, enc_ch, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.BatchNorm1d(enc_ch),
+        ]
+        if dropout_p > 0:
+            b1.append(nn.Dropout1d(dropout_p))
+        b2: list[nn.Module] = [
             nn.Conv1d(enc_ch, enc_ch, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.BatchNorm1d(enc_ch),
-            nn.Conv1d(enc_ch, k, kernel_size=1),   # temporal bottleneck
+        ]
+        if dropout_p > 0:
+            b2.append(nn.Dropout1d(dropout_p))
+        self.backbone = nn.Sequential(
+            *b1,
+            *b2,
+            nn.Conv1d(enc_ch, k, kernel_size=1),  # temporal bottleneck
         )
         self.mu_head     = nn.Conv1d(k, k, kernel_size=1)
         self.logvar_head = nn.Conv1d(k, k, kernel_size=1)
@@ -110,6 +126,7 @@ class MultiPatientTemporalVAE(nn.Module):
         dec_ch: int,
         shared_channels: int,
         input_timesteps: int,
+        dropout_p: float = 0.0,
     ):
         super().__init__()
         self._config = {
@@ -118,12 +135,13 @@ class MultiPatientTemporalVAE(nn.Module):
             "dec_ch": dec_ch,
             "shared_channels": shared_channels,
             "input_timesteps": input_timesteps,
+            "dropout_p": float(dropout_p),
         }
         self.shared_channels = shared_channels
         self.input_timesteps = input_timesteps
 
         self.encoders = nn.ModuleList([
-            TemporalPatientEncoder(n, enc_ch, shared_channels)
+            TemporalPatientEncoder(n, enc_ch, shared_channels, dropout_p=dropout_p)
             for n in n_electrodes_list
         ])
         self.decoders = nn.ModuleList([
@@ -165,10 +183,12 @@ class MultiPatientTemporalVAE(nn.Module):
             mu_avg:      (batch, k, T) — shared latent mean
             logvar_avg:  (batch, k, T) — shared latent log-variance
             cross_recs:  dict (j, i) → decoder_j(mu_i), for all i≠j pairs
+            mus:         list of μ_i per subject, each (batch, k, T) (same tensors used inside forward)
         """
         xs_norm = [self._normalize(i, x) for i, x in enumerate(xs)]
 
-        mus, logvars = [], []
+        mus: list[torch.Tensor] = []
+        logvars = []
         for i, xn in enumerate(xs_norm):
             mu, logvar = self.encoders[i](xn)
             mus.append(mu)
@@ -191,7 +211,7 @@ class MultiPatientTemporalVAE(nn.Module):
                 if i != j:
                     cross_recs[(j, i)] = self.decoders[j](mus[i])
 
-        return x_recs_norm, xs_norm, mu_avg, logvar_avg, cross_recs
+        return x_recs_norm, xs_norm, mu_avg, logvar_avg, cross_recs, mus
 
     # ------------------------------------------------------------------
     # Encode (evaluation) — returns averaged mu across patients

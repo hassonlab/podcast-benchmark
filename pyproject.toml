@@ -56,6 +56,11 @@ tensorboard = [
     "tensorboard>=2.15.0",
 ]
 
+# BrainIAK SRM / ISC for fmri_raiders (Raider tutorial replication)
+fmri = [
+    "brainiak>=0.11",
+]
+
 # GPU support for PyTorch
 gpu = [
     "nvidia-cublas-cu12==12.4.5.8",
@@ -81,7 +86,7 @@ dev = [
 
 # Full installation with all optional features
 all = [
-    "podcast-benchmark[test,tensorboard,gpu]",
+    "podcast-benchmark[test,tensorboard,gpu,fmri]",
 ]
 
 [tool.setuptools.packages.find]
