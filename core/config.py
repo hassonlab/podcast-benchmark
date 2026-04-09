@@ -69,9 +69,6 @@ class DataParams:
     target_sr: Optional[int] = None
     # If set to uV then will scale raw data to microvolts. Otherwise will keep original units (V).
     signal_unit: Optional[str] = None
-    # If true, preprocessing functions receive a list of per-subject arrays
-    # instead of a single concatenated array. Used by per-subject FM pipelines.
-    per_subject_preprocessing: bool = False
     # If true, will drop bad channels marked in raw.info['bads'] after loading data.
     do_drop_bads: bool = True
 

@@ -431,7 +431,6 @@ def get_data(
     window_width: float,
     preprocessing_fns=None,
     preprocessor_params: dict = None,
-    per_subject_preprocessing: bool = False,
 ):
     """Gather data for every row in task_df from raw.
 
@@ -493,12 +492,9 @@ def get_data(
     if len(datas) == 0:
         raise ValueError("No valid events found within data time bounds")
 
-    if per_subject_preprocessing:
-        # Per-subject mode: pass list of per-subject [N, Ci, T] arrays to preprocessor
-        datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
-    else:
-        datas = np.concatenate(datas, axis=1)
-        datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
+    datas = np.concatenate(datas, axis=1)
+
+    datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
 
     return datas, selected_targets, selected_rows_df
 

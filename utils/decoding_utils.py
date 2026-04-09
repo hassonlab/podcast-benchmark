@@ -1045,7 +1045,6 @@ def run_training_over_lags(
             data_params.window_width,
             preprocessing_fns,
             data_params.preprocessor_params,
-            per_subject_preprocessing=data_params.per_subject_preprocessing,
         )
 
         neural_tensor = torch.FloatTensor(neural_data)
