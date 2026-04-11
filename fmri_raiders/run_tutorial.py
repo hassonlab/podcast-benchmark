@@ -144,8 +144,8 @@ def main():
     parser.add_argument(
         "--image-srm-features",
         type=int,
-        default=100,
-        help="SRM features for movie→image transfer (tutorial exercise 9)",
+        default=50,
+        help="SRM features for movie→image transfer (tutorial exercise 9; default 50 like --features)",
     )
     parser.add_argument("--skip-image", action="store_true", help="Skip §7 image classification")
     args = parser.parse_args()

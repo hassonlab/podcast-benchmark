@@ -49,12 +49,12 @@ def rule(char: str = "─", title: str | None = None) -> None:
         print(char * w)
 
 
-def banner(subtitle: str | None = None) -> None:
+def banner(subtitle: str | None = None, *, title: str = "Raider temporal VAE") -> None:
     w = _width()
-    title = "Raider temporal VAE"
+    full_title = title
     if subtitle:
-        title = f"{title} · {subtitle}"
-    line = f" {title} "
+        full_title = f"{title} · {subtitle}"
+    line = f" {full_title} "
     print()
     print(cyan("╭" + "─" * (w - 2) + "╮"))
     pad = w - 4 - len(line)

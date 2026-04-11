@@ -2,18 +2,22 @@
 """
 Evaluate Raider temporal VAE alongside BrainIAK tutorial 11 conventions (no BrainIAK required).
 
-Movie TSM: chronological split (first / second half of TRs). Raw voxels are z-scored within each
-half (tutorial). VAE latents use **μ_avg** per window (mean over subjects), mean-pooled over
-window time → **k** features per TR.
+**Movie TSM:** Chronological halves (z-scored voxels per half). **SRM** for TSM is **always**
+fit on movie **half 1 only**, **k=50** shared features (capped by voxels), then half 2 is
+transformed with the same ``W`` (held-out movie TRs for SRM). **VAE** latents use **μ_avg**
+(mean over encoders, mean-pooled) for each half; use ``--checkpoint-tsm`` with a **first_half**
+checkpoint for held-out half-2 VAE TSM.
 
-SRM baseline (BrainIAK): fits SRM with the same movie split as the checkpoint. Use
-``--no-compare-srm`` if BrainIAK/MPI is unavailable.
+**Image LOO:** **Full-movie** protocol — SRM is fit on the **entire** movie, then image runs are
+transformed (**k=50**). Use a **full_movie** VAE checkpoint for image encoding.
 
-Usage::
+**Two VAE checkpoints (recommended):** pass **both** ``--checkpoint-tsm`` and ``--checkpoint-image``
+(synonyms: ``--model-tsm``, ``--model-image``) — one network trained for movie TSM (typically
+``raider_temporal_vae.pt``, first half of the movie), and a **separate** network for image transfer
+(typically ``raider_temporal_vae_full_movie.pt``). For a single shared weights file only, pass
+``--checkpoint`` once (uses that file for both tasks).
 
-    python fmri_raiders/eval_temporal_vae.py \\
-        --checkpoint fmri_raiders/checkpoints/raider_temporal_vae.pt \\
-        --data-dir data/raider
+SRM baseline needs BrainIAK (``pip install -e ".[fmri]"``). Use ``--no-compare-srm`` to skip.
 """
 
 from __future__ import annotations
@@ -39,6 +43,14 @@ from shared_space.models.patient_temporal_vae import MultiPatientTemporalVAE
 TSM_WINDOW = 10
 ENCODE_BATCH = 1024
 SRM_N_ITER = 20
+# BrainIAK SRM latent dimension for TSM + image (fixed; capped by voxel count).
+SRM_SHARED_FEATURES = 50
+
+
+def _resolve_ckpt(path: str | None) -> str | None:
+    if not path:
+        return None
+    return path if os.path.isabs(path) else os.path.join(_PROJECT_ROOT, path)
 
 
 def load_raider_vae_checkpoint(path: str, map_location: str | None = None):
@@ -93,8 +105,40 @@ def zscore_time_features(data_list: list[np.ndarray]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate Raider temporal VAE (TSM + image LOO)")
-    parser.add_argument("--checkpoint", required=True, help="Path from train_temporal_vae.py")
+    parser = argparse.ArgumentParser(
+        description="Evaluate Raider temporal VAE (TSM + image LOO)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Two-model example (recommended):\n"
+            "  python fmri_raiders/eval_temporal_vae.py \\\n"
+            "    --checkpoint-tsm fmri_raiders/checkpoints/raider_temporal_vae.pt \\\n"
+            "    --checkpoint-image fmri_raiders/checkpoints/raider_temporal_vae_full_movie.pt \\\n"
+            "    --data-dir data/raider --device auto\n"
+            "Same using aliases: --model-tsm … --model-image …"
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint",
+        default=None,
+        metavar="PATH",
+        help="One .pt used for **both** TSM and image (only if you do not pass the two paths below)",
+    )
+    parser.add_argument(
+        "--checkpoint-tsm",
+        "--model-tsm",
+        default=None,
+        dest="checkpoint_tsm",
+        metavar="PATH",
+        help="VAE checkpoint **only** for movie TSM (e.g. first_half / raider_temporal_vae.pt)",
+    )
+    parser.add_argument(
+        "--checkpoint-image",
+        "--model-image",
+        default=None,
+        dest="checkpoint_image",
+        metavar="PATH",
+        help="VAE checkpoint **only** for image LOO (e.g. full_movie / raider_temporal_vae_full_movie.pt)",
+    )
     parser.add_argument("--data-dir", default=os.path.join(_PROJECT_ROOT, "data", "raider"))
     parser.add_argument(
         "--no-compare-srm",
@@ -110,38 +154,79 @@ def main() -> None:
     args = parser.parse_args()
 
     data_dir = args.data_dir if os.path.isabs(args.data_dir) else os.path.join(_PROJECT_ROOT, args.data_dir)
-    ckpt_path = args.checkpoint if os.path.isabs(args.checkpoint) else os.path.join(_PROJECT_ROOT, args.checkpoint)
+    path_single = _resolve_ckpt(args.checkpoint)
+    path_tsm = _resolve_ckpt(args.checkpoint_tsm)
+    path_img = _resolve_ckpt(args.checkpoint_image)
+    if path_tsm and path_img:
+        ckpt_tsm, ckpt_img = path_tsm, path_img
+    elif path_single and not path_tsm and not path_img:
+        ckpt_tsm = ckpt_img = path_single
+    elif path_single and (path_tsm or path_img):
+        parser.error("Do not mix --checkpoint with --checkpoint-tsm / --checkpoint-image; pick one style.")
+    elif path_tsm or path_img:
+        parser.error(
+            "Two models: pass **both** --checkpoint-tsm and --checkpoint-image "
+            "(or --model-tsm and --model-image). "
+            "Or pass only --checkpoint to use one file for both tasks."
+        )
+    else:
+        parser.error(
+            "Provide --checkpoint-tsm **and** --checkpoint-image (two checkpoints), "
+            "or a single --checkpoint for both TSM and image."
+        )
 
     device = pick_device(args.device)
-    model, meta = load_raider_vae_checkpoint(ckpt_path, map_location=str(device))
-    model.to(device)
-
-    half_tr = int(meta.get("half_tr", 15))
-    num_average_samples = int(meta.get("num_average_samples", 3))
-    train_mode = meta.get("movie_split_for_training", "unknown")
-    tsm_feat_dim = int(model.shared_channels)
-
-    cli_style.banner("evaluation")
-    if train_mode == "first_half":
-        _tsm_note = "TSM half 2 = held out from VAE (tutorial movie protocol)"
-    elif train_mode == "full":
-        _tsm_note = "TSM is not held-out generalization (VAE saw all TRs)"
+    model_tsm, meta_tsm = load_raider_vae_checkpoint(ckpt_tsm, map_location=str(device))
+    model_tsm.to(device)
+    if ckpt_tsm == ckpt_img:
+        model_img, meta_img = model_tsm, meta_tsm
     else:
-        _tsm_note = "Unknown train split in checkpoint; treat TSM rows cautiously"
+        model_img, meta_img = load_raider_vae_checkpoint(ckpt_img, map_location=str(device))
+        model_img.to(device)
 
-    cli_style.key_value_block(
-        [
-            ("Checkpoint", ckpt_path),
-            ("Window (half_TR / bin)", f"{half_tr} / {num_average_samples}"),
-            ("movie_split_for_training", train_mode),
-            ("VAE latent (eval)", "μ_avg only, mean-pooled → k"),
-            ("VAE TSM feature dim", str(tsm_feat_dim)),
-            ("TSM interpretation", _tsm_note),
-        ]
-    )
-    cli_style.rule()
+    half_tr = int(meta_tsm.get("half_tr", 15))
+    num_average_samples = int(meta_tsm.get("num_average_samples", 3))
+    vae_tsm_train = meta_tsm.get("movie_split_for_training", "unknown")
+    tsm_feat_dim = int(model_tsm.shared_channels)
+
+    half_tr_img = int(meta_img.get("half_tr", 15))
+    num_av_img = int(meta_img.get("num_average_samples", 3))
+    vae_img_train = meta_img.get("movie_split_for_training", "unknown")
 
     movie_data, vox_num, n_tr, num_subs = raider_data.load_movie(data_dir)
+    srm_k = min(SRM_SHARED_FEATURES, vox_num)
+
+    cli_style.banner("evaluation")
+    if vae_tsm_train == "first_half":
+        _tsm_note = "TSM VAE: half 2 held out from VAE if ckpt is first_half"
+    elif vae_tsm_train == "full":
+        _tsm_note = "TSM VAE: full-movie ckpt — half 2 seen in VAE loss (SRM TSM still half-1 fit)"
+    else:
+        _tsm_note = "Unknown VAE TSM checkpoint train split"
+
+    _kv = [
+        ("Checkpoint · TSM", ckpt_tsm),
+        ("Checkpoint · image LOO", ckpt_img),
+        ("SRM shared features k", str(srm_k)),
+        ("Window (TSM ckpt)", f"{half_tr} / {num_average_samples}"),
+        ("Window (image ckpt)", f"{half_tr_img} / {num_av_img}"),
+        ("movie_split_for_training · TSM ckpt", vae_tsm_train),
+        ("movie_split_for_training · image ckpt", vae_img_train),
+        ("VAE latent (eval)", "μ_avg only, mean-pooled → k"),
+        ("VAE k · TSM", str(tsm_feat_dim)),
+        ("VAE k · image", str(int(model_img.shared_channels))),
+        ("TSM protocol", "SRM always fit movie half 1; half 2 test"),
+        ("Image SRM / VAE protocol", "SRM on full movie; VAE from image ckpt"),
+        ("TSM note (VAE)", _tsm_note),
+    ]
+    if ckpt_tsm != ckpt_img:
+        _kv.insert(
+            2,
+            ("Note", "TSM uses --checkpoint-tsm; image LOO uses --checkpoint-image"),
+        )
+    cli_style.key_value_block(_kv)
+    cli_style.rule()
+
     train_list, test_list = raider_data.split_half_movie(movie_data, num_subs)
 
     raw_train = [x.copy() for x in train_list]
@@ -154,13 +239,13 @@ def main() -> None:
 
     print(
         f"\n  {cli_style.cyan('…')} "
-        f"{cli_style.dim('Encoding latents for movie half 1 and half 2 (chronological split)')}"
+        f"{cli_style.dim('Encoding TSM latents (movie half 1 & 2) with TSM checkpoint')}"
     )
     lat_train = encode_per_subject_latent_timeseries(
-        model, vae_train, half_tr, num_average_samples, device
+        model_tsm, vae_train, half_tr, num_average_samples, device
     )
     lat_test = encode_per_subject_latent_timeseries(
-        model, vae_test, half_tr, num_average_samples, device
+        model_tsm, vae_test, half_tr, num_average_samples, device
     )
 
     z_lat_tr = [x.copy() for x in lat_train]
@@ -169,29 +254,24 @@ def main() -> None:
     zscore_time_features(z_lat_te)
 
     cli_style.rule(title="Time-segment matching (BrainIAK tutorial 11 style)")
-    if train_mode == "first_half":
+    print(
+        cli_style.dim(
+            "  Raw: z-scored within each movie half. SRM: always fit on **half 1 only** (k=50), "
+            "transform half 2 (held out for SRM). VAE: encoded with TSM checkpoint."
+        )
+    )
+    if vae_tsm_train == "first_half":
         print(
             cli_style.dim(
-                "  Like the tutorial: raw data are z-scored within each movie half separately. "
-                "VAE was trained only on movie half 1; half 2 never appeared in the loss. "
-                "Compare VAE vs raw on half 2 for generalization to new movie TRs."
+                "  VAE half 2: not in VAE training loss (first_half checkpoint)."
             )
         )
-    elif train_mode == "full":
+    elif vae_tsm_train == "full":
         print(
             cli_style.bold("  Note: ")
             + cli_style.dim(
-                "This checkpoint used movie_split_for_training=full (all TRs). "
-                "Both chronological halves were in VAE training; half 2 is not held out. "
-                "TSM rows below are descriptive only. For tutorial-style held-out TSM, train with "
-                "raider_temporal_vae.yml (first_half) and evaluate that checkpoint."
-            )
-        )
-    else:
-        print(
-            cli_style.dim(
-                f"  Checkpoint missing or unknown movie_split_for_training ({train_mode!r}). "
-                "Cannot assert held-out protocol; verify how the model was trained."
+                "TSM checkpoint is full_movie — half 2 was in the VAE loss. "
+                "Use --checkpoint-tsm with raider_temporal_vae.pt for held-out half-2 VAE TSM."
             )
         )
 
@@ -202,15 +282,13 @@ def main() -> None:
     d_h2 = acc_vae_te.mean() - acc_raw_te.mean()
 
     acc_srm_tr = acc_srm_te = None
-    srm_k = None
     compare_srm = not args.no_compare_srm
-    if compare_srm and train_mode in ("first_half", "full"):
+    if compare_srm:
         try:
             from fmri_raiders.srm_raider import fit_srm_movie_halves
 
-            srm_k = tsm_feat_dim
             _sh_tr, _sh_te = fit_srm_movie_halves(
-                train_mode,
+                "first_half",
                 movie_data,
                 num_subs,
                 vox_num,
@@ -225,194 +303,86 @@ def main() -> None:
             print(f"  {cli_style.dim(f'Skip SRM baseline: {e}')}")
 
     def _srm_half1_label() -> str:
-        assert srm_k is not None
-        if train_mode == "first_half":
-            return f"SRM shared · movie half 1 (k={srm_k}; fit on half 1 only)"
-        return f"SRM shared · movie half 1 (k={srm_k}; full-movie SRM)"
+        return f"SRM shared · movie half 1 (k={srm_k}; fit on half 1 only)"
 
     def _srm_half2_label() -> str:
-        assert srm_k is not None
-        if train_mode == "first_half":
-            return f"SRM shared · movie half 2 (k={srm_k}; same W, half 2 not in SRM fit)"
-        return f"SRM shared · movie half 2 (k={srm_k}; full-movie SRM)"
+        return f"SRM shared · movie half 2 (k={srm_k}; same W, half 2 not in SRM fit)"
 
-    if train_mode == "first_half":
-        tsm_rows = [
-            (
-                "Raw voxels · movie half 1 (VAE train split)",
-                f"{acc_raw_tr.mean():.4f}",
-                f"{acc_raw_tr.std():.4f}",
-            ),
-            (
-                "VAE latent · movie half 1",
-                f"{acc_vae_tr.mean():.4f}",
-                f"{acc_vae_tr.std():.4f}",
-            ),
+    vae_h1 = "VAE latent · movie half 1"
+    vae_h2 = "VAE latent · movie half 2"
+    if vae_tsm_train == "first_half":
+        vae_h1 += " (VAE train split)"
+        vae_h2 += " (held out from VAE)"
+    elif vae_tsm_train == "full":
+        vae_h1 += " (chronological)"
+        vae_h2 += " (chronological; in VAE train)"
+
+    tsm_rows = [
+        ("Raw voxels · movie half 1", f"{acc_raw_tr.mean():.4f}", f"{acc_raw_tr.std():.4f}"),
+        (vae_h1, f"{acc_vae_tr.mean():.4f}", f"{acc_vae_tr.std():.4f}"),
+    ]
+    if acc_srm_tr is not None:
+        tsm_rows.append((_srm_half1_label(), f"{acc_srm_tr.mean():.4f}", f"{acc_srm_tr.std():.4f}"))
+    tsm_rows.extend(
+        [
+            ("Raw voxels · movie half 2", f"{acc_raw_te.mean():.4f}", f"{acc_raw_te.std():.4f}"),
+            (vae_h2, f"{acc_vae_te.mean():.4f}", f"{acc_vae_te.std():.4f}"),
         ]
-        if acc_srm_tr is not None:
-            tsm_rows.append(
-                (
-                    _srm_half1_label(),
-                    f"{acc_srm_tr.mean():.4f}",
-                    f"{acc_srm_tr.std():.4f}",
-                )
-            )
-        tsm_rows.extend(
-            [
-                (
-                    "Raw voxels · movie half 2 (held out from VAE)",
-                    f"{acc_raw_te.mean():.4f}",
-                    f"{acc_raw_te.std():.4f}",
-                ),
-                (
-                    "VAE latent · movie half 2",
-                    f"{acc_vae_te.mean():.4f}",
-                    f"{acc_vae_te.std():.4f}",
-                ),
-            ]
-        )
-        if acc_srm_te is not None:
-            tsm_rows.append(
-                (
-                    _srm_half2_label(),
-                    f"{acc_srm_te.mean():.4f}",
-                    f"{acc_srm_te.std():.4f}",
-                )
-            )
-    elif train_mode == "full":
-        tsm_rows = [
-            (
-                "Raw voxels · movie half 1 (chronological)",
-                f"{acc_raw_tr.mean():.4f}",
-                f"{acc_raw_tr.std():.4f}",
-            ),
-            (
-                "VAE latent · movie half 1",
-                f"{acc_vae_tr.mean():.4f}",
-                f"{acc_vae_tr.std():.4f}",
-            ),
-        ]
-        if acc_srm_tr is not None:
-            tsm_rows.append(
-                (
-                    _srm_half1_label(),
-                    f"{acc_srm_tr.mean():.4f}",
-                    f"{acc_srm_tr.std():.4f}",
-                )
-            )
-        tsm_rows.extend(
-            [
-                (
-                    "Raw voxels · movie half 2 (chronological; also in VAE train)",
-                    f"{acc_raw_te.mean():.4f}",
-                    f"{acc_raw_te.std():.4f}",
-                ),
-                (
-                    "VAE latent · movie half 2",
-                    f"{acc_vae_te.mean():.4f}",
-                    f"{acc_vae_te.std():.4f}",
-                ),
-            ]
-        )
-        if acc_srm_te is not None:
-            tsm_rows.append(
-                (
-                    _srm_half2_label(),
-                    f"{acc_srm_te.mean():.4f}",
-                    f"{acc_srm_te.std():.4f}",
-                )
-            )
-    else:
-        tsm_rows = [
-            ("Raw voxels · movie half 1", f"{acc_raw_tr.mean():.4f}", f"{acc_raw_tr.std():.4f}"),
-            ("VAE latent · movie half 1", f"{acc_vae_tr.mean():.4f}", f"{acc_vae_tr.std():.4f}"),
-        ]
-        if acc_srm_tr is not None:
-            tsm_rows.append(
-                (
-                    f"SRM shared · movie half 1 (k={srm_k})",
-                    f"{acc_srm_tr.mean():.4f}",
-                    f"{acc_srm_tr.std():.4f}",
-                )
-            )
-        tsm_rows.extend(
-            [
-                ("Raw voxels · movie half 2", f"{acc_raw_te.mean():.4f}", f"{acc_raw_te.std():.4f}"),
-                ("VAE latent · movie half 2", f"{acc_vae_te.mean():.4f}", f"{acc_vae_te.std():.4f}"),
-            ]
-        )
-        if acc_srm_te is not None:
-            tsm_rows.append(
-                (
-                    f"SRM shared · movie half 2 (k={srm_k})",
-                    f"{acc_srm_te.mean():.4f}",
-                    f"{acc_srm_te.std():.4f}",
-                )
-            )
+    )
+    if acc_srm_te is not None:
+        tsm_rows.append((_srm_half2_label(), f"{acc_srm_te.mean():.4f}", f"{acc_srm_te.std():.4f}"))
 
     cli_style.metrics_table(("Condition", "Mean", "Std"), tsm_rows)
 
-    if train_mode == "first_half":
-        sign = "+" if d_h2 >= 0 else ""
-        print(
-            f"  {cli_style.bold('Half 2 TSM — mean (VAE latent − raw voxels):')} "
-            f"{cli_style.cyan(f'{sign}{d_h2:.4f}')}"
-        )
-        print(
-            "  "
-            + cli_style.dim(
-                "Positive ⇒ better segment matching in shared latent vs raw on held-out movie TRs."
-            )
-        )
-        if acc_srm_te is not None:
-            d_srm = acc_srm_te.mean() - acc_raw_te.mean()
-            sign_s = "+" if d_srm >= 0 else ""
-            print(
-                f"  {cli_style.bold('Half 2 TSM — mean (SRM shared − raw voxels):')} "
-                f"{cli_style.cyan(f'{sign_s}{d_srm:.4f}')}"
-            )
-    elif train_mode == "full":
+    sign = "+" if d_h2 >= 0 else ""
+    print(
+        f"  {cli_style.bold('Half 2 TSM — mean (VAE latent − raw voxels):')} "
+        f"{cli_style.cyan(f'{sign}{d_h2:.4f}')}"
+    )
+    if vae_tsm_train == "first_half":
         print(
             "  "
             + cli_style.dim(
-                "No held-out movie-half summary for this checkpoint (full-movie training). "
-                f"Half 2 mean (VAE − raw) = {d_h2:+.4f} (descriptive only, not generalization)."
+                "Positive ⇒ better segment matching in VAE latent vs raw on held-out movie TRs "
+                "(VAE + SRM half 2 both unseen at train time for their respective fits)."
             )
         )
-    else:
+    if acc_srm_te is not None:
+        d_srm = acc_srm_te.mean() - acc_raw_te.mean()
+        sign_s = "+" if d_srm >= 0 else ""
         print(
-            "  "
-            + cli_style.dim(
-                f"Half 2 mean (VAE − raw) = {d_h2:+.4f}; interpret only after confirming train split."
-            )
+            f"  {cli_style.bold('Half 2 TSM — mean (SRM shared − raw voxels):')} "
+            f"{cli_style.cyan(f'{sign_s}{d_srm:.4f}')}"
         )
 
     cli_style.rule(title="Image runs · LOO Nu-SVM")
+    print(
+        cli_style.dim(
+            "  SRM: fit on **full movie** (k=50), transform image runs (tutorial §7). "
+            "VAE: latents from **image** checkpoint (full_movie recommended)."
+        )
+    )
     image_np, labels = raider_data.load_image_and_labels(data_dir)
     n_img = min(num_subs, image_np.shape[2], movie_data.shape[2])
     image_np = image_np[:, :, :n_img]
     tr_img = image_np.shape[1]
-    if train_mode == "full":
+    if vae_img_train != "full":
         print(
             cli_style.dim(
-                "  Matches tutorial image exercise: VAE trained on full movie, then image runs encoded."
+                "  Warning: image checkpoint is not full_movie — image LOO still runs, "
+                "but protocol matches tutorial best with raider_temporal_vae_full_movie.pt."
             )
         )
-    else:
+    if tr_img < 2 * half_tr_img + 1:
         print(
-            cli_style.dim(
-                "  Tutorial image exercise uses **full-movie** VAE; this checkpoint is first_half only. "
-                "Retrain with raider_temporal_vae_full_movie.yml for comparable image transfer."
-            )
+            f"  {cli_style.dim(f'Skip: image TRs {tr_img} < 2·half_tr+1 for image ckpt half_tr={half_tr_img}')}"
         )
-    if tr_img < 2 * half_tr + 1:
-        print(f"  {cli_style.dim(f'Skip: image TRs {tr_img} < 2·half_tr+1 for half_tr={half_tr}')}")
     else:
         lat_img = encode_per_subject_latent_timeseries(
-            model,
+            model_img,
             [image_np[:, :, s] for s in range(n_img)],
-            half_tr,
-            num_average_samples,
+            half_tr_img,
+            num_av_img,
             device,
         )
         z_img = [x.copy() for x in lat_img]
@@ -425,17 +395,17 @@ def main() -> None:
         acc_raw_img = image_class_prediction(i_list, lab)
 
         acc_srm_img = None
-        if compare_srm and train_mode in ("first_half", "full"):
+        if compare_srm:
             try:
                 from fmri_raiders.srm_raider import fit_srm_for_images
 
                 shared_img = fit_srm_for_images(
-                    train_mode,
+                    "full",
                     movie_data[:, :, :n_img],
                     [image_np[:, :, s] for s in range(n_img)],
                     n_img,
                     vox_num,
-                    features=tsm_feat_dim,
+                    features=srm_k,
                     n_iter=SRM_N_ITER,
                 )
                 acc_srm_img = image_class_prediction(shared_img, lab)
@@ -449,7 +419,7 @@ def main() -> None:
         if acc_srm_img is not None:
             img_rows.append(
                 (
-                    f"SRM shared (LOO, k={tsm_feat_dim})",
+                    f"SRM shared (LOO, k={srm_k})",
                     f"{acc_srm_img.mean():.4f}",
                     f"{acc_srm_img.std():.4f}",
                 )

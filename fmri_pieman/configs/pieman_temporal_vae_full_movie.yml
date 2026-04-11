@@ -1,0 +1,26 @@
+# Pieman2 — full-movie training (for image LOO when image.npy / label.npy exist).
+# Same memory rationale as pieman_temporal_vae.yml (~98k voxels).
+
+data_params:
+  pieman_dir: data/pieman
+  movie_split_for_training: full
+  half_tr: 15
+  num_average_samples: 3
+  stride_tr: 3
+
+tvae_params:
+  shared_channels: 64
+  enc_ch: 24
+  dec_ch: 24
+  input_timesteps: 10
+  beta: 0.1
+  alpha: 1.0
+
+training_params:
+  batch_size: 1
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  grad_clip_norm: 5.0
+
+checkpoint_path: fmri_pieman/checkpoints/pieman_temporal_vae_full_movie.pt

@@ -56,9 +56,10 @@ tensorboard = [
     "tensorboard>=2.15.0",
 ]
 
-# BrainIAK SRM / ISC for fmri_raiders (Raider tutorial replication)
+# BrainIAK SRM / ISC for fmri_raiders (Raider tutorial replication); nibabel for Pieman NIfTI → movie.npy
 fmri = [
     "brainiak>=0.11",
+    "nibabel>=5.0.0",
 ]
 
 # GPU support for PyTorch
