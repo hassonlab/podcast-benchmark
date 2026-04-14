@@ -482,7 +482,7 @@ def get_data(
         # Should be the same selected rows from all raws.
         # TODO: add an assertion to make sure this always holds.
         selected_rows_df = task_df_valid.iloc[epochs.selection]
-        selected_targets = task_df_valid.target.to_numpy()
+        selected_targets = selected_rows_df.target.to_numpy()
 
         # Make sure the number of samples match
         assert data.shape[0] == selected_rows_df.shape[0], "Sample counts don't match"
