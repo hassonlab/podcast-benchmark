@@ -1,0 +1,45 @@
+config_setter_name: brainbert_finetune
+task_config:
+  task_name: pos_task
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    use_high_gamma: false
+    target_sr: 2048
+    window_width: 1.0
+  task_specific_config:
+    pos_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 4
+  epochs: 100
+  learning_rate: 1.0e-05
+  weight_decay: 1.0e-05
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -1000
+  max_lag: 1500
+  lag_step_size: 500
+  losses:
+  - cross_entropy
+  loss_weights:
+  - 1.0
+  metrics:
+  - roc_auc_multiclass
+  - f1
+  - acc
+  early_stopping_metric: roc_auc_multiclass
+  smaller_is_better: false
+  fold_ids:
+  - 1
+  - 5
+trial_name: brainbert_persubject_concat_pos
+model_spec:
+  constructor_name: brainbert_finetune
+  params:
+    model_dir: models/brainbert/pretrained_model
+    output_dim: 5
+    mlp_layer_sizes: []
+    dropout: 0.0
+    freeze_foundation: true
+  sub_models: {}
+  per_subject_feature_concat: true

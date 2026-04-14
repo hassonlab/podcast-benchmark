@@ -445,7 +445,7 @@ def get_data(
                                 preprocessor_params)  -> array of shape [num_words, ...]
     """
     datas = []
-    for raw in raws:
+    for raw in raws: #raw for each subject
         # Calculate time bounds for filtering
         tmin = lag / 1000 - window_width / 2
         tmax = lag / 1000 + window_width / 2 - 2e-3
@@ -474,11 +474,11 @@ def get_data(
             event_id=None,
             preload=True,
             on_missing="ignore",
-            event_repeated="merge",
+            event_repeated="merge", #! WARNING: this can drop event if multiple events fall into the same epoch.
             verbose="ERROR",
         )
 
-        data = epochs.get_data(copy=False)
+        data = epochs.get_data(copy=False)  #* shape: [n_words, n_electrodes_this_subject, timesteps]           
         # Should be the same selected rows from all raws.
         # TODO: add an assertion to make sure this always holds.
         selected_rows_df = task_df_valid.iloc[epochs.selection]
@@ -492,11 +492,12 @@ def get_data(
     if len(datas) == 0:
         raise ValueError("No valid events found within data time bounds")
 
-    datas = np.concatenate(datas, axis=1)
+    subject_channel_counts = [d.shape[1] for d in datas]
+    datas = np.concatenate(datas, axis=1) #* axis=1 (electrode dimension) concat
 
     datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
 
-    return datas, selected_targets, selected_rows_df
+    return datas, selected_targets, selected_rows_df, subject_channel_counts
 
 
 def df_columns_to_tensors(
