@@ -774,6 +774,9 @@ def train_decoding_model(
                 model = MakeIgnoreKwargsDuringForward(model.head).to(device) 
             elif model_name == "DIVERDecoder" : #*DIVFER
                 model = DIVERCachedFeatureAdapterModel(model.diver_model.ft_core_model, model.diver_model.ft_model_output_adapter).to(device)
+            elif model_name == "GPT2Brain" : #* GPT2Brain and such 
+                import pdb ; pdb.set_trace() #! not implemente yet... need research
+                # raise NotImplementedError(f"Feature caching and loader generation after feature extraction is not yet implemented for GPT2Brain and similar models. Got model: {model_name}")
             else :
                 raise NotImplementedError(f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}")
         
@@ -882,10 +885,19 @@ def train_decoding_model(
             test_extra_inputs = data_utils.df_columns_to_tensors(
                 data_df, task_config.task_specific_config.input_fields, te_idx
             )
-
+            
+            test_features = []
+            test_targets = []
+            with torch.no_grad():
+                for batch_data in loaders["test"]:
+                    features, _, y_b = batch_data
+                    test_features.append(features)
+                    test_targets.append(y_b)
+            test_features, test_targets = (torch.cat(test_features, dim=0), torch.cat(test_targets, dim=0))
+        
             results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
-                neural_data[te_idx],
-                Y[te_idx],
+                test_features,
+                test_targets,
                 model,
                 device,
                 data_df[task_config.data_params.word_column],
