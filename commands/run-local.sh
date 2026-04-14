@@ -7,6 +7,8 @@ usage() {
 Usage:
   ./commands/run-local.sh --model MODEL --task TASK [options] [-- EXTRA_MAIN_ARGS...]
 
+ALWAYS put --model
+
 Run a task locally (no SLURM). For quick debugging on login nodes or
 interactive sessions (salloc).
 
@@ -48,6 +50,10 @@ Examples:
   ./commands/run-local.sh --config configs/baselines/neural_conv_decoder/glove.yml
 EOF
 }
+
+# cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark
+#./commands/run-local.sh --model popt --task gpt_surprise --epochs 3
+# ./commands/run-local.sh --model diver --task gpt_surprise --epochs 3  --override "model_spec.feature_cache=True" 
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
