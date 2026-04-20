@@ -4,15 +4,16 @@ set -euo pipefail
 
 # ============================================================
 # Run many jobs in parallel on an interactive GPU node.
-# (supersubject version — all subjects, all channels)
+# (sig10 version — per-subject, top 10% significant channels)
 #
-# Unlike submit-task.sh (which sbatch's ONE job to the SLURM queue),
-# this script is meant for an already-allocated interactive node
-# (e.g. via salloc or interactive-nersc.sh). It launches multiple
-# python processes sharing the same GPU(s).
+# Loops over individual subjects, using electrode files from
+# processed_data/sig10/sub{NN}_sig.csv to select sig channels.
+#
+# For the supersubject (all subjects, all channels) version, see:
+#   job_script_in_interactive_supersubject.sh
 #
 # Usage:
-#   ./commands/job_script_in_interactive_supersubject.sh [--max-parallel N] [--dry-run]
+#   ./commands/job_script_in_interactive.sh [--max-parallel N] [--dry-run]
 #
 # Options:
 #   --max-parallel N   Max concurrent jobs (default: 1)
@@ -20,16 +21,16 @@ set -euo pipefail
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${SCRIPT_DIR}"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MAX_PARALLEL=1
+MAX_PARALLEL=2
 DRY_RUN=0
 CLI_MODELS=()
 
 # cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark/commands
-# CUDA_VISIBLE_DEVICES=0 bash job_script_in_interactive_supersubject.sh --models diver
-# CUDA_VISIBLE_DEVICES=1 bash job_script_in_interactive_supersubject.sh --models popt
-# CUDA_VISIBLE_DEVICES=2 bash job_script_in_interactive_supersubject.sh --models brainbert
+# CUDA_VISIBLE_DEVICES=0 bash job_script_in_interactive.sh --models diver
+# CUDA_VISIBLE_DEVICES=2 bash job_script_in_interactive.sh --models popt
+# CUDA_VISIBLE_DEVICES=2 bash job_script_in_interactive.sh --models brainbert
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -46,8 +47,6 @@ done
 
 # ---- Job matrix ----
 models=(
-    "brainbert"
-    "popt"
     "diver"
 )
 # Override models from CLI if --models was given
@@ -59,35 +58,44 @@ fi
     # "diver" 1
 
 
+
 tasks=(
-    #"whisper_embedding"   # done (all 3 models)
-    #"gpt_surprise"        # done (all 3 models)
-    #"pos"
+    # "whisper_embedding"
+    # "gpt_surprise"
+    # "pos"
     "content_noncontent"
-    "gpt_surprise_multiclass"
-    #"iu_boundary"
-    #"llm_embedding_pretraining"
+    # "gpt_surprise_multiclass"
+    # "iu_boundary"
     #"sentence_onset"
+    #"llm_decoding"
+    # "llm_embedding_pretraining"
+    #"word_embedding"
     #"volume_level"
-    #
-    # "llm_decoding"        # bug: tensor shape mismatch
-    # "word_embedding"      # bug: preserve_ensemble kwarg
 )
 
-lags=(0)
+# tasks=(
+# )
+
+
+
+lags=(0) #(-250, 0, 250, 500)
+
+#!removed
+    # "llm_decoding"
+    # "volume_level"
+
+# ---- Per-subject sig10 mode ----
+# Set to non-empty to loop over individual subjects with sig10 electrode files.
+# Each subject uses processed_data/sig10/sub{NN}_sig.csv as electrode_file_path.
+# Leave empty ("") to use the variant config as-is (e.g. supersubject with all channels).
+USE_SIG10=0 # 0 or 1
+
+subjects=(9)
+
 
 variants=(
-    "supersubject"
-    #"persubject_concat"
+    "subject_full"
 )
-
-# ---- Sig10 mode ----
-# Set USE_SIG10=1 to loop per-subject with sig10 electrode files.
-# When enabled, supersubject variant maps to subject{N}_full configs,
-# and electrode_file_path is overridden to processed_data/sig10/sub{N}_sig.csv.
-# When disabled (default), runs with the variant config as-is (SigFull).
-USE_SIG10=0
-subjects=(1 2 3 4 5 6 7 8 9)
 
 # ---- Logging ----
 LOG_DIR="${PROJECT_ROOT}/logs/interactive_batch"
@@ -138,57 +146,53 @@ reap_finished() {
 
 # ---- Main loop ----
 echo "=========================================="
-echo "Interactive batch runner (supersubject)"
+echo "Interactive batch runner"
 echo "  max_parallel: ${MAX_PARALLEL}"
 echo "  log_dir: ${LOG_DIR}"
 echo "  start: $(date)"
 echo "=========================================="
-for task in "${tasks[@]}"; do
-    for lag in "${lags[@]}"; do
+
+for lag in "${lags[@]}"; do
+    for task in "${tasks[@]}"; do
         for model in "${models[@]}"; do
-            for variant in "${variants[@]}"; do
 
-                # Build subject list: if USE_SIG10, loop per-subject; otherwise single iteration
-                if [[ "${USE_SIG10}" == "1" ]]; then
-                    iter_subjects=("${subjects[@]}")
-                else
-                    iter_subjects=("")
-                fi
+            # Always loop per-subject (subject_full variant needs subject{N}_full.yml)
+            # USE_SIG10 only controls whether sig10 electrode overrides are applied
+            iter_subjects=("${subjects[@]}")
 
-                for subj in "${iter_subjects[@]}"; do
+            for subj in "${iter_subjects[@]}"; do
+                for variant in "${variants[@]}"; do
 
-                    # Resolve variant & overrides for sig10 mode
-                    actual_variant="$variant"
+                    # Config file is always subject{N}_full.yml
+                    config="configs/foundation_models/${model}/${task}/subject${subj}_full.yml"
+                    if [[ ! -f "${PROJECT_ROOT}/${config}" ]]; then
+                        skipped_jobs+=("${model}/${task}/subject${subj}_full/lag${lag}")
+                        continue
+                    fi
+
+                    # Output path: results/.../subject_full/subject{N}_full/
+                    #           or results/.../subject_sig10/subject{N}_sig10/
                     sig10_overrides=()
-                    suffix_args=()
-                    subj_tag=""
-
-                    if [[ -n "$subj" && "${USE_SIG10}" == "1" ]]; then
-                        # For supersubject variant, map to subject{N}_full config
-                        if [[ "$variant" == "supersubject" ]]; then
-                            actual_variant="subject${subj}_full"
-                        fi
+                    if [[ "${USE_SIG10}" == "1" ]]; then
                         sig_file="processed_data/sig10/sub${subj}_sig.csv"
                         if [[ ! -f "${PROJECT_ROOT}/${sig_file}" ]]; then
-                            echo "[WARN]  sig10 file not found: ${sig_file}, skipping"
-                            skipped_jobs+=("${model}/${task}/${variant}_sig10/sub${subj}/lag${lag}")
+                            echo "[WARN]  sig10 file not found: ${sig_file}, skipping subject ${subj}"
+                            skipped_jobs+=("${model}/${task}/subject_sig10/subject${subj}_sig10/lag${lag}")
                             continue
                         fi
                         sig10_overrides=(
                             --override "task_config.data_params.electrode_file_path=${sig_file}"
                         )
-                        suffix_args=(--output-suffix "sig10")
-                        subj_tag="/sub${subj}"
+                        group_variant="subject_sig10"
+                        output_suffix="subject${subj}_sig10"
+                    else
+                        group_variant="subject_full"
+                        output_suffix="subject${subj}_full"
                     fi
 
-                    config="configs/foundation_models/${model}/${task}/${actual_variant}.yml"
-                    if [[ ! -f "${PROJECT_ROOT}/${config}" ]]; then
-                        skipped_jobs+=("${model}/${task}/${actual_variant}${subj_tag}/lag${lag}")
-                        continue
-                    fi
+                    job_label="${model}/${task}/${group_variant}/${output_suffix}/lag${lag}"
+                    job_log="${LOG_DIR}/${model}_${task}_${output_suffix}_lag${lag}_${TIMESTAMP}.log"
 
-                    job_label="${model}/${task}/${actual_variant}${subj_tag}/lag${lag}"
-                    job_log="${LOG_DIR}/${model}_${task}_${actual_variant}${subj:+_sub${subj}}_lag${lag}_${TIMESTAMP}.log"
                     total_jobs=$((total_jobs + 1))
 
                     if [[ "$DRY_RUN" == "1" ]]; then
@@ -203,12 +207,13 @@ for task in "${tasks[@]}"; do
                     "${PROJECT_ROOT}/commands/run-local.sh" \
                         --model "$model" \
                         --task "$task" \
-                        --variant "$actual_variant" \
+                        --config "$config" \
+                        --variant "$group_variant" \
+                        --output-suffix "$output_suffix" \
                         --fold-ids "[1,5]" \
                         --lag "$lag" \
                         --override "model_spec.feature_cache=True" \
                         "${sig10_overrides[@]+"${sig10_overrides[@]}"}" \
-                        "${suffix_args[@]+"${suffix_args[@]}"}" \
                         > "$job_log" 2>&1 &
 
                     pids+=($!)

@@ -780,7 +780,7 @@ def train_decoding_model(
             elif model_name == "ReferencePOPTDecoder":
                 output_dim = model.output_dim
             elif model_name == "DIVERDecoder":
-                output_dim = model.diver_model.ft_model_output_adapter[-1].out_features
+                output_dim = model.output_dim
             else:
                 raise NotImplementedError(f"per_subject_feature_concat not implemented for model: {model_name}")
 
@@ -819,7 +819,7 @@ def train_decoding_model(
             elif model_name == "DIVERDecoder" : #*DIVFER
                 model = DIVERCachedFeatureAdapterModel(model.diver_model.ft_core_model, model.diver_model.ft_model_output_adapter).to(device)
             elif model_name == "GPT2Brain" : #* GPT2Brain and such 
-                import pdb ; pdb.set_trace() #! not implemente yet... need research
+                raise NotImplementedError(f"Feature caching is not yet implemented for GPT2Brain. Got model: {model_name}")
                 # raise NotImplementedError(f"Feature caching and loader generation after feature extraction is not yet implemented for GPT2Brain and similar models. Got model: {model_name}")
             else :
                 raise NotImplementedError(f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}")
@@ -1192,7 +1192,6 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
     """
     model.eval()
     all_features, y_bs = [], []
-    import pdb; pdb.set_trace()
     with torch.no_grad():
         for batch_data in loader:
             Xb, inputs_dict, y_b = batch_data
@@ -1222,7 +1221,6 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
             concat_emb = torch.cat(subject_embeddings, dim=-1)
             all_features.append(concat_emb)
             y_bs.append(y_b)
-    import pdb; pdb.set_trace()
     concat_features = torch.cat(all_features, dim=0)
     n_subjects = len(subject_channel_counts)
     embed_dim = concat_features.shape[-1] // n_subjects
