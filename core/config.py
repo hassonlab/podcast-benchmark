@@ -207,6 +207,7 @@ class ModelSpec:
     constructor_name: str
     params: Dict[str, Any] = field(default_factory=dict)
     feature_cache: bool = False
+    per_subject_feature_concat: bool = False
     sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
     checkpoint_path: Optional[str] = None
     # Optional model_data_getter name. If specified, this getter will be called to

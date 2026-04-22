@@ -7,6 +7,8 @@ usage() {
 Usage:
   ./commands/run-local.sh --model MODEL --task TASK [options] [-- EXTRA_MAIN_ARGS...]
 
+ALWAYS put --model
+
 Run a task locally (no SLURM). For quick debugging on login nodes or
 interactive sessions (salloc).
 
@@ -49,6 +51,10 @@ Examples:
 EOF
 }
 
+# cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark
+#./commands/run-local.sh --model popt --task gpt_surprise --epochs 3
+# ./commands/run-local.sh --model diver --task gpt_surprise --epochs 3  --override "model_spec.feature_cache=True" 
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -60,6 +66,7 @@ GPU_COUNT=""
 CPU_COUNT=""
 PYTHON_ENV=""
 JOB_NAME=""
+OUTPUT_SUFFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 HAS_FOLD_OVERRIDE=0
 HAS_LAG_OVERRIDE=0
@@ -133,6 +140,10 @@ while [[ $# -gt 0 ]]; do
                     ;;
             esac
             MAIN_ARGS+=("--${2}")
+            shift 2
+            ;;
+        --output-suffix)
+            OUTPUT_SUFFIX="${2:?missing value for --output-suffix}"
             shift 2
             ;;
         --dry-run)
@@ -213,9 +224,13 @@ fi
 
 # Output dirs (same layout as slurm_worker)
 if [[ -n "$MODEL" && -n "$TASK" ]]; then
-    OUTPUT_DIR="${PROJECT_ROOT}/results/foundation_models/${MODEL}/${TASK}/${VARIANT}"
-    CHECKPOINT_DIR="${PROJECT_ROOT}/checkpoints/foundation_models/${MODEL}/${TASK}/${VARIANT}"
-    TENSORBOARD_DIR="${PROJECT_ROOT}/event_logs/foundation_models/${MODEL}/${TASK}/${VARIANT}"
+    SUFFIX_PATH="${VARIANT}"
+    if [[ -n "$OUTPUT_SUFFIX" ]]; then
+        SUFFIX_PATH="${VARIANT}/${OUTPUT_SUFFIX}"
+    fi
+    OUTPUT_DIR="${PROJECT_ROOT}/results/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
+    CHECKPOINT_DIR="${PROJECT_ROOT}/checkpoints/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
+    TENSORBOARD_DIR="${PROJECT_ROOT}/event_logs/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
     mkdir -p "$OUTPUT_DIR" "$CHECKPOINT_DIR" "$TENSORBOARD_DIR"
     MAIN_ARGS+=(
         "--output_dir=${OUTPUT_DIR}"
