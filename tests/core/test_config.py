@@ -120,6 +120,7 @@ class TestDictToConfig:
 
         assert config.model_spec.constructor_name == "test_model"
         assert config.training_params.batch_size == 128
+        assert config.train_one_subject_at_a_time is False
         # Check defaults are preserved
         assert config.training_params.epochs == 100  # default
         assert config.training_params.learning_rate == 0.001  # default
@@ -162,6 +163,7 @@ class TestYAMLIntegration:
         assert config.training_params.batch_size == 64
         assert config.training_params.learning_rate == 0.001
         assert config.training_params.epochs == 20
+        assert config.train_one_subject_at_a_time is True
         assert config.trial_name == "temp_test"
 
     def test_roundtrip_conversion(self, sample_experiment_config):
