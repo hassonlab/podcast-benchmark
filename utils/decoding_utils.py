@@ -494,7 +494,7 @@ def train_decoding_model(
         is_train = optimizer is not None
         if is_train:
             model.train()
-            #*note that this is not enough for gpt2brain, which is why we have a seprate `change_training_mode`
+            # *note that this is not enough for gpt2brain, which is why we have a seprate `change_training_mode`
         else:
             model.eval()
 
@@ -521,13 +521,15 @@ def train_decoding_model(
             yb = yb.to(device)
 
             if is_train:
-                #example thing you could run to do sanity check the training mode and requires grad
-                # check_model_train_eval_and_requires_grads(model, True) 
-                
-                #if gpt2brain mode, get ready for train mode (nees to be done cuz llm freeze thing is complicated)
-                if model.__class__.__name__.startswith("GPT2Brain") : 
-                    model.change_training_mode(freeze_lm=model_spec.params['freeze_lm']) # adhoc method...
-                
+                # example thing you could run to do sanity check the training mode and requires grad
+                # check_model_train_eval_and_requires_grads(model, True)
+
+                # if gpt2brain mode, get ready for train mode (nees to be done cuz llm freeze thing is complicated)
+                if model.__class__.__name__.startswith("GPT2Brain"):
+                    model.change_training_mode(
+                        freeze_lm=model_spec.params["freeze_lm"]
+                    )  # adhoc method...
+
                 # Forward pass
                 out = model(Xb, **inputs_dict)
                 # Loss calculation
@@ -763,8 +765,8 @@ def train_decoding_model(
         history["num_epochs"] = None
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
-        
-        #if per_subject_feature_concat, extract per-subject embeddings, concat, and train linear probe
+
+        # if per_subject_feature_concat, extract per-subject embeddings, concat, and train linear probe
         if getattr(model_spec, "per_subject_feature_concat", False):
             if subject_channel_counts is None or len(subject_channel_counts) <= 1:
                 raise ValueError(
@@ -772,14 +774,34 @@ def train_decoding_model(
                     "Got subject_channel_counts={subject_channel_counts}"
                 )
             cache_loader_generation_start_time = time.time()
-            #import warnings
-            #warnings.warn("per_subject_feature_concat ALWAYS to caching. regardless of model_spec.feature_cache)")
+            # import warnings
+            # warnings.warn("per_subject_feature_concat ALWAYS to caching. regardless of model_spec.feature_cache)")
             loaders = {
-                "train": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["train"], subject_channel_counts, device), training_params.batch_size, shuffle=True),
-                "val": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["val"], subject_channel_counts, device), training_params.batch_size, shuffle=False),
-                "test": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["test"], subject_channel_counts, device), training_params.batch_size, shuffle=False),
+                "train": generate_loaders_from_features(
+                    *extract_per_subject_concat_features(
+                        model, loaders["train"], subject_channel_counts, device
+                    ),
+                    training_params.batch_size,
+                    shuffle=True,
+                ),
+                "val": generate_loaders_from_features(
+                    *extract_per_subject_concat_features(
+                        model, loaders["val"], subject_channel_counts, device
+                    ),
+                    training_params.batch_size,
+                    shuffle=False,
+                ),
+                "test": generate_loaders_from_features(
+                    *extract_per_subject_concat_features(
+                        model, loaders["test"], subject_channel_counts, device
+                    ),
+                    training_params.batch_size,
+                    shuffle=False,
+                ),
             }
-            print(f"Time taken for per-subject feature extraction and concat: {time.time() - cache_loader_generation_start_time}")
+            print(
+                f"Time taken for per-subject feature extraction and concat: {time.time() - cache_loader_generation_start_time}"
+            )
 
             # Determine output_dim from model
             model_name = str(model.__class__.__name__)
@@ -790,7 +812,9 @@ def train_decoding_model(
             elif model_name == "DIVERDecoder":
                 output_dim = model.output_dim
             else:
-                raise NotImplementedError(f"per_subject_feature_concat not implemented for model: {model_name}")
+                raise NotImplementedError(
+                    f"per_subject_feature_concat not implemented for model: {model_name}"
+                )
 
             # Get concat feature dim from the first batch
             sample_batch = next(iter(loaders["train"]))
@@ -798,7 +822,9 @@ def train_decoding_model(
             print(f"Linear probe: {concat_dim} -> {output_dim}")
 
             probe = nn.Linear(concat_dim, output_dim)
-            model = SqueezeWrapper(feature_head=MakeIgnoreKwargsDuringForward(probe), output_dim=output_dim).to(device)
+            model = SqueezeWrapper(
+                feature_head=MakeIgnoreKwargsDuringForward(probe), output_dim=output_dim
+            ).to(device)
 
             # Re-create optimizer for the new model
             optimizer = torch.optim.AdamW(
@@ -807,32 +833,55 @@ def train_decoding_model(
                 weight_decay=float(training_params.weight_decay),
             )
 
-        #elif feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
+        # elif feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
         elif getattr(model_spec, "feature_cache", False):
             cache_loader_generation_start_time = time.time()
-            #redfining loaders (with cached model)
+            # redfining loaders (with cached model)
             loaders = {
-                "train" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["train"], device), training_params.batch_size, shuffle=True), #training already shuffled but we still shuffle since each epoch should see data in different order for better convergence
-                "val" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["val"], device), training_params.batch_size, shuffle=False),
-                "test" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["test"], device), training_params.batch_size, shuffle=False),
+                "train": generate_loaders_from_features(
+                    *extract_features_for_caching(model, loaders["train"], device),
+                    training_params.batch_size,
+                    shuffle=True,
+                ),  # training already shuffled but we still shuffle since each epoch should see data in different order for better convergence
+                "val": generate_loaders_from_features(
+                    *extract_features_for_caching(model, loaders["val"], device),
+                    training_params.batch_size,
+                    shuffle=False,
+                ),
+                "test": generate_loaders_from_features(
+                    *extract_features_for_caching(model, loaders["test"], device),
+                    training_params.batch_size,
+                    shuffle=False,
+                ),
             }
-            print(f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}")
-                
-            #redefining model
+            print(
+                f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}"
+            )
+
+            # redefining model
             model_name = str(model.__class__.__name__)
-            if model_name == "ReferenceBrainBERTDecoder":  #*brainbert
-                model = SqueezeWrapper(feature_head = model.projector, output_dim=model.output_dim).to(device)
-            elif model_name == "ReferencePOPTDecoder" : #*popt
-                model = MakeIgnoreKwargsDuringForward(model.head).to(device) 
-            elif model_name == "DIVERDecoder" : #*DIVFER
-                model = DIVERCachedFeatureAdapterModel(model.diver_model.ft_core_model, model.diver_model.ft_model_output_adapter).to(device)
-            elif model_name == "GPT2Brain" : #* GPT2Brain and such 
-                raise NotImplementedError(f"Feature caching is not yet implemented for GPT2Brain. Got model: {model_name}")
+            if model_name == "ReferenceBrainBERTDecoder":  # *brainbert
+                model = SqueezeWrapper(
+                    feature_head=model.projector, output_dim=model.output_dim
+                ).to(device)
+            elif model_name == "ReferencePOPTDecoder":  # *popt
+                model = MakeIgnoreKwargsDuringForward(model.head).to(device)
+            elif model_name == "DIVERDecoder":  # *DIVFER
+                model = DIVERCachedFeatureAdapterModel(
+                    model.diver_model.ft_core_model,
+                    model.diver_model.ft_model_output_adapter,
+                ).to(device)
+            elif model_name == "GPT2Brain":  # * GPT2Brain and such
+                raise NotImplementedError(
+                    f"Feature caching is not yet implemented for GPT2Brain. Got model: {model_name}"
+                )
                 # raise NotImplementedError(f"Feature caching and loader generation after feature extraction is not yet implemented for GPT2Brain and similar models. Got model: {model_name}")
-            else :
-                raise NotImplementedError(f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}")
-        
-        loop_start_time = time.time() #! remove later 
+            else:
+                raise NotImplementedError(
+                    f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}"
+                )
+
+        loop_start_time = time.time()  #! remove later
         for epoch in loop:
             train_mets = run_epoch(model, loaders["train"], optimizer)
             val_mets = run_epoch(model, loaders["val"])
@@ -882,7 +931,9 @@ def train_decoding_model(
                     **{f"val_{name}": val for name, val in val_mets.items()},
                 }
             )
-        print(f"Time taken for training loop: {time.time() - loop_start_time}") #! remove later
+        print(
+            f"Time taken for training loop: {time.time() - loop_start_time}"
+        )  #! remove later
 
         history["num_epochs"] = best_epoch + 1
 
@@ -937,7 +988,7 @@ def train_decoding_model(
             test_extra_inputs = data_utils.df_columns_to_tensors(
                 data_df, task_config.task_specific_config.input_fields, te_idx
             )
-            
+
             test_features = []
             test_targets = []
             with torch.no_grad():
@@ -945,8 +996,11 @@ def train_decoding_model(
                     features, _, y_b = batch_data
                     test_features.append(features)
                     test_targets.append(y_b)
-            test_features, test_targets = (torch.cat(test_features, dim=0), torch.cat(test_targets, dim=0))
-        
+            test_features, test_targets = (
+                torch.cat(test_features, dim=0),
+                torch.cat(test_targets, dim=0),
+            )
+
             results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
                 test_features,
                 test_targets,
@@ -1092,6 +1146,17 @@ def run_training_over_lags(
 
     all_new_results = []
 
+    from utils.dataset import RawNeuralDataset
+
+    raw_dataset = RawNeuralDataset(
+        raws,
+        task_df,
+        data_params.window_width,
+        lags,
+        preprocessing_fns,
+        data_params.preprocessor_params,
+    )
+
     for lag in lags:
         if lag in already_read_lags:
             print(f"Lag {lag} already done, skipping...")
@@ -1101,21 +1166,12 @@ def run_training_over_lags(
         print("running lag:", lag)
         print("=" * 60)
 
-        # TODO: Support lazy-loading for larger datasets on future tasks.
-        neural_data, targets, data_df, subject_channel_counts = data_utils.get_data(
-            lag,
-            raws,
-            task_df,
-            data_params.window_width,
-            preprocessing_fns,
-            data_params.preprocessor_params,
-        )
-        
-        neural_tensor = torch.FloatTensor(neural_data) #(5030, 183, 13, 40) (N_words from task_df, total electordes, STFT time bins, freq channels)
-        # Handle case where Y contains arrays (e.g., word embeddings)
-        if targets.dtype == object:
-            targets = np.stack(targets)
-        targets_tensor = torch.FloatTensor(targets) # (5031) ???
+        (
+            neural_tensor,
+            targets_tensor,
+            data_df,
+            subject_channel_counts,
+        ) = raw_dataset.get_data_for_lag(lag)
 
         print(f"neural_tensor shape: {neural_tensor.shape}")
         models, histories, cv_results = train_decoding_model(
@@ -1166,11 +1222,11 @@ def run_training_over_lags(
         existing_df.to_csv(filename, index=False)
 
 
-### below : are stuff for feature caching! 
+### below : are stuff for feature caching!
 def extract_features_for_caching(model, loader, device):
     model.eval()
-    
-    #feature aggregation
+
+    # feature aggregation
     all_features, input_dicts, y_bs = [], [], []
     with torch.no_grad():
         for batch_data in loader:
@@ -1180,7 +1236,9 @@ def extract_features_for_caching(model, loader, device):
                 k: v.to(device) if torch.is_tensor(v) else v
                 for k, v in inputs_dict.items()
             }
-            features = model(Xb, **inputs_dict, return_feature_emb_instead_of_projection=True)
+            features = model(
+                Xb, **inputs_dict, return_feature_emb_instead_of_projection=True
+            )
             all_features.append(features)
             input_dicts.append(inputs_dict)
             y_bs.append(y_b)
@@ -1212,14 +1270,16 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
             # Split coordinate tensors by subject if present
             # DIVER uses xyz_id, POPT uses lip_coords — both are [batch, total_channels, 3]
             coord_chunks = {}
-            for coord_key in ('xyz_id', 'lip_coords'):
+            for coord_key in ("xyz_id", "lip_coords"):
                 if coord_key in inputs_dict and torch.is_tensor(inputs_dict[coord_key]):
                     coord_tensor = inputs_dict[coord_key].to(device)
-                    coord_chunks[coord_key] = torch.split(coord_tensor, subject_channel_counts, dim=1)
+                    coord_chunks[coord_key] = torch.split(
+                        coord_tensor, subject_channel_counts, dim=1
+                    )
 
             subject_embeddings = []
             for s_idx, chunk in enumerate(subject_chunks):
-                sub_kwargs = {'return_feature_emb_instead_of_projection': True}
+                sub_kwargs = {"return_feature_emb_instead_of_projection": True}
                 for coord_key, chunks in coord_chunks.items():
                     sub_kwargs[coord_key] = chunks[s_idx]
                 emb = model(chunk, **sub_kwargs)
@@ -1232,20 +1292,26 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
     concat_features = torch.cat(all_features, dim=0)
     n_subjects = len(subject_channel_counts)
     embed_dim = concat_features.shape[-1] // n_subjects
-    print(f"Per-subject-concat features: {n_subjects} subjects x {embed_dim}d = {concat_features.shape[-1]}d total")
+    print(
+        f"Per-subject-concat features: {n_subjects} subjects x {embed_dim}d = {concat_features.shape[-1]}d total"
+    )
     # Return empty input_dicts (features replace raw input, no extra kwargs needed)
     empty_dicts = [{} for _ in range(len(all_features))]
     return concat_features, empty_dicts, torch.cat(y_bs, dim=0)
 
 
-def generate_loaders_from_features(features, input_dicts, y_bs, batch_size, shuffle = False):
+def generate_loaders_from_features(
+    features, input_dicts, y_bs, batch_size, shuffle=False
+):
     def _merge_input_dicts(batch_dicts):
         if not batch_dicts:
             return {}
         merged = {}
         for key in batch_dicts[0].keys():
             vals = [d[key] for d in batch_dicts if torch.is_tensor(d[key])]
-            merged[key] = torch.cat(vals, dim=0) if vals else [d[key] for d in batch_dicts]
+            merged[key] = (
+                torch.cat(vals, dim=0) if vals else [d[key] for d in batch_dicts]
+            )
         return merged
 
     def _make_loader(feat, inp, y, shuffle):
@@ -1267,8 +1333,9 @@ def generate_loaders_from_features(features, input_dicts, y_bs, batch_size, shuf
 
     return _make_loader(features, input_dicts, y_bs, shuffle=shuffle)
 
+
 class SqueezeWrapper(nn.Module):
-    def __init__(self, feature_head : nn.Module, output_dim = None):
+    def __init__(self, feature_head: nn.Module, output_dim=None):
         super().__init__()
         self.feature_head = feature_head
         self.output_dim = output_dim
@@ -1278,7 +1345,8 @@ class SqueezeWrapper(nn.Module):
         if self.output_dim == 1 and out.shape[-1] == 1:
             out = out.squeeze(-1)
         return out
-    
+
+
 class MakeIgnoreKwargsDuringForward(nn.Module):
     def __init__(self, module):
         super().__init__()
@@ -1286,15 +1354,16 @@ class MakeIgnoreKwargsDuringForward(nn.Module):
 
     def forward(self, x, **kwargs):
         return self.module(x)
-    
+
+
 class DIVERCachedFeatureAdapterModel(nn.Module):
     def __init__(self, core_module, output_adapter):
         super().__init__()
         self.core_module = core_module
         self.output_adapter = output_adapter
-        
+
     def forward(self, x, **kwargs):
-        core_out = self.core_module(x) #*ignores kwargs as not needed.. kinda adhoc 
+        core_out = self.core_module(x)
         adapted_out = self.output_adapter(core_out)
         if adapted_out.shape[-1] == 1:
             adapted_out = adapted_out.squeeze(-1)
@@ -1309,7 +1378,6 @@ def _build_gpt2_cached_feature_head(encoder_model: nn.Module) -> nn.Module:
     encoder_name = encoder_model.__class__.__name__
 
     if encoder_name == "ReferenceBrainBERTDecoder":
-        # projector usually does not need kwargs; keep squeeze logic consistent with existing path
         return SqueezeWrapper(
             feature_head=MakeIgnoreKwargsDuringForward(encoder_model.projector),
             output_dim=getattr(encoder_model, "output_dim", None),
@@ -1327,26 +1395,24 @@ def _build_gpt2_cached_feature_head(encoder_model: nn.Module) -> nn.Module:
     raise NotImplementedError(
         f"GPT2Brain feature-cache adapter not implemented for encoder: {encoder_name}"
     )
-    
+
+
 class GPT2BrainCachedFeatureAdapterModel(nn.Module):
     def __init__(self, gpt2_brain_model: nn.Module, cached_feature_head: nn.Module):
         super().__init__()
         self.gpt2_brain_model = gpt2_brain_model
         self.cached_feature_head = cached_feature_head
-    
-    def change_training_mode(self, freeze_lm = True):
-        #! very adhoc but whatever...
-        # Freeze LM if specified
+
+    def change_training_mode(self, freeze_lm=True):
         if freeze_lm:
             for param in self.gpt2_brain_model.lm_model.parameters():
                 param.requires_grad = False
-            self.gpt2_brain_model.lm_model.eval()  # Set LM to eval mode when frozen
+            self.gpt2_brain_model.lm_model.eval()
         else:
-            self.gpt2_brain_model.lm_model.train()  # Set LM to train mode when not frozen
-        
-        self.gpt2_brain_model.encoder_model.eval() # Encoder is always frozen and in eval mode
+            self.gpt2_brain_model.lm_model.train()
 
-        # Cached feature head should always be trainable and in train mode
+        self.gpt2_brain_model.encoder_model.eval()
+
         for param in self.cached_feature_head.parameters():
             param.requires_grad = True
         self.cached_feature_head.train()
@@ -1362,15 +1428,12 @@ class GPT2BrainCachedFeatureAdapterModel(nn.Module):
         return_all_preds=False,
         **kwargs,
     ):
-        # 1) cached feature -> FM post-cache projection/head output
         neural_embeddings = self.cached_feature_head(x, **kwargs)
-
-        # 2) build prompt embeddings + mask
-        prompt_embeddings, prompt_attention_mask = self.gpt2_brain_model._build_prompt_embeddings(
-            neural_embeddings, all_input_ids, all_attention_mask
+        prompt_embeddings, prompt_attention_mask = (
+            self.gpt2_brain_model._build_prompt_embeddings(
+                neural_embeddings, all_input_ids, all_attention_mask
+            )
         )
-
-        # 3) run GPT2
         output = self.gpt2_brain_model.lm_model(
             inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
         )
@@ -1378,31 +1441,28 @@ class GPT2BrainCachedFeatureAdapterModel(nn.Module):
         if return_all_preds:
             return output.logits, prompt_attention_mask
 
-        # Prefer GPT2Brain's own target extraction logic when available
-        if hasattr(self.gpt2_brain_model, "_get_target_predictions") and target_attention_mask is not None:
+        if (
+            hasattr(self.gpt2_brain_model, "_get_target_predictions")
+            and target_attention_mask is not None
+        ):
             return self.gpt2_brain_model._get_target_predictions(
                 output, prompt_attention_mask, target_attention_mask
             )
 
-        # Fallback: next-token logits from last position
         return output.logits[:, -1, :]
 
 
-def check_model_train_eval_and_requires_grads(model: nn.Module, print_requires_grad_params = False):
-    r""" 
-    #example usage below
-    check_model_train_eval_and_requires_grads(model.gpt2_brain_model)
-    check_model_train_eval_and_requires_grads(model.cached_feature_head)
-    check_model_train_eval_and_requires_grads(model.gpt2_brain_model.encoder_model)
-    check_model_train_eval_and_requires_grads(model.gpt2_brain_model.lm_model)
-    print(f"==="*5)
-    check_model_train_eval_and_requires_grads(model.cached_feature_head, True) #! feature_head.module.weight, feature_head.module.bias are the only ones that requires grad
-    check_model_train_eval_and_requires_grads(model.gpt2_brain_model.lm_model, True) #! Parameter 'transformer.wte.weight' requires grad
-    """
+def check_model_train_eval_and_requires_grads(
+    model: nn.Module, print_requires_grad_params=False
+):
     print(f"Model is in training mode: {model.training}")
     num_params_requires_grad = sum(1 for p in model.parameters() if p.requires_grad)
 
-    print(f"Parameter tensors requiring grad: {num_params_requires_grad} out of {sum(1 for p in model.parameters())} total parameters")
+    print(
+        "Parameter tensors requiring grad: "
+        f"{num_params_requires_grad} out of "
+        f"{sum(1 for p in model.parameters())} total parameters"
+    )
     if print_requires_grad_params:
         for name, param in model.named_parameters():
             if param.requires_grad:
