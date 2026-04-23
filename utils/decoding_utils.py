@@ -30,7 +30,7 @@ from utils import data_utils
 from utils.dataset import NeuralDictDataset
 from core.config import TrainingParams, TaskConfig, ModelSpec
 from utils.fold_utils import get_sequential_folds, get_zero_shot_folds
-from utils.model_utils import build_model_from_spec
+from utils.model_utils import build_model_from_spec, model_spec_contains_constructor
 import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
@@ -479,6 +479,9 @@ def train_decoding_model(
             cv_results[metric] = []
 
     models, histories = [], []
+    use_feature_cache = training_params.feature_cache or model_spec_contains_constructor(
+        model_spec, "caching_model"
+    )
     lag_cache_store = {}
     lag_build_context = {"_cache_store": lag_cache_store}
     lag_example_ids = torch.arange(len(data_df), dtype=torch.long)
@@ -642,7 +645,7 @@ def train_decoding_model(
         extra_test_inputs = data_utils.df_columns_to_tensors(
             data_df, task_config.task_specific_config.input_fields, te_idx
         )
-        if training_params.feature_cache:
+        if use_feature_cache:
             extra_train_inputs["cache_key"] = lag_example_ids[tr_idx]
             extra_val_inputs["cache_key"] = lag_example_ids[va_idx]
             extra_test_inputs["cache_key"] = lag_example_ids[te_idx]
@@ -708,7 +711,7 @@ def train_decoding_model(
             lag=lag,
             fold=fold,
             build_context=lag_build_context,
-            use_feature_cache=training_params.feature_cache,
+            use_feature_cache=use_feature_cache,
         ).to(device)
 
         if training_params.optimizer == "MuAdamW":

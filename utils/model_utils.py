@@ -9,6 +9,16 @@ from core.config import ModelSpec
 from core import registry
 
 
+def model_spec_contains_constructor(model_spec: ModelSpec, constructor_name: str) -> bool:
+    if model_spec.constructor_name == constructor_name:
+        return True
+
+    return any(
+        model_spec_contains_constructor(sub_spec, constructor_name)
+        for sub_spec in model_spec.sub_models.values()
+    )
+
+
 def build_model_from_spec(
     model_spec: ModelSpec,
     lag: Optional[int] = None,
@@ -66,7 +76,11 @@ def build_model_from_spec(
     built_sub_models = {}
     for param_name, sub_spec in model_spec.sub_models.items():
         built_sub_models[param_name] = build_model_from_spec(
-            sub_spec, lag, fold, build_context=build_context
+            sub_spec,
+            lag,
+            fold,
+            build_context=build_context,
+            use_feature_cache=use_feature_cache,
         )
 
     # Get the constructor function from registry (registry stores {"constructor": fn, "required_data_getter": str|None})
@@ -79,7 +93,7 @@ def build_model_from_spec(
     if (
         build_context is not None
         and "_cache_store" in build_context
-        and use_feature_cache
+        and (use_feature_cache or model_spec.constructor_name == "caching_model")
     ):
         all_kwargs["_cache_store"] = build_context["_cache_store"]
 
@@ -97,8 +111,13 @@ def build_model_from_spec(
 
         if os.path.exists(checkpoint_path):
             print(f"Loading checkpoint from: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location="cpu")
-            model.load_state_dict(checkpoint)
+            if hasattr(model, "load_checkpoint") and callable(
+                getattr(model, "load_checkpoint")
+            ):
+                model.load_checkpoint(checkpoint_path)
+            else:
+                checkpoint = torch.load(checkpoint_path, map_location="cpu")
+                model.load_state_dict(checkpoint)
         else:
             raise FileNotFoundError(
                 f"Checkpoint not found: {checkpoint_path}\n"
