@@ -1,0 +1,1759 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A benchmarking framework for neural decoding from podcast listening data">
+      
+      
+        <meta name="author" content="Hasson Lab">
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Foundation Model Integration Analysis - Podcast Benchmark</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#foundation-model-integration-analysis" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Podcast Benchmark" class="md-header__button md-logo" aria-label="Podcast Benchmark" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Podcast Benchmark
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Foundation Model Integration Analysis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/hassonlab/podcast-benchmark" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hassonlab/podcast-benchmark
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../onboarding-model/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../task-reference/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Podcast Benchmark" class="md-nav__button md-logo" aria-label="Podcast Benchmark" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Podcast Benchmark
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/hassonlab/podcast-benchmark" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hassonlab/podcast-benchmark
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../onboarding-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Onboarding a Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adding-task/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a Task
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../baseline-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Baseline Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#high-level-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-Level Findings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="High-Level Findings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-the-root-framework-is-structurally-newer-than-the-reference-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The root framework is structurally newer than the reference implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-brainbert-and-popt-in-root-currently-contain-placeholderexample-style-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. BrainBERT and PopT in root currently contain placeholder/example-style integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-diver-in-root-is-partially-ported-but-not-fully-aligned-with-the-reference-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. DIVER in root is partially ported, but not fully aligned with the reference setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-diverclip-should-be-treated-as-a-configuration-and-initialization-source-not-a-new-root-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Diverclip should be treated as a configuration and initialization source, not a new root model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-llm-decoding-is-already-integrated-into-the-root-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. LLM decoding is already integrated into the root benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-the-current-root-framework-already-provides-most-of-the-hooks-needed-for-an-integrationpy-centered-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. The current root framework already provides most of the hooks needed for an integration.py-centered port
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-shared-utility-edits-should-be-avoided-unless-a-concrete-runtime-blocker-appears" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Shared utility edits should be avoided unless a concrete runtime blocker appears
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-not-every-gap-in-the-reference-implementation-needs-to-be-repaired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Not every gap in the reference implementation needs to be repaired
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Constraints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation Constraints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#preferred-edit-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preferred edit surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#yaml-controlled-loss-and-output-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        YAML-controlled loss and output activation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimal-coreconfigpy-extension-that-may-be-worth-making" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal core/config.py extension that may be worth making
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-specific-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model-Specific Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model-Specific Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#brainbert" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BrainBERT
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#popt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PopT
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DIVER
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diverclip-derived-settings-to-absorb-into-diver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DIVERCLIP-derived settings to absorb into DIVER
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concrete-todo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concrete TODO
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Concrete TODO">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-0-freeze-the-configuration-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0: Freeze the configuration policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-finalize-model-side-integration-so-yamls-can-target-all-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: Finalize model-side integration so YAMLs can target all tasks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-inventory-the-full-target-task-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Inventory the full target task set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-bring-over-yamls-for-reference-backed-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: Bring over YAMLs for reference-backed tasks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-design-yamls-for-tasks-not-implemented-in-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: Design YAMLs for tasks not implemented in reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-build-the-supersubject-config-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: Build the supersubject config matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-validate-all-yamls-without-introducing-new-code-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6: Validate all YAMLs without introducing new code paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-run-task-by-task-smoke-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7: Run task-by-task smoke tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-8-prepare-final-measurement-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 8: Prepare final measurement runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#target-configuration-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target Configuration Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Target Configuration Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#preferred-axis-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preferred axis order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-is-preferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this is preferred
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#planned-final-directory-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Planned Final Directory Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Note
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="foundation-model-integration-analysis">Foundation Model Integration Analysis<a class="headerlink" href="#foundation-model-integration-analysis" title="Permanent link">&para;</a></h1>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>This document records the current analysis and follow-up TODO for integrating the model-specific implementation that exists in <code>references_podcast/podcast-benchmark</code> into the latest root codebase at <code>podcast-benchmark</code>.</p>
+<p>The root codebase is the source of truth. The reference code is used only as an implementation source for:</p>
+<ul>
+<li><code>brainbert</code></li>
+<li><code>popt</code></li>
+<li><code>diver</code></li>
+<li>selected <code>diverclip</code> execution settings that should be folded into <code>diver</code></li>
+</ul>
+<p><code>diverclip</code> itself is not planned as a separate model family in the root codebase.</p>
+<h2 id="high-level-findings">High-Level Findings<a class="headerlink" href="#high-level-findings" title="Permanent link">&para;</a></h2>
+<h3 id="1-the-root-framework-is-structurally-newer-than-the-reference-implementation">1. The root framework is structurally newer than the reference implementation<a class="headerlink" href="#1-the-root-framework-is-structurally-newer-than-the-reference-implementation" title="Permanent link">&para;</a></h3>
+<p>The latest root benchmark has already moved to a newer execution model:</p>
+<ul>
+<li>task registration uses <code>task_registry</code></li>
+<li>model construction uses <code>ModelSpec</code></li>
+<li>model-specific DataFrame enrichment uses <code>model_data_getter</code></li>
+<li>task config is nested under <code>task_config</code></li>
+<li>multi-stage runs are supported via <code>MultiTaskConfig</code></li>
+</ul>
+<p>Relevant files:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/main.py"><code>main.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/core/config.py"><code>core/config.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/core/registry.py"><code>core/registry.py</code></a></li>
+</ul>
+<p>This means the integration target is not "copy reference code as-is", but "port reference functionality into the root execution model".</p>
+<h3 id="2-brainbert-and-popt-in-root-currently-contain-placeholderexample-style-integration">2. BrainBERT and PopT in root currently contain placeholder/example-style integration<a class="headerlink" href="#2-brainbert-and-popt-in-root-currently-contain-placeholderexample-style-integration" title="Permanent link">&para;</a></h3>
+<p>The root implementations of <code>brainbert</code> and <code>popt</code> are not faithful ports of the reference integration. They are closer to an example foundation-model onboarding pattern than the reference wrappers used in the old benchmark.</p>
+<p>Relevant files:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/brainbert/integration.py"><code>models/brainbert/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/popt/integration.py"><code>models/popt/integration.py</code></a></li>
+</ul>
+<p>By contrast, the reference versions are tied to the actual intended upstream wrappers and checkpoint handling:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/references_podcast/podcast-benchmark/models/brainbert/integration.py"><code>references_podcast/podcast-benchmark/models/brainbert/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/references_podcast/podcast-benchmark/models/popt/integration.py"><code>references_podcast/podcast-benchmark/models/popt/integration.py</code></a></li>
+</ul>
+<h3 id="3-diver-in-root-is-partially-ported-but-not-fully-aligned-with-the-reference-setup">3. DIVER in root is partially ported, but not fully aligned with the reference setup<a class="headerlink" href="#3-diver-in-root-is-partially-ported-but-not-fully-aligned-with-the-reference-setup" title="Permanent link">&para;</a></h3>
+<p>The root <code>diver</code> implementation already adopts the new framework better than BrainBERT and PopT:</p>
+<ul>
+<li>it registers a <code>model_data_getter</code></li>
+<li>it works with <code>task_config</code></li>
+<li>it injects <code>xyz_id</code> into the task DataFrame for DIVER input</li>
+</ul>
+<p>Relevant file:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/diver/integration.py"><code>models/diver/integration.py</code></a></li>
+</ul>
+<p>However, the reference tree still contains practical setup that is not fully represented in root:</p>
+<ul>
+<li>pretrained checkpoint variants</li>
+<li>execution/config conventions stabilized under <code>diverclip</code></li>
+<li>strategy-based model path selection</li>
+</ul>
+<p>Relevant reference files:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/references_podcast/podcast-benchmark/models/diver/integration.py"><code>references_podcast/podcast-benchmark/models/diver/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/references_podcast/podcast-benchmark/models/diverclip/integration.py"><code>references_podcast/podcast-benchmark/models/diverclip/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/references_podcast/podcast-benchmark/models/diverclip/model_registry.py"><code>references_podcast/podcast-benchmark/models/diverclip/model_registry.py</code></a></li>
+</ul>
+<h3 id="4-diverclip-should-be-treated-as-a-configuration-and-initialization-source-not-a-new-root-model">4. Diverclip should be treated as a configuration and initialization source, not a new root model<a class="headerlink" href="#4-diverclip-should-be-treated-as-a-configuration-and-initialization-source-not-a-new-root-model" title="Permanent link">&para;</a></h3>
+<p>The current desired direction is:</p>
+<ul>
+<li>do not re-introduce <code>diverclip</code> as its own root model family</li>
+<li>reuse <code>diverclip</code>'s practical execution settings inside root <code>diver</code></li>
+</ul>
+<p>This means the useful part of <code>diverclip</code> is:</p>
+<ul>
+<li>checkpoint selection logic</li>
+<li>stable initialization strategies</li>
+<li>execution-time options known to work under the benchmark loop</li>
+</ul>
+<p>This is not the same as restoring:</p>
+<ul>
+<li><code>diverclip</code></li>
+<li><code>diverclip_flatten</code></li>
+<li><code>diverclip_attn</code></li>
+</ul>
+<p>as separate constructors.</p>
+<h3 id="5-llm-decoding-is-already-integrated-into-the-root-benchmark">5. LLM decoding is already integrated into the root benchmark<a class="headerlink" href="#5-llm-decoding-is-already-integrated-into-the-root-benchmark" title="Permanent link">&para;</a></h3>
+<p>The root benchmark already has a native LLM decoding task:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/tasks/llm_decoding.py"><code>tasks/llm_decoding.py</code></a></li>
+</ul>
+<p>The reference benchmark used a separate <code>llm_decoding_pipeline</code>, but that separation is no longer desirable. The root task system should remain the only task pipeline. Only model-specific LLM config setters and constructors should be ported if needed.</p>
+<h3 id="6-the-current-root-framework-already-provides-most-of-the-hooks-needed-for-an-integrationpy-centered-port">6. The current root framework already provides most of the hooks needed for an integration.py-centered port<a class="headerlink" href="#6-the-current-root-framework-already-provides-most-of-the-hooks-needed-for-an-integrationpy-centered-port" title="Permanent link">&para;</a></h3>
+<p>The latest root benchmark already has the two key extension points needed for a low-diff port:</p>
+<ul>
+<li>model-specific extra inputs can be injected through <code>model_data_getter</code></li>
+<li>neural preprocessing can be injected through <code>preprocessing_fn_name</code></li>
+</ul>
+<p>Relevant files:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/main.py"><code>main.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/utils/decoding_utils.py"><code>utils/decoding_utils.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/utils/data_utils.py"><code>utils/data_utils.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/core/registry.py"><code>core/registry.py</code></a></li>
+</ul>
+<p>This is important because it means the intended port does not need to start by rewriting shared utilities.</p>
+<p>Specifically:</p>
+<ul>
+<li>LIP or MNI coordinates can be added to the task DataFrame via model-specific getters</li>
+<li>those added columns are automatically appended to <code>input_fields</code></li>
+<li>the batched tensors are then passed into model <code>forward(**kwargs)</code> automatically</li>
+<li>STFT can be handled through a model-registered preprocessor instead of rewriting <code>utils/data_utils.py</code></li>
+</ul>
+<h3 id="7-shared-utility-edits-should-be-avoided-unless-a-concrete-runtime-blocker-appears">7. Shared utility edits should be avoided unless a concrete runtime blocker appears<a class="headerlink" href="#7-shared-utility-edits-should-be-avoided-unless-a-concrete-runtime-blocker-appears" title="Permanent link">&para;</a></h3>
+<p>Current preference for the port:</p>
+<ul>
+<li>modify <code>models/brainbert/integration.py</code></li>
+<li>modify <code>models/popt/integration.py</code></li>
+<li>modify <code>models/diver/integration.py</code></li>
+<li>allow a small targeted extension to <a href="/storage/connectome/jmhan/podcast-benchmark/core/config.py"><code>core/config.py</code></a> if YAML support requires it</li>
+</ul>
+<p>Avoid by default:</p>
+<ul>
+<li><code>utils/data_utils.py</code></li>
+<li><code>utils/decoding_utils.py</code></li>
+<li><code>metrics/classification_metrics.py</code></li>
+<li><code>models/shared_preprocessors.py</code></li>
+</ul>
+<p>These files should only be changed if a specific required reference behavior cannot be expressed using the existing integration hooks.</p>
+<h3 id="8-not-every-gap-in-the-reference-implementation-needs-to-be-repaired">8. Not every gap in the reference implementation needs to be repaired<a class="headerlink" href="#8-not-every-gap-in-the-reference-implementation-needs-to-be-repaired" title="Permanent link">&para;</a></h3>
+<p>The goal is not to improve the reference codebase beyond what was actually used.</p>
+<p>That means the port does not need to proactively fix reference-side incompleteness such as:</p>
+<ul>
+<li>strict <code>checkpoint_file</code> YAML enforcement everywhere</li>
+<li>global removal of <code>electrode_file_path</code></li>
+<li>making DIVER code defaults perfectly match all past configs</li>
+<li>cleaning up older legacy configs that still use <code>bce</code></li>
+</ul>
+<p>The target is fidelity to the practical reference behavior, not cleanup beyond reference.</p>
+<h2 id="implementation-constraints">Implementation Constraints<a class="headerlink" href="#implementation-constraints" title="Permanent link">&para;</a></h2>
+<h3 id="preferred-edit-surface">Preferred edit surface<a class="headerlink" href="#preferred-edit-surface" title="Permanent link">&para;</a></h3>
+<p>The preferred implementation surface is:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/brainbert/integration.py"><code>models/brainbert/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/popt/integration.py"><code>models/popt/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/diver/integration.py"><code>models/diver/integration.py</code></a></li>
+</ul>
+<p>This should cover:</p>
+<ul>
+<li>checkpoint and wrapper loading</li>
+<li>model-specific config setters</li>
+<li>model-specific preprocessors</li>
+<li>model-specific data getters</li>
+<li>model-specific output-shape and activation behavior</li>
+</ul>
+<h3 id="yaml-controlled-loss-and-output-activation">YAML-controlled loss and output activation<a class="headerlink" href="#yaml-controlled-loss-and-output-activation" title="Permanent link">&para;</a></h3>
+<p>The root benchmark already resolves losses from YAML through <code>training_params.losses</code>.</p>
+<p>Relevant files:</p>
+<ul>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/utils/decoding_utils.py"><code>utils/decoding_utils.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/metrics/classification_metrics.py"><code>metrics/classification_metrics.py</code></a></li>
+</ul>
+<p>Therefore the integrations should follow this rule:</p>
+<ul>
+<li>if the configured loss is <code>bce_with_logits</code>, model outputs must remain raw logits</li>
+<li>if the configured loss is <code>cross_entropy</code>, model outputs must remain raw logits</li>
+<li>if a legacy probability-based loss such as <code>bce</code> is intentionally used, sigmoid output may still be allowed</li>
+</ul>
+<p>This activation decision should be implemented inside each model integration, not by modifying the shared training loop.</p>
+<h3 id="minimal-coreconfigpy-extension-that-may-be-worth-making">Minimal <code>core/config.py</code> extension that may be worth making<a class="headerlink" href="#minimal-coreconfigpy-extension-that-may-be-worth-making" title="Permanent link">&para;</a></h3>
+<p>If YAML-native control is desired, the minimal additional <code>DataParams</code> fields worth adding are:</p>
+<ul>
+<li><code>use_stft_preprocessing: bool = False</code></li>
+<li><code>stft_config: Optional[dict] = None</code></li>
+<li><code>use_lip_coords: bool = False</code></li>
+</ul>
+<p>These are enough to express the reference-style model behavior cleanly in YAML while keeping the rest of the root config schema intact.</p>
+<p><code>loading_options</code> is not required for the planned port because the root already has first-class fields for:</p>
+<ul>
+<li><code>target_sr</code></li>
+<li><code>signal_unit</code></li>
+<li><code>do_drop_bads</code></li>
+</ul>
+<p>So <code>loading_options</code> should only be added if reproducing the reference YAML shape becomes more important than minimizing schema churn.</p>
+<h2 id="model-specific-analysis">Model-Specific Analysis<a class="headerlink" href="#model-specific-analysis" title="Permanent link">&para;</a></h2>
+<h3 id="brainbert">BrainBERT<a class="headerlink" href="#brainbert" title="Permanent link">&para;</a></h3>
+<p>Current root state:</p>
+<ul>
+<li>implemented as a generic example foundation model</li>
+<li>not yet aligned with the reference wrapper-based loading path</li>
+<li>likely not preserving reference checkpoint/config semantics</li>
+</ul>
+<p>Needs from reference:</p>
+<ul>
+<li>wrapper path setup</li>
+<li>checkpoint resolution and load semantics</li>
+<li>reference config mapping</li>
+<li>root-compatible config setter behavior</li>
+<li>input shape adapter between root benchmark tensors and BrainBERT expectations</li>
+</ul>
+<h3 id="popt">PopT<a class="headerlink" href="#popt" title="Permanent link">&para;</a></h3>
+<p>Current root state:</p>
+<ul>
+<li>also example-style at the top level</li>
+<li>contains more practical logic than BrainBERT, but still needs verification against the reference behavior</li>
+<li>includes BrainBERT-assisted mode and LIP-related hooks, but these need to be validated against the intended reference pipeline</li>
+</ul>
+<p>Needs from reference:</p>
+<ul>
+<li>correct upstream/checkpoint semantics</li>
+<li>explicit handling of reference-style electrode sequence behavior</li>
+<li>robust LIP coordinate injection via <code>model_data_getter</code></li>
+<li>root-compatible config setters and model specs</li>
+</ul>
+<h3 id="diver">DIVER<a class="headerlink" href="#diver" title="Permanent link">&para;</a></h3>
+<p>Current root state:</p>
+<ul>
+<li>closer to production than BrainBERT and PopT</li>
+<li>already using <code>model_data_getter</code></li>
+<li>already adapted to the new <code>task_config</code> shape</li>
+</ul>
+<p>Still missing or incomplete:</p>
+<ul>
+<li>reference-level convenience and variant support</li>
+<li>strategy-based checkpoint selection</li>
+<li>practical settings proven under the old <code>diverclip</code> path</li>
+</ul>
+<h3 id="diverclip-derived-settings-to-absorb-into-diver">DIVERCLIP-derived settings to absorb into DIVER<a class="headerlink" href="#diverclip-derived-settings-to-absorb-into-diver" title="Permanent link">&para;</a></h3>
+<p>What is worth porting:</p>
+<ul>
+<li>strategy-based pretrained path resolution</li>
+<li>known-good execution defaults</li>
+<li>compatible checkpoint naming support</li>
+<li>any adapter or auxiliary weight loading that is genuinely useful in root <code>diver</code></li>
+</ul>
+<p>What should not be ported as separate root model families:</p>
+<ul>
+<li><code>diverclip</code></li>
+<li><code>diverclip_flatten</code></li>
+<li><code>diverclip_attn</code></li>
+</ul>
+<h2 id="concrete-todo">Concrete TODO<a class="headerlink" href="#concrete-todo" title="Permanent link">&para;</a></h2>
+<p>The near-term goal is no longer just "make one task run". The goal is:</p>
+<ul>
+<li>keep <code>brainbert</code>, <code>popt</code>, and <code>diver</code> integrated into the root codebase</li>
+<li>define a <code>supersubject</code> evaluation variant</li>
+<li>make all root tasks runnable under that variant through model-specific YAML configs</li>
+</ul>
+<p>For the current planning pass, YAML deduplication through a separate <code>common.yml</code> file is deferred. The loader does not currently support file-level include or inheritance. Therefore the first complete pass should prefer clarity and completeness over DRYness.</p>
+<h3 id="phase-0-freeze-the-configuration-policy">Phase 0: Freeze the configuration policy<a class="headerlink" href="#phase-0-freeze-the-configuration-policy" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Treat <code>supersubject</code> as the canonical pooled setting that uses all electrodes listed in <a href="/storage/connectome/jmhan/podcast-benchmark/processed_data/all_subject_sig.csv"><code>processed_data/all_subject_sig.csv</code></a>.</li>
+<li>In <code>supersubject</code> configs, do not hardcode a single subject id.</li>
+<li>Let <code>electrode_file_path: processed_data/all_subject_sig.csv</code> determine the included subject and electrode set.</li>
+<li>Do not introduce a separate YAML inheritance layer yet.</li>
+<li>Accept repetition across YAML files in the first complete implementation pass.</li>
+</ol>
+<h3 id="phase-1-finalize-model-side-integration-so-yamls-can-target-all-tasks">Phase 1: Finalize model-side integration so YAMLs can target all tasks<a class="headerlink" href="#phase-1-finalize-model-side-integration-so-yamls-can-target-all-tasks" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Keep the edit surface centered on:</li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/brainbert/integration.py"><code>models/brainbert/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/popt/integration.py"><code>models/popt/integration.py</code></a></li>
+<li><a href="/storage/connectome/jmhan/podcast-benchmark/models/diver/integration.py"><code>models/diver/integration.py</code></a></li>
+<li>Keep shared utility edits minimal and only for concrete blockers.</li>
+<li>Ensure all three models can consume YAML-controlled task settings for:</li>
+<li>regression losses</li>
+<li>binary classification losses</li>
+<li>multiclass losses</li>
+<li>LLM decoding task inputs</li>
+<li>Keep loss-to-activation behavior correct:</li>
+<li><code>mse</code> and embedding regression -&gt; linear output</li>
+<li><code>bce_with_logits</code> -&gt; linear/raw logit output</li>
+<li><code>cross_entropy</code> -&gt; linear/raw logit output</li>
+<li>Ensure the following model-specific data paths are stable:</li>
+<li>BrainBERT STFT preprocessing</li>
+<li>PopT STFT preprocessing</li>
+<li>PopT BrainBERT-upstream execution</li>
+<li>PopT LIP coordinate injection</li>
+<li>DIVER MNI coordinate injection</li>
+<li>DIVER strategy-based pretrained path selection</li>
+</ol>
+<h3 id="phase-2-inventory-the-full-target-task-set">Phase 2: Inventory the full target task set<a class="headerlink" href="#phase-2-inventory-the-full-target-task-set" title="Permanent link">&para;</a></h3>
+<p>The final YAML plan should cover all tasks currently present in the root benchmark, not just the ones that existed in the reference implementation.</p>
+<p>Root task inventory:</p>
+<ul>
+<li><code>word_embedding_decoding_task</code></li>
+<li><code>whisper_embedding_decoding_task</code></li>
+<li><code>content_noncontent_task</code></li>
+<li><code>sentence_onset_task</code></li>
+<li><code>gpt_surprise_task</code></li>
+<li><code>gpt_surprise_multiclass_task</code></li>
+<li><code>pos_task</code></li>
+<li><code>volume_level_decoding_task</code></li>
+<li><code>iu_boundary_task</code></li>
+<li><code>llm_decoding_task</code></li>
+<li><code>llm_embedding_pretraining_task</code></li>
+</ul>
+<p>Reference-backed task group:</p>
+<ul>
+<li><code>word_embedding_decoding_task</code></li>
+<li><code>whisper_embedding_decoding_task</code></li>
+<li><code>content_noncontent_task</code></li>
+<li><code>sentence_onset_task</code></li>
+<li><code>gpt_surprise_task</code></li>
+<li><code>gpt_surprise_multiclass_task</code></li>
+<li><code>pos_task</code></li>
+<li><code>volume_level_decoding_task</code></li>
+</ul>
+<p>Root-only task group that still needs new YAML design:</p>
+<ul>
+<li><code>iu_boundary_task</code></li>
+<li><code>llm_decoding_task</code></li>
+<li><code>llm_embedding_pretraining_task</code></li>
+</ul>
+<h3 id="phase-3-bring-over-yamls-for-reference-backed-tasks">Phase 3: Bring over YAMLs for reference-backed tasks<a class="headerlink" href="#phase-3-bring-over-yamls-for-reference-backed-tasks" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Review the reference configs used in practice for <code>brainbert</code>, <code>popt</code>, and <code>diver</code>.</li>
+<li>For each task that was already implemented in reference, create root-native YAML configs under the new model/task/variant-file layout.</li>
+<li>Translate reference-era fields into the current root schema rather than copying old YAMLs verbatim.</li>
+<li>Preserve task semantics from reference where possible:</li>
+<li>same task name</li>
+<li>same output dimension intent</li>
+<li>same loss family</li>
+<li>same coordinate / STFT behavior</li>
+<li>The first YAML migration target set should be:</li>
+<li><code>word_embedding_decoding_task</code></li>
+<li><code>whisper_embedding_decoding_task</code></li>
+<li><code>content_noncontent_task</code></li>
+<li><code>sentence_onset_task</code></li>
+<li><code>gpt_surprise_task</code></li>
+<li><code>gpt_surprise_multiclass_task</code></li>
+<li><code>pos_task</code></li>
+<li><code>volume_level_decoding_task</code></li>
+</ol>
+<h3 id="phase-4-design-yamls-for-tasks-not-implemented-in-reference">Phase 4: Design YAMLs for tasks not implemented in reference<a class="headerlink" href="#phase-4-design-yamls-for-tasks-not-implemented-in-reference" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Create new root-native YAMLs for:</li>
+<li><code>iu_boundary_task</code></li>
+<li><code>llm_decoding_task</code></li>
+<li><code>llm_embedding_pretraining_task</code></li>
+<li>Do not wait for perfect deduplication before writing these configs.</li>
+<li>For each new task, define:</li>
+<li>canonical <code>trial_name</code></li>
+<li>correct <code>task_specific_config</code></li>
+<li>correct <code>training_params.losses</code></li>
+<li>correct <code>training_params.metrics</code></li>
+<li>
+<p>correct <code>model_spec.params.output_dim</code>원하면 다음 답변에서 “어떤 검증 로그를 찍어야 이 수정이 맞게 들어갔는지”까지 같이 제안하겠습니다.</p>
+</li>
+<li>
+<p>Ensure these root-only task YAMLs are consistent with the already-ported model integrations rather than inventing a separate execution path.</p>
+</li>
+</ol>
+<h3 id="phase-5-build-the-supersubject-config-matrix">Phase 5: Build the supersubject config matrix<a class="headerlink" href="#phase-5-build-the-supersubject-config-matrix" title="Permanent link">&para;</a></h3>
+<p>For each of the following models:</p>
+<ul>
+<li><code>brainbert</code></li>
+<li><code>popt</code></li>
+<li><code>diver</code></li>
+</ul>
+<p>Create a <code>supersubject</code> config set that covers the full task list, with one canonical YAML per model-task pair.</p>
+<p>Planned minimum matrix:</p>
+<ul>
+<li><code>word_embedding</code></li>
+<li><code>whisper_embedding</code></li>
+<li><code>content_noncontent</code></li>
+<li><code>sentence_onset</code></li>
+<li><code>gpt_surprise</code></li>
+<li><code>gpt_surprise_multiclass</code></li>
+<li><code>pos</code></li>
+<li><code>volume_level</code></li>
+<li><code>iu_boundary</code></li>
+<li><code>llm_decoding</code></li>
+<li><code>llm_embedding_pretraining</code></li>
+</ul>
+<p>Notes:</p>
+<ul>
+<li>PopT may later gain secondary variants such as LIP vs no-LIP, but the first complete pass should establish one canonical config per task.</li>
+<li>If a task is not meaningful for a given model after validation, that should be recorded explicitly rather than silently omitted.</li>
+</ul>
+<h3 id="phase-6-validate-all-yamls-without-introducing-new-code-paths">Phase 6: Validate all YAMLs without introducing new code paths<a class="headerlink" href="#phase-6-validate-all-yamls-without-introducing-new-code-paths" title="Permanent link">&para;</a></h3>
+<p>For every new YAML:</p>
+<ol>
+<li>confirm config load succeeds</li>
+<li>confirm config setters run</li>
+<li>confirm task getter resolves</li>
+<li>confirm model constructor resolves</li>
+<li>confirm required model data getters resolve</li>
+<li>confirm expected loss and metric names resolve</li>
+</ol>
+<p>At this stage the goal is not yet benchmark-quality results. The goal is complete runnable coverage.</p>
+<h3 id="phase-7-run-task-by-task-smoke-tests">Phase 7: Run task-by-task smoke tests<a class="headerlink" href="#phase-7-run-task-by-task-smoke-tests" title="Permanent link">&para;</a></h3>
+<ol>
+<li>For each model, run a small smoke-test subset of tasks first:</li>
+<li><code>word_embedding</code></li>
+<li><code>content_noncontent</code></li>
+<li><code>pos</code></li>
+<li><code>llm_decoding</code></li>
+<li>After those pass, extend to the rest of the task set.</li>
+<li>Record any task that requires additional integration changes and feed it back into Phase 1.</li>
+</ol>
+<h3 id="phase-8-prepare-final-measurement-runs">Phase 8: Prepare final measurement runs<a class="headerlink" href="#phase-8-prepare-final-measurement-runs" title="Permanent link">&para;</a></h3>
+<p>Once all YAMLs load and smoke tests pass:</p>
+<ol>
+<li>choose canonical supersubject YAMLs for actual measurement</li>
+<li>define fold / lag / channel overrides through CLI rather than hardcoding them into YAML</li>
+<li>run the requested BrainBERT / PopT / DIVER measurements</li>
+<li>archive the exact command lines used for reproducibility</li>
+</ol>
+<h2 id="target-configuration-strategy">Target Configuration Strategy<a class="headerlink" href="#target-configuration-strategy" title="Permanent link">&para;</a></h2>
+<p>For now, do not attempt to split shared config blocks into a separate <code>common.yml</code>.</p>
+<p>Reason:</p>
+<ul>
+<li>the current config loader does not support YAML include or inheritance across files</li>
+<li>YAML anchors only help within a single file</li>
+<li>introducing a new config composition system would require touching code beyond the currently preferred scope</li>
+</ul>
+<p>The more important structural decision is the directory axis order.</p>
+<h3 id="preferred-axis-order">Preferred axis order<a class="headerlink" href="#preferred-axis-order" title="Permanent link">&para;</a></h3>
+<p>The preferred final structure is:</p>
+<ul>
+<li><code>model &gt; task &gt; evaluation-variant-file</code></li>
+</ul>
+<p>For example:</p>
+<ul>
+<li><code>configs/foundation_models/brainbert/word_embedding/supersubject.yml</code></li>
+<li><code>configs/foundation_models/popt/content_noncontent/supersubject.yml</code></li>
+<li><code>configs/foundation_models/diver/llm_decoding/supersubject.yml</code></li>
+</ul>
+<h3 id="why-this-is-preferred">Why this is preferred<a class="headerlink" href="#why-this-is-preferred" title="Permanent link">&para;</a></h3>
+<p>This is better than <code>model &gt; subject &gt; task</code> for the current benchmark because:</p>
+<ul>
+<li>task differences are larger than subject-scope differences</li>
+<li><code>supersubject</code> is not a literal subject, but one evaluation variant among many possible electrode-selection profiles</li>
+<li>future variants such as <code>sub01.yml</code>, <code>sub02.yml</code>, or <code>supersubject_with_lip.yml</code> fit naturally beside the same task</li>
+<li>it keeps all configs relevant to one model-task pair together</li>
+<li>it avoids a large <code>supersubject/</code> directory full of unrelated task files</li>
+</ul>
+<p>This is also slightly better than a fully nested <code>model &gt; task &gt; subject/</code> directory because:</p>
+<ul>
+<li>the evaluation variant currently maps to one config file, not a set of many files</li>
+<li>using <code>supersubject.yml</code> as the filename keeps the tree shallower</li>
+<li>future single-subject configs can be added as sibling files without creating unnecessary directories</li>
+</ul>
+<p>Therefore the immediate strategy is:</p>
+<ul>
+<li>use explicit per-task YAMLs</li>
+<li>place them under model-first, task-second directories</li>
+<li>encode evaluation variant, subject scope, or electrode profile in the filename</li>
+<li>keep some duplication if needed</li>
+<li>optimize for readability and reliability first</li>
+</ul>
+<p>Recommended filename convention:</p>
+<ul>
+<li><code>supersubject.yml</code> for the pooled all-electrode setting</li>
+<li><code>sub01.yml</code>, <code>sub02.yml</code>, ... for whole-subject variants</li>
+<li><code>sub01_sig.yml</code>, <code>sub01_all.yml</code>, <code>sub01_custom_&lt;tag&gt;.yml</code> for electrode-profile variants</li>
+</ul>
+<p>If deduplication becomes necessary later, it should be addressed as a separate config-system task rather than folded into the current integration pass.</p>
+<h2 id="planned-final-directory-structure">Planned Final Directory Structure<a class="headerlink" href="#planned-final-directory-structure" title="Permanent link">&para;</a></h2>
+<p>After the YAML migration is complete, the intended <code>foundation_models</code> layout is model-first and task-second, with evaluation variant encoded in the filename:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>configs/
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  foundation_models/
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    brainbert/
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>      word_embedding/
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        supersubject.yml
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>      whisper_embedding/
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        supersubject.yml
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>      content_noncontent/
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        supersubject.yml
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>      sentence_onset/
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        supersubject.yml
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>      gpt_surprise/
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        supersubject.yml
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>      gpt_surprise_multiclass/
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        supersubject.yml
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>      pos/
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>        supersubject.yml
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>      volume_level/
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>        supersubject.yml
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>      iu_boundary/
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>        supersubject.yml
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>      llm_decoding/
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>        supersubject.yml
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>      llm_embedding_pretraining/
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>        supersubject.yml
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    popt/
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>      word_embedding/
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>        supersubject.yml
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>      whisper_embedding/
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>        supersubject.yml
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>      content_noncontent/
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>        supersubject.yml
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>      sentence_onset/
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>        supersubject.yml
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>      gpt_surprise/
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>        supersubject.yml
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>      gpt_surprise_multiclass/
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>        supersubject.yml
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>      pos/
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>        supersubject.yml
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>      volume_level/
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>        supersubject.yml
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>      iu_boundary/
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>        supersubject.yml
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>      llm_decoding/
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>        supersubject.yml
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>      llm_embedding_pretraining/
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>        supersubject.yml
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>    diver/
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>      word_embedding/
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>        supersubject.yml
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>      whisper_embedding/
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>        supersubject.yml
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>      content_noncontent/
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>        supersubject.yml
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>      sentence_onset/
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>        supersubject.yml
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>      gpt_surprise/
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>        supersubject.yml
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>      gpt_surprise_multiclass/
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>        supersubject.yml
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>      pos/
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>        supersubject.yml
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>      volume_level/
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>        supersubject.yml
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>      iu_boundary/
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>        supersubject.yml
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>      llm_decoding/
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>        supersubject.yml
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>      llm_embedding_pretraining/
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>        supersubject.yml
+</code></pre></div>
+<p>Possible future extensions under the same scheme:</p>
+<ul>
+<li><code>configs/foundation_models/brainbert/word_embedding/sub01.yml</code></li>
+<li><code>configs/foundation_models/brainbert/word_embedding/sub02.yml</code></li>
+<li><code>configs/foundation_models/brainbert/word_embedding/sub01_sig.yml</code></li>
+<li><code>configs/foundation_models/brainbert/word_embedding/sub01_custom_lgab.yml</code></li>
+<li><code>configs/foundation_models/popt/word_embedding/supersubject_with_lip.yml</code></li>
+</ul>
+<p>Optional cleanup after migration:</p>
+<ul>
+<li>move current flat files in <a href="/storage/connectome/jmhan/podcast-benchmark/configs/foundation_models"><code>configs/foundation_models</code></a> into a temporary <code>legacy/</code> directory</li>
+<li>update docs and example commands to point to the new model-first, task-second layout</li>
+</ul>
+<h2 id="execution-note">Execution Note<a class="headerlink" href="#execution-note" title="Permanent link">&para;</a></h2>
+<p>The work should be considered complete only when:</p>
+<ul>
+<li>the three model integrations are stable</li>
+<li>the supersubject YAML matrix exists for all root tasks under the model/task/variant-file layout</li>
+<li>each YAML can at least complete a smoke-test run</li>
+<li>the requested final measurements can be launched from those YAMLs without additional ad hoc config edits</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/hassonlab/podcast-benchmark" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
