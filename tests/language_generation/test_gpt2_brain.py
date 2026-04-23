@@ -46,6 +46,7 @@ class MockTransformer(nn.Module):
     def __init__(self, vocab_size, hidden_size):
         super().__init__()
         self.wte = nn.Embedding(vocab_size, hidden_size)
+        self.dropout = nn.Dropout(p=0.1)
 
 
 class MockGPT2LMHeadModel(nn.Module):
@@ -337,6 +338,56 @@ class TestGPT2BrainConstruction:
                     embedding_grad[token_id],
                     torch.zeros_like(embedding_grad[token_id]),
                 ), f"Token {token_id} should have zero gradient but has non-zero values"
+
+    def test_train_keeps_frozen_lm_in_eval_mode(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Frozen LM should stay in eval mode when the wrapper is set to train."""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+        )
+
+        model.train()
+
+        assert model.training
+        assert not model.lm_model.training
+        assert model.lm_model.transformer.wte.weight.requires_grad
+
+        non_embedding_params = [
+            param
+            for name, param in model.lm_model.named_parameters()
+            if name != "transformer.wte.weight"
+        ]
+        assert non_embedding_params
+        assert all(not param.requires_grad for param in non_embedding_params)
+
+    def test_train_and_eval_toggle_unfrozen_lm_mode(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Unfrozen LM should follow the wrapper's train/eval mode."""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=False,
+        )
+
+        model.train()
+        assert model.training
+        assert model.lm_model.training
+        assert all(param.requires_grad for param in model.lm_model.parameters())
+
+        model.eval()
+        assert not model.training
+        assert not model.lm_model.training
+        assert all(param.requires_grad for param in model.lm_model.parameters())
 
 
 class TestGPT2BrainForwardSingleEmbed:
