@@ -143,6 +143,9 @@ class TrainingParams:
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
     shuffle_targets: bool = False
+    # Optional flag to enable feature caching paths in model integrations. This assumes your ModelSpec wraps the model you would like to cache
+    # with a CachingModel and then provides a cache_key in your models forward. See CachingModel for expected encoder interface.
+    feature_cache: bool = False
 
     # --------------------------------------------------------------------------
     # Optimizer extras (optional)
@@ -180,8 +183,6 @@ class ModelSpec:
     Attributes:
         constructor_name: Name of the registered model constructor function
         params: Dictionary of parameters to pass to the constructor (excluding sub-models)
-        feature_cache: Optional flag to enable feature caching paths in model integrations.
-                      This is forwarded into constructor params as `feature_cache`.
         sub_models: Dictionary mapping parameter names to ModelSpec objects.
                    The keys indicate the keyword argument names that will receive
                    the built sub-models when constructing the parent model.
@@ -206,7 +207,6 @@ class ModelSpec:
 
     constructor_name: str
     params: Dict[str, Any] = field(default_factory=dict)
-    feature_cache: bool = False
     per_subject_feature_concat: bool = False
     sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
     checkpoint_path: Optional[str] = None

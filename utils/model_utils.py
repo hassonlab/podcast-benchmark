@@ -14,6 +14,7 @@ def build_model_from_spec(
     lag: Optional[int] = None,
     fold: Optional[int] = None,
     build_context: Optional[dict] = None,
+    use_feature_cache: bool = False,
 ):
     """Recursively build a model from a ModelSpec, handling nested sub-models and checkpoints.
 
@@ -27,6 +28,8 @@ def build_model_from_spec(
         model_spec: ModelSpec instance describing the model to build
         lag: Current lag value in ms (for checkpoint path formatting)
         fold: Current fold number (for checkpoint path formatting)
+        build_context: Optional dictionary to pass additional context during building (e.g. cache stores)
+        use_feature_cache: Optional flag to indicate if feature caching should be used.
 
     Returns:
         The constructed model instance with checkpoints loaded if specified
@@ -73,9 +76,11 @@ def build_model_from_spec(
     # Combine params and built sub-models into a single kwargs dict.
     # Forward top-level flags into model params for convenience/compatibility.
     all_kwargs = {**model_spec.params, **built_sub_models}
-    if "feature_cache" not in all_kwargs:
-        all_kwargs["feature_cache"] = model_spec.feature_cache
-    if build_context is not None and "_cache_store" in build_context:
+    if (
+        build_context is not None
+        and "_cache_store" in build_context
+        and use_feature_cache
+    ):
         all_kwargs["_cache_store"] = build_context["_cache_store"]
 
     # Build the model

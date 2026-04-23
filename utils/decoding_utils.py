@@ -497,7 +497,6 @@ def train_decoding_model(
         is_train = optimizer is not None
         if is_train:
             model.train()
-            # *note that this is not enough for gpt2brain, which is why we have a seprate `change_training_mode`
         else:
             model.eval()
 
@@ -652,9 +651,10 @@ def train_decoding_model(
         extra_test_inputs = data_utils.df_columns_to_tensors(
             data_df, task_config.task_specific_config.input_fields, te_idx
         )
-        extra_train_inputs["cache_key"] = lag_example_ids[tr_idx]
-        extra_val_inputs["cache_key"] = lag_example_ids[va_idx]
-        extra_test_inputs["cache_key"] = lag_example_ids[te_idx]
+        if training_params.feature_cache:
+            extra_train_inputs["cache_key"] = lag_example_ids[tr_idx]
+            extra_val_inputs["cache_key"] = lag_example_ids[va_idx]
+            extra_test_inputs["cache_key"] = lag_example_ids[te_idx]
         datasets = {
             "train": NeuralDictDataset(
                 neural_data[tr_idx], extra_train_inputs, Y_train_norm
@@ -713,7 +713,11 @@ def train_decoding_model(
 
         # Model, optimizer, early‐stop setup
         model = build_model_from_spec(
-            model_spec, lag=lag, fold=fold, build_context=lag_build_context
+            model_spec,
+            lag=lag,
+            fold=fold,
+            build_context=lag_build_context,
+            use_feature_cache=training_params.feature_cache,
         ).to(device)
 
         if training_params.optimizer == "MuAdamW":
@@ -782,8 +786,6 @@ def train_decoding_model(
                     "Got subject_channel_counts={subject_channel_counts}"
                 )
             cache_loader_generation_start_time = time.time()
-            # import warnings
-            # warnings.warn("per_subject_feature_concat ALWAYS to caching. regardless of model_spec.feature_cache)")
             loaders = {
                 "train": generate_loaders_from_features(
                     *extract_per_subject_concat_features(
@@ -1291,69 +1293,6 @@ def generate_loaders_from_features(
         }
 
     return _make_loader(features, input_dicts, y_bs, shuffle=shuffle)
-
-
-class SqueezeWrapper(nn.Module):
-    def __init__(self, feature_head: nn.Module, output_dim=None):
-        super().__init__()
-        self.feature_head = feature_head
-        self.output_dim = output_dim
-
-    def forward(self, x, **kwargs):
-        out = self.feature_head(x, **kwargs)
-        if self.output_dim == 1 and out.shape[-1] == 1:
-            out = out.squeeze(-1)
-        return out
-
-
-class MakeIgnoreKwargsDuringForward(nn.Module):
-    def __init__(self, module):
-        super().__init__()
-        self.module = module
-
-    def forward(self, x, **kwargs):
-        return self.module(x)
-
-
-class DIVERCachedFeatureAdapterModel(nn.Module):
-    def __init__(self, core_module, output_adapter):
-        super().__init__()
-        self.core_module = core_module
-        self.output_adapter = output_adapter
-
-    def forward(self, x, **kwargs):
-        core_out = self.core_module(x)
-        adapted_out = self.output_adapter(core_out)
-        if adapted_out.shape[-1] == 1:
-            adapted_out = adapted_out.squeeze(-1)
-        return adapted_out
-
-
-def _build_gpt2_cached_feature_head(encoder_model: nn.Module) -> nn.Module:
-    """
-    Build FM-specific adapter that maps cached encoder features -> neural embeddings
-    expected by GPT2Brain prompt construction.
-    """
-    encoder_name = encoder_model.__class__.__name__
-
-    if encoder_name == "ReferenceBrainBERTDecoder":
-        return SqueezeWrapper(
-            feature_head=MakeIgnoreKwargsDuringForward(encoder_model.projector),
-            output_dim=getattr(encoder_model, "output_dim", None),
-        )
-
-    if encoder_name == "ReferencePOPTDecoder":
-        return MakeIgnoreKwargsDuringForward(encoder_model.head)
-
-    if encoder_name == "DIVERDecoder":
-        return DIVERCachedFeatureAdapterModel(
-            encoder_model.diver_model.ft_core_model,
-            encoder_model.diver_model.ft_model_output_adapter,
-        )
-
-    raise NotImplementedError(
-        f"GPT2Brain feature-cache adapter not implemented for encoder: {encoder_name}"
-    )
 
 
 class GPT2BrainCachedFeatureAdapterModel(nn.Module):
