@@ -42,7 +42,6 @@ class RawNeuralDataset:
         raws: list,
         task_df: pd.DataFrame,
         window_width: float,
-        lags: list[int],
         preprocessing_fns=None,
         preprocessor_params=None,
     ):
@@ -98,7 +97,9 @@ class RawNeuralDataset:
                 continue
 
             onset_samples = (task_df_valid.start.to_numpy() * self.sfreq).astype(int)
-            selection = np.flatnonzero(~pd.Series(onset_samples).duplicated().to_numpy())
+            selection = np.flatnonzero(
+                ~pd.Series(onset_samples).duplicated().to_numpy()
+            )
             selected_rows_this_raw = task_df_valid.iloc[selection]
 
             if selected_rows_df is None:
