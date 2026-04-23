@@ -1028,6 +1028,17 @@ def run_training_over_lags(
 
     all_new_results = []
 
+    from utils.dataset import RawNeuralDataset
+
+    raw_dataset = RawNeuralDataset(
+        raws,
+        task_df,
+        data_params.window_width,
+        lags,
+        preprocessing_fns,
+        data_params.preprocessor_params,
+    )
+
     for lag in lags:
         if lag in already_read_lags:
             print(f"Lag {lag} already done, skipping...")
@@ -1037,21 +1048,7 @@ def run_training_over_lags(
         print("running lag:", lag)
         print("=" * 60)
 
-        # TODO: Support lazy-loading for larger datasets on future tasks.
-        neural_data, targets, data_df = data_utils.get_data(
-            lag,
-            raws,
-            task_df,
-            data_params.window_width,
-            preprocessing_fns,
-            data_params.preprocessor_params,
-        )
-
-        neural_tensor = torch.FloatTensor(neural_data)
-        # Handle case where Y contains arrays (e.g., word embeddings)
-        if targets.dtype == object:
-            targets = np.stack(targets)
-        targets_tensor = torch.FloatTensor(targets)
+        neural_tensor, targets_tensor, data_df = raw_dataset.get_data_for_lag(lag)
 
         print(f"neural_tensor shape: {neural_tensor.shape}")
 

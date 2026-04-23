@@ -1,7 +1,7 @@
 """
-Tests for data_utils.py.
+Tests for data_utils.py and RawNeuralDataset.
 
-Tests the get_data function for handling out-of-bounds time windows
+Tests the RawNeuralDataset class for handling out-of-bounds time windows
 and the read_electrode_file function for parsing electrode mapping files.
 """
 
@@ -17,12 +17,12 @@ from unittest.mock import patch, MagicMock
 from scipy.signal import resample_poly
 import torch
 from utils.data_utils import (
-    get_data,
     read_electrode_file,
     load_raws,
     read_subject_mapping,
     df_columns_to_tensors,
 )
+from utils.dataset import RawNeuralDataset
 from core.config import DataParams
 
 
@@ -74,58 +74,42 @@ def task_df_out_of_bounds():
     )
 
 
-class TestGetDataOutOfBounds:
-    """Test get_data function with out-of-bounds time windows."""
+class TestRawNeuralDataset:
+    """Test RawNeuralDataset for correct window filtering and lag slicing."""
 
-    def test_get_data_in_bounds_baseline(self, mock_raw, task_df_in_bounds):
-        """Test that get_data works correctly with in-bounds events."""
-        lag = 0
+    def test_in_bounds_baseline(self, mock_raw, task_df_in_bounds):
+        """Dataset keeps all events when they are in bounds for the given lag."""
+        lags = [0]
         window_width = 0.5
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, window_width, lags)
+        neural, targets, df = ds.get_data_for_lag(0)
 
-        data, targets, selected_rows_df = get_data(
-            lag=lag,
-            raws=[mock_raw],
-            task_df=task_df_in_bounds,
-            window_width=window_width,
-        )
+        assert neural.shape[0] == len(task_df_in_bounds)
+        assert targets.shape[0] == len(task_df_in_bounds)
+        assert len(df) == len(task_df_in_bounds)
 
-        assert data.shape[0] == len(task_df_in_bounds)
-        assert len(targets) == len(task_df_in_bounds)
-        assert len(selected_rows_df) == len(task_df_in_bounds)
-
-    def test_get_data_without_word_column(self, mock_raw, task_df_in_bounds):
-        """Test that get_data works correctly with in-bounds events."""
-        lag = 0
+    def test_correct_window_shape(self, mock_raw, task_df_in_bounds):
+        """get_data_for_lag returns the expected time-axis length."""
+        sfreq = mock_raw.info["sfreq"]
         window_width = 0.5
+        lags = [0]
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, window_width, lags)
+        neural, _, _ = ds.get_data_for_lag(0)
 
-        data, targets, selected_rows_df = get_data(
-            lag=lag,
-            raws=[mock_raw],
-            task_df=task_df_in_bounds,
-            window_width=window_width,
-        )
+        expected_samples = int(round((window_width - 2e-3) * sfreq)) + 1
+        assert neural.shape[2] == expected_samples
 
-        assert data.shape[0] == len(task_df_in_bounds)
-        assert len(targets) == len(task_df_in_bounds)
-        assert len(selected_rows_df) == len(task_df_in_bounds)
-
-    def test_get_data_out_of_bounds_bug(self, mock_raw, task_df_out_of_bounds):
-        """Test that out-of-bounds events raise ValueError instead of creating empty epochs."""
-        lag = 500
+    def test_out_of_bounds_raises(self, mock_raw, task_df_out_of_bounds):
+        """Dataset raises ValueError when no events are valid for the window."""
+        lags = [500]
         window_width = 1.0
-
         with pytest.raises(
             ValueError, match="No valid events found within data time bounds"
         ):
-            data, targets, words = get_data(
-                lag=lag,
-                raws=[mock_raw],
-                task_df=task_df_out_of_bounds,
-                window_width=window_width,
-            )
+            RawNeuralDataset([mock_raw], task_df_out_of_bounds, window_width, lags)
 
-    def test_get_data_extreme_out_of_bounds(self, mock_raw):
-        """Test that extremely out-of-bounds events raise ValueError without warnings."""
+    def test_extreme_out_of_bounds_raises(self, mock_raw):
+        """Dataset raises ValueError for completely out-of-range events."""
         task_df_extreme = pd.DataFrame(
             {
                 "start": [-3.0, 20.0, 25.0],
@@ -134,22 +118,13 @@ class TestGetDataOutOfBounds:
                 "target": [0, 1, 2],
             }
         )
-
-        lag = 0
-        window_width = 0.5
-
         with pytest.raises(
             ValueError, match="No valid events found within data time bounds"
         ):
-            data, targets, words = get_data(
-                lag=lag,
-                raws=[mock_raw],
-                task_df=task_df_extreme,
-                window_width=window_width,
-            )
+            RawNeuralDataset([mock_raw], task_df_extreme, 0.5, [0])
 
-    def test_get_data_mixed_bounds(self, mock_raw):
-        """Test that only in-bounds events are kept when mix of valid/invalid events."""
+    def test_mixed_bounds_filters_correctly(self, mock_raw):
+        """Only in-bounds events are retained when the DataFrame has a mix."""
         task_df_mixed = pd.DataFrame(
             {
                 "start": [2.0, 9.8, 4.0, 10.1],
@@ -158,24 +133,18 @@ class TestGetDataOutOfBounds:
                 "target": [0, 1, 2, 3],
             }
         )
-
-        lag = 500
+        lags = [500]
         window_width = 1.0
+        ds = RawNeuralDataset([mock_raw], task_df_mixed, window_width, lags)
+        neural, targets, df = ds.get_data_for_lag(500)
 
-        data, targets, selected_rows_df = get_data(
-            lag=lag,
-            raws=[mock_raw],
-            task_df=task_df_mixed,
-            window_width=window_width,
-        )
+        expected_valid = 2
+        assert neural.shape[0] == expected_valid
+        assert targets.shape[0] == expected_valid
+        assert len(df) == expected_valid
 
-        expected_valid_events = 2
-        assert data.shape[0] == expected_valid_events
-        assert len(targets) == expected_valid_events
-        assert len(selected_rows_df) == expected_valid_events
-
-    def test_get_data_negative_time_bounds(self, mock_raw):
-        """Test that events with negative time windows are filtered out."""
+    def test_negative_time_bounds_raises(self, mock_raw):
+        """Events whose window goes before t=0 are filtered; raises if none remain."""
         task_df_early = pd.DataFrame(
             {
                 "start": [0.1, 0.2, 0.3],
@@ -184,51 +153,51 @@ class TestGetDataOutOfBounds:
                 "target": [0, 1, 2],
             }
         )
-
-        lag = -1000  # -1 second
-        window_width = 0.5  # ±0.25s around event+lag
-
-        # Events at 0.1s with -1s lag = -0.9s, window [-1.15s, -0.65s] - all negative
         with pytest.raises(
             ValueError, match="No valid events found within data time bounds"
         ):
-            data, targets, words = get_data(
-                lag=lag,
-                raws=[mock_raw],
-                task_df=task_df_early,
-                window_width=window_width,
-            )
+            RawNeuralDataset([mock_raw], task_df_early, 0.5, [-1000])
 
-    def test_get_data_mixed_negative_bounds(self, mock_raw):
-        """Test filtering with mix of valid events and negative time window events."""
+    def test_mixed_negative_bounds_filters(self, mock_raw):
+        """Mix of valid and early-start events: only valid rows are kept."""
         task_df_mixed_neg = pd.DataFrame(
             {
-                "start": [
-                    0.7,
-                    2.0,
-                    3.0,
-                    0.2,
-                ],  # Mix: some valid, some will be negative
+                "start": [0.7, 2.0, 3.0, 0.2],
                 "end": [1.1, 2.1, 3.1, 0.3],
                 "word": ["valid1", "valid2", "valid3", "early"],
                 "target": [0, 1, 2, 3],
             }
         )
+        lags = [-500]
+        window_width = 0.4
+        ds = RawNeuralDataset([mock_raw], task_df_mixed_neg, window_width, lags)
+        neural, targets, df = ds.get_data_for_lag(-500)
 
-        lag = -500  # -0.5 seconds
-        window_width = 0.4  # ±0.2s around event+lag
+        expected_valid = 3
+        assert neural.shape[0] == expected_valid
+        assert targets.shape[0] == expected_valid
+        assert len(df) == expected_valid
 
-        data, targets, selected_rows_df = get_data(
-            lag=lag,
-            raws=[mock_raw],
-            task_df=task_df_mixed_neg,
-            window_width=window_width,
-        )
+    def test_multiple_lags_consistent_rows(self, mock_raw, task_df_in_bounds):
+        """All lags return the same number of rows (filtered once against full range)."""
+        lags = [-200, 0, 200]
+        window_width = 0.5
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, window_width, lags)
 
-        expected_valid_events = 3
-        assert data.shape[0] == expected_valid_events
-        assert len(targets) == expected_valid_events
-        assert len(selected_rows_df) == expected_valid_events
+        n_words = None
+        for lag in lags:
+            neural, targets, df = ds.get_data_for_lag(lag)
+            if n_words is None:
+                n_words = neural.shape[0]
+            assert neural.shape[0] == n_words
+            assert targets.shape[0] == n_words
+
+    def test_returns_float_tensors(self, mock_raw, task_df_in_bounds):
+        """get_data_for_lag returns torch.FloatTensor objects."""
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, 0.5, [0])
+        neural, targets, _ = ds.get_data_for_lag(0)
+        assert neural.dtype == torch.float32
+        assert targets.dtype == torch.float32
 
 
 @pytest.fixture
