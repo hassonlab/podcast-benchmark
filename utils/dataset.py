@@ -42,7 +42,6 @@ class RawNeuralDataset:
         raws: list,
         task_df: pd.DataFrame,
         window_width: float,
-        lags: list[int],
         preprocessing_fns=None,
         preprocessor_params=None,
     ):
