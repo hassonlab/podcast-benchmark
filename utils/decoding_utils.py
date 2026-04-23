@@ -1112,7 +1112,6 @@ def run_training_over_lags(
         raws,
         task_df,
         data_params.window_width,
-        lags,
         preprocessing_fns,
         data_params.preprocessor_params,
     )
