@@ -92,7 +92,6 @@ class GPT2Brain(nn.Module):
 
         # Freeze language model if requested
         if freeze_lm:
-            print(f"freezing LM")
             self.lm_model.eval()  # Set to eval mode to disable dropout, etc.
             for param in self.lm_model.parameters():
                 param.requires_grad = False
@@ -116,21 +115,6 @@ class GPT2Brain(nn.Module):
                 self.lm_model.transformer.wte.weight.register_hook(
                     zero_non_brain_gradients
                 )
-        # Freeze brain encoder (except linear head parts) by default
-        if not self.no_brain_encoder:
-            print(
-            "[GPT2Brain] Brain encoder is frozen by default. "
-            "If you want it trainable, you must modify this implementation/config."
-            )
-            self.encoder_model.eval()
-            
-            #adhoc solution for unfreezing the linear parts... 
-            for name, param in self.encoder_model.named_parameters():
-                if name.startswith("projector") or name.startswith("head") or name.startswith("diver_model.ft_"):
-                    #projector : BrainBERT, head : popt, ft_ : fine-tuning head for DIVER
-                    print(f"Not freezing encoder parameter: {name}")
-                    param.requires_grad = True
-                param.requires_grad = False
 
     def _get_brain_separator_embeddings(self, batch_size, device):
         """Get embeddings for brain separator tokens."""
@@ -218,20 +202,15 @@ class GPT2Brain(nn.Module):
             neural_embedding = self.encoder_model(
                 neural_data, **encoder_kwargs
             )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
-            #* neural_data : [4, 99, 13, 40 ] becomes neural_embedding : torch.Size([4, 768])
-                    
-            if "return_feature_emb_instead_of_projection" in encoder_inputs:
-                return neural_embedding , None #i.e. the should run the rest of the parts... (after changing neural-embedding to )
         else : 
             neural_embedding = None
 
-        # if not return_feature_emb_instead_of_projection or no brain encoder, keep the default, doing the projection to lm_model's embedding dimension and concatenation and stuff 
         return self._build_prompt_embeddings(neural_embedding, input_ids, attention_mask, **encoder_inputs)
 
     def _build_prompt_embeddings(self, neural_embedding, input_ids, attention_mask, **encoder_inputs):
         
         device = input_ids.device
-        batch_size = neural_embedding.shape[0]
+        batch_size = input_ids.shape[0]
 
         all_tokens = []
         num_neural_tokens = 0
@@ -313,18 +292,10 @@ class GPT2Brain(nn.Module):
             raise ValueError(
                 "target_attention_mask must be provided when return_all_preds=False"
             )
-        if "return_feature_emb_instead_of_projection" in encoder_inputs:
-            assert self.encoder_model is not None, "Encoder model must be provided if using return_feature_emb_instead_of_projection"
-            self.return_features_instead_of_projection = encoder_inputs['return_feature_emb_instead_of_projection'] #*no popping! used later 
-        else : 
-            self.return_features_instead_of_projection = False            
 
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
             neural_data, all_input_ids, all_attention_mask, **encoder_inputs
         )
-        if self.return_features_instead_of_projection:
-            return prompt_embeddings
-        
         output = self.lm_model(
             inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
         )

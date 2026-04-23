@@ -170,6 +170,18 @@ def _find_first_model_spec_by_constructor(model_spec, constructor_name):
     return None
 
 
+def _find_nested_encoder_model_spec(model_spec, encoder_constructor_name):
+    encoder_spec = model_spec.sub_models.get("encoder_model")
+    while encoder_spec is not None and encoder_spec.constructor_name == "caching_model":
+        encoder_spec = encoder_spec.sub_models.get("inner_model")
+    if (
+        encoder_spec is not None
+        and encoder_spec.constructor_name == encoder_constructor_name
+    ):
+        return encoder_spec
+    return None
+
+
 def _default_output_dim_for_task(task_name, task_specific_config):
     if task_name in (
         "word_embedding_decoding_task",
@@ -337,6 +349,57 @@ def create_data_info_list(batch_size: int, num_channels: int, channel_names: lis
 # DIVER DECODER CLASS
 # =============================================================================
 
+class DIVEREncoder(nn.Module):
+    def __init__(self, diver_model):
+        super().__init__()
+        self.diver_model = diver_model
+
+    def forward(self, x, **kwargs):
+        xyz_id = kwargs.get("xyz_id", None)
+        data_info_list = kwargs.get("data_info_list", None)
+
+        batch_size = x.shape[0]
+        num_channels = x.shape[1]
+
+        if xyz_id is not None:
+            data_info_list = []
+            for i in range(batch_size):
+                coords = xyz_id[i]
+                if torch.is_tensor(coords):
+                    coords = coords.cpu().numpy()
+                data_info_list.append(
+                    {
+                        "num_channels": num_channels,
+                        "modality": "iEEG",
+                        "xyz_id": coords,
+                    }
+                )
+        elif data_info_list is None:
+            data_info_list = create_data_info_list(batch_size, num_channels)
+
+        backbone_out = self.diver_model.backbone(
+            x, data_info_list=data_info_list, use_mask=False, return_encoder_output=True
+        )
+        features = self.diver_model.feature_extraction_func(
+            backbone_out, data_info_list=data_info_list
+        )
+        return self.diver_model.ft_model_input_adapter(
+            features, data_info_list=data_info_list
+        )
+
+
+class DIVERHead(nn.Module):
+    def __init__(self, ft_core_model, ft_model_output_adapter):
+        super().__init__()
+        self.ft_core_model = ft_core_model
+        self.ft_model_output_adapter = ft_model_output_adapter
+
+    def forward(self, x, **kwargs):
+        data_info_list = kwargs.get("data_info_list", None)
+        out = self.ft_core_model(x, data_info_list=data_info_list)
+        return self.ft_model_output_adapter(out, data_info_list=data_info_list)
+
+
 class DIVERDecoder(nn.Module):
     """
     DIVER model decoder for Podcast benchmark.
@@ -345,7 +408,14 @@ class DIVERDecoder(nn.Module):
     Handles data format conversion and output activation.
     """
     
-    def __init__(self, diver_model, output_activation: str = "linear", output_dim: int = None):
+    def __init__(
+        self,
+        diver_model,
+        output_activation: str = "linear",
+        output_dim: int = None,
+        encoder_model=None,
+        head_model=None,
+    ):
         """
         Args:
             diver_model: DIVER FineTuneModel instance (flatten_linear_finetune or flatten_mlp_finetune)
@@ -357,6 +427,19 @@ class DIVERDecoder(nn.Module):
         """
         super().__init__()
         self.diver_model = diver_model
+        if encoder_model is not None:
+            self.encoder_model = encoder_model
+            self.head_model = head_model
+        elif hasattr(diver_model, "ft_core_model") and hasattr(
+            diver_model, "ft_model_output_adapter"
+        ):
+            self.encoder_model = DIVEREncoder(diver_model)
+            self.head_model = DIVERHead(
+                diver_model.ft_core_model, diver_model.ft_model_output_adapter
+            )
+        else:
+            self.encoder_model = None
+            self.head_model = None
         self.output_activation = output_activation
         self.output_dim = output_dim
     
@@ -373,43 +456,32 @@ class DIVERDecoder(nn.Module):
         Returns:
             Output tensor [batch_size, output_dim] (probabilities if activation applied)
         """
-        # Accept xyz_id directly (flattened approach) or legacy data_info_list
-        xyz_id = kwargs.get('xyz_id', None)
-        data_info_list = kwargs.get('data_info_list', None)
+        if self.encoder_model is not None and self.head_model is not None:
+            output = self.head_model(self.encoder_model(x, **kwargs), **kwargs)
+        else:
+            xyz_id = kwargs.get("xyz_id", None)
+            data_info_list = kwargs.get("data_info_list", None)
 
-        batch_size = x.shape[0]
-        num_channels = x.shape[1]
+            batch_size = x.shape[0]
+            num_channels = x.shape[1]
 
-        # Build data_info_list for underlying DIVER-1 model
-        if xyz_id is not None:
-            # xyz_id is [batch_size, num_channels, 3]
-            data_info_list = []
-            for i in range(batch_size):
-                # Convert tensor to numpy if needed
-                coords = xyz_id[i]
-                if torch.is_tensor(coords):
-                    coords = coords.cpu().numpy()
-                data_info_list.append({
-                    'num_channels': num_channels,
-                    'modality': 'iEEG',
-                    'xyz_id': coords,
-                })
-        elif data_info_list is None:
-            # Fallback: create default data_info_list without coordinates
-            data_info_list = create_data_info_list(batch_size, num_channels)
-        if kwargs.get('return_feature_emb_instead_of_projection', False):
-            # DIVER model forward (outputs logits)
-            # for ref : model.diver_model.backbone/ft_core_model/ft_core_model/ft_model_output_adapter
-            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-            return self.diver_model.ft_model_input_adapter(
-                self.diver_model.feature_extraction_func(
-                    self.diver_model.backbone(
-                        x, data_info_list=data_info_list, use_mask=False, return_encoder_output=True
-                        ), 
-                    data_info_list=data_info_list), 
-                data_info_list=data_info_list)
-        
-        output = self.diver_model(x, data_info_list=data_info_list)
+            if xyz_id is not None:
+                data_info_list = []
+                for i in range(batch_size):
+                    coords = xyz_id[i]
+                    if torch.is_tensor(coords):
+                        coords = coords.cpu().numpy()
+                    data_info_list.append(
+                        {
+                            "num_channels": num_channels,
+                            "modality": "iEEG",
+                            "xyz_id": coords,
+                        }
+                    )
+            elif data_info_list is None:
+                data_info_list = create_data_info_list(batch_size, num_channels)
+
+            output = self.diver_model(x, data_info_list=data_info_list)
         
         # Apply output activation to convert logits to probabilities
         if self.output_activation == "sigmoid":
@@ -644,9 +716,30 @@ def create_diver_finetuning_model(model_params):
     output_activation = _resolve_output_activation(model_params)
     
     # Wrap in DIVERDecoder for Podcast benchmark interface
-    decoder = DIVERDecoder(diver_model, output_activation=output_activation, output_dim=output_dim)
+    encoder_model = model_params.get("encoder_model")
+    head_model = model_params.get("head_model")
+    if encoder_model is not None and head_model is None and hasattr(
+        diver_model, "ft_core_model"
+    ) and hasattr(diver_model, "ft_model_output_adapter"):
+        head_model = DIVERHead(
+            diver_model.ft_core_model, diver_model.ft_model_output_adapter
+        )
+
+    decoder = DIVERDecoder(
+        diver_model,
+        output_activation=output_activation,
+        output_dim=output_dim,
+        encoder_model=encoder_model,
+        head_model=head_model,
+    )
     
     return decoder
+
+
+@registry.register_model_constructor("diver_encoder", required_data_getter="diver_data_info")
+def create_diver_encoder(model_params):
+    decoder = create_diver_finetuning_model(dict(model_params))
+    return decoder.encoder_model
 
 
 # =============================================================================
@@ -725,5 +818,9 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
 
     # 7. Copy output_dim to embedding_dim (same as BrainBERT/PopT)
     model_params["embedding_dim"] = model_params["output_dim"]
+
+    encoder_spec = _find_nested_encoder_model_spec(diver_model_spec, "diver_encoder")
+    if encoder_spec is not None:
+        encoder_spec.params.update(model_params)
 
     return experiment_config

@@ -431,6 +431,7 @@ def get_data(
     window_width: float,
     preprocessing_fns=None,
     preprocessor_params: dict = None,
+    return_subject_channel_counts: bool = False,
 ):
     """Gather data for every row in task_df from raw.
 
@@ -497,7 +498,10 @@ def get_data(
 
     datas = _apply_preprocessing(datas, preprocessing_fns, preprocessor_params)
 
-    return datas, selected_targets, selected_rows_df, subject_channel_counts
+    if return_subject_channel_counts:
+        return datas, selected_targets, selected_rows_df, subject_channel_counts
+
+    return datas, selected_targets, selected_rows_df
 
 
 def df_columns_to_tensors(

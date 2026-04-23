@@ -479,6 +479,9 @@ def train_decoding_model(
             cv_results[metric] = []
 
     models, histories = [], []
+    lag_cache_store = {}
+    lag_build_context = {"_cache_store": lag_cache_store}
+    lag_example_ids = torch.arange(len(data_df), dtype=torch.long)
 
     # Store baseline results across folds
     logistic_regression_results = []
@@ -647,6 +650,9 @@ def train_decoding_model(
         extra_test_inputs = data_utils.df_columns_to_tensors(
             data_df, task_config.task_specific_config.input_fields, te_idx
         )
+        extra_train_inputs["cache_key"] = lag_example_ids[tr_idx]
+        extra_val_inputs["cache_key"] = lag_example_ids[va_idx]
+        extra_test_inputs["cache_key"] = lag_example_ids[te_idx]
         datasets = {
             "train": NeuralDictDataset(
                 neural_data[tr_idx], extra_train_inputs, Y_train_norm
@@ -704,7 +710,9 @@ def train_decoding_model(
             ridge_regression_results.append(ridge_baseline_metrics)
 
         # Model, optimizer, early‐stop setup
-        model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
+        model = build_model_from_spec(
+            model_spec, lag=lag, fold=fold, build_context=lag_build_context
+        ).to(device)
 
         if training_params.optimizer == "MuAdamW":
             print("Using MuAdamW optimizer")
@@ -807,31 +815,6 @@ def train_decoding_model(
                 weight_decay=float(training_params.weight_decay),
             )
 
-        #elif feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
-        elif getattr(model_spec, "feature_cache", False):
-            cache_loader_generation_start_time = time.time()
-            #redfining loaders (with cached model)
-            loaders = {
-                "train" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["train"], device), training_params.batch_size, shuffle=True), #training already shuffled but we still shuffle since each epoch should see data in different order for better convergence
-                "val" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["val"], device), training_params.batch_size, shuffle=False),
-                "test" : generate_loaders_from_features(*extract_features_for_caching(model, loaders["test"], device), training_params.batch_size, shuffle=False),
-            }
-            print(f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}")
-                
-            #redefining model
-            model_name = str(model.__class__.__name__)
-            if model_name == "ReferenceBrainBERTDecoder":  #*brainbert
-                model = SqueezeWrapper(feature_head = model.projector, output_dim=model.output_dim).to(device)
-            elif model_name == "ReferencePOPTDecoder" : #*popt
-                model = MakeIgnoreKwargsDuringForward(model.head).to(device) 
-            elif model_name == "DIVERDecoder" : #*DIVFER
-                model = DIVERCachedFeatureAdapterModel(model.diver_model.ft_core_model, model.diver_model.ft_model_output_adapter).to(device)
-            elif model_name == "GPT2Brain" : #* GPT2Brain and such 
-                raise NotImplementedError(f"Feature caching is not yet implemented for GPT2Brain. Got model: {model_name}")
-                # raise NotImplementedError(f"Feature caching and loader generation after feature extraction is not yet implemented for GPT2Brain and similar models. Got model: {model_name}")
-            else :
-                raise NotImplementedError(f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}")
-        
         loop_start_time = time.time() #! remove later 
         for epoch in loop:
             train_mets = run_epoch(model, loaders["train"], optimizer)
@@ -1109,6 +1092,7 @@ def run_training_over_lags(
             data_params.window_width,
             preprocessing_fns,
             data_params.preprocessor_params,
+            return_subject_channel_counts=True,
         )
         
         neural_tensor = torch.FloatTensor(neural_data) #(5030, 183, 13, 40) (N_words from task_df, total electordes, STFT time bins, freq channels)

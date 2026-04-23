@@ -48,4 +48,12 @@ model_spec:
     mlp_layer_sizes: []
     dropout: 0.0
     freeze_foundation: true
-  sub_models: {}
+  sub_models:
+    encoder_model:
+      constructor_name: caching_model
+      params: {}
+      sub_models:
+        inner_model:
+          constructor_name: brainbert_encoder
+          params: {}
+          sub_models: {}

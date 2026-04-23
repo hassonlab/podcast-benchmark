@@ -10,6 +10,39 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_CONFIG_ROOT = REPO_ROOT / "configs" / "foundation_models"
 
+ENCODER_CONSTRUCTOR_BY_MODEL = {
+    "brainbert_finetune": "brainbert_encoder",
+    "diver_finetune": "diver_encoder",
+    "popt_finetune": "popt_encoder",
+}
+
+
+def normalize_foundation_model_spec_for_caching(cfg: dict) -> None:
+    model_spec = cfg.get("model_spec", {})
+    constructor_name = model_spec.get("constructor_name")
+    encoder_constructor_name = ENCODER_CONSTRUCTOR_BY_MODEL.get(constructor_name)
+    if encoder_constructor_name is None:
+        return
+    if model_spec.get("params", {}).get("freeze_foundation") is not True:
+        return
+
+    sub_models = model_spec.setdefault("sub_models", {})
+    encoder_spec = sub_models.get("encoder_model")
+    if isinstance(encoder_spec, dict) and encoder_spec.get("constructor_name") == "caching_model":
+        return
+
+    sub_models["encoder_model"] = {
+        "constructor_name": "caching_model",
+        "params": {},
+        "sub_models": {
+            "inner_model": {
+                "constructor_name": encoder_constructor_name,
+                "params": {},
+                "sub_models": {},
+            }
+        },
+    }
+
 
 def iter_supersubject_templates() -> list[Path]:
     return sorted(FOUNDATION_CONFIG_ROOT.glob("*/*/supersubject.yml"))
@@ -17,6 +50,7 @@ def iter_supersubject_templates() -> list[Path]:
 
 def build_subject_variant_config(template_cfg: dict, model: str, task: str, subject_id: int) -> dict:
     cfg = yaml.safe_load(yaml.safe_dump(template_cfg))
+    normalize_foundation_model_spec_for_caching(cfg)
 
     task_config = cfg.setdefault("task_config", {})
     data_params = task_config.setdefault("data_params", {})

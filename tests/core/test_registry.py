@@ -13,14 +13,31 @@ from core import registry
 
 @pytest.fixture(autouse=True)
 def reset_registries():
-    """Reset all registries after each test to prevent state pollution."""
-    yield  # Run the test
-    # Clean up after the test
+    """Restore registries after each test to prevent state pollution."""
+    original_model_constructor_registry = registry.model_constructor_registry.copy()
+    original_data_preprocessor_registry = registry.data_preprocessor_registry.copy()
+    original_config_setter_registry = registry.config_setter_registry.copy()
+    original_metric_registry = registry.metric_registry.copy()
+    original_model_data_getter_registry = registry.model_data_getter_registry.copy()
+
     registry.model_constructor_registry.clear()
     registry.data_preprocessor_registry.clear()
     registry.config_setter_registry.clear()
     registry.metric_registry.clear()
     registry.model_data_getter_registry.clear()
+
+    yield  # Run the test
+
+    registry.model_constructor_registry.clear()
+    registry.model_constructor_registry.update(original_model_constructor_registry)
+    registry.data_preprocessor_registry.clear()
+    registry.data_preprocessor_registry.update(original_data_preprocessor_registry)
+    registry.config_setter_registry.clear()
+    registry.config_setter_registry.update(original_config_setter_registry)
+    registry.metric_registry.clear()
+    registry.metric_registry.update(original_metric_registry)
+    registry.model_data_getter_registry.clear()
+    registry.model_data_getter_registry.update(original_model_data_getter_registry)
 
 
 @pytest.fixture

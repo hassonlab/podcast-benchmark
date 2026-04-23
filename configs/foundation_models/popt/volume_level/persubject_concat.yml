@@ -55,5 +55,13 @@ model_spec:
     dropout: 0.0
     freeze_foundation: true
     num_frozen_layers: 0
-  sub_models: {}
+  sub_models:
+    encoder_model:
+      constructor_name: caching_model
+      params: {}
+      sub_models:
+        inner_model:
+          constructor_name: popt_encoder
+          params: {}
+          sub_models: {}
   per_subject_feature_concat: true

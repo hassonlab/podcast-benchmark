@@ -250,6 +250,18 @@ def _find_first_model_spec_by_constructor(model_spec, constructor_name):
     return None
 
 
+def _find_nested_encoder_model_spec(model_spec, encoder_constructor_name):
+    encoder_spec = model_spec.sub_models.get("encoder_model")
+    while encoder_spec is not None and encoder_spec.constructor_name == "caching_model":
+        encoder_spec = encoder_spec.sub_models.get("inner_model")
+    if (
+        encoder_spec is not None
+        and encoder_spec.constructor_name == encoder_constructor_name
+    ):
+        return encoder_spec
+    return None
+
+
 def _setup_brainbert_path():
     brainbert_root = os.path.dirname(os.path.abspath(__file__))
     brainbert_wrapper = os.path.join(brainbert_root, "BrainBERT")
@@ -416,43 +428,19 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 load_pretrained_model = load_reference_pretrained_model
 
 
-class ReferenceBrainBERTDecoder(nn.Module):
+class ReferenceBrainBERTEncoder(nn.Module):
     def __init__(
         self,
-        finetune_model,
-        output_dim=1,
+        upstream,
+        frozen_upstream=False,
         num_electrodes=None,
         hidden_dim=768,
-        mlp_layer_sizes=None,
-        dropout=0.0,
-        output_activation="linear",
     ):
         super().__init__()
-        self.finetune_model = finetune_model
-        self.output_dim = output_dim
+        self.upstream = upstream
+        self.frozen_upstream = frozen_upstream
         self.num_electrodes = num_electrodes
         self.hidden_dim = hidden_dim
-        self.output_activation = output_activation
-
-        if self.num_electrodes is not None and self.hidden_dim is not None:
-            input_dim = self.num_electrodes * self.hidden_dim
-            if mlp_layer_sizes:
-                layers = []
-                curr_dim = input_dim
-                for h_dim in mlp_layer_sizes:
-                    layers.append(nn.Linear(curr_dim, h_dim))
-                    layers.append(nn.ReLU())
-                    if dropout > 0:
-                        layers.append(nn.Dropout(dropout))
-                    curr_dim = h_dim
-                layers.append(nn.Linear(curr_dim, 1 if output_dim == 1 else output_dim))
-                self.projector = nn.Sequential(*layers)
-            else:
-                self.projector = nn.Linear(input_dim, output_dim)
-                nn.init.normal_(self.projector.weight, mean=0.0, std=0.001)
-                nn.init.zeros_(self.projector.bias)
-        else:
-            self.projector = None
 
     def forward(self, x, **kwargs):
         if x.ndim != 4:
@@ -464,40 +452,59 @@ class ReferenceBrainBERTDecoder(nn.Module):
         inputs = x.contiguous().view(batch_size * num_channels, time_steps, freq_channels)
         pad_mask = None
 
-        if self.projector is not None:
-            if self.finetune_model.frozen_upstream:
-                self.finetune_model.upstream.eval()
-                with torch.no_grad():
-                    features = self.finetune_model.upstream(
-                        inputs, pad_mask, intermediate_rep=True
-                    )
-            else:
-                features = self.finetune_model.upstream(
-                    inputs, pad_mask, intermediate_rep=True
-                )
-
-            if features.shape[0] == batch_size * num_channels:
-                seq_len = features.shape[1]
-                middle = seq_len // 2
-                start = max(0, middle - 5)
-                end = min(seq_len, middle + 5)
-                if end <= start:
-                    pooled = features.mean(dim=1)
-                else:
-                    pooled = features[:, start:end, :].mean(dim=1)
-            else:
-                pooled = features.mean(dim=0)
-
-            pooled = pooled.view(batch_size, num_channels, -1)
-            flattened = pooled.reshape(batch_size, -1)
-            if kwargs.get('return_feature_emb_instead_of_projection', False):
-                assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-                #* used for feature caching
-                return flattened
-            out = self.projector(flattened)
+        if self.frozen_upstream:
+            self.upstream.eval()
+            with torch.no_grad():
+                features = self.upstream(inputs, pad_mask, intermediate_rep=True)
         else:
-            out = self.finetune_model(inputs, pad_mask)
-            out = out.view(batch_size, num_channels, -1).mean(dim=1)
+            features = self.upstream(inputs, pad_mask, intermediate_rep=True)
+
+        if features.shape[0] == batch_size * num_channels:
+            seq_len = features.shape[1]
+            middle = seq_len // 2
+            start = max(0, middle - 5)
+            end = min(seq_len, middle + 5)
+            if end <= start:
+                pooled = features.mean(dim=1)
+            else:
+                pooled = features[:, start:end, :].mean(dim=1)
+        else:
+            pooled = features.mean(dim=0)
+
+        pooled = pooled.view(batch_size, num_channels, -1)
+        if self.num_electrodes is not None and self.hidden_dim is not None:
+            return pooled.reshape(batch_size, -1)
+        return pooled.mean(dim=1)
+
+
+class ReferenceBrainBERTHead(nn.Module):
+    def __init__(self, head_model=None):
+        super().__init__()
+        self.head_model = head_model if head_model is not None else nn.Identity()
+
+    def forward(self, x, **kwargs):
+        return self.head_model(x)
+
+
+class ReferenceBrainBERTDecoder(nn.Module):
+    def __init__(
+        self,
+        encoder_model,
+        projector,
+        output_dim=1,
+        output_activation="linear",
+        finetune_model=None,
+    ):
+        super().__init__()
+        self.encoder_model = encoder_model
+        self.projector = projector
+        self.output_dim = output_dim
+        self.output_activation = output_activation
+        self.finetune_model = finetune_model
+
+    def forward(self, x, **kwargs):
+        latents = self.encoder_model(x, **kwargs)
+        out = self.projector(latents)
 
         if self.output_activation == "sigmoid":
             out = torch.sigmoid(out)
@@ -722,19 +729,27 @@ def create_finetuning_decoder(model_params):
             except Exception:
                 upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
 
-        finetune_cfg = _dict_to_cfg(
-            {
-                "name": "finetune_model",
-                "frozen_upstream": frozen_upstream,
-                "hidden_dim": getattr(upstream_cfg, "hidden_dim", 768),
-            }
-        )
-        finetune_model = build_model(finetune_cfg, upstream)
-
         hidden_dim = getattr(upstream_cfg, "hidden_dim", 768)
+        encoder_model = model_params.get("encoder_model")
+        if encoder_model is None:
+            encoder_model = ReferenceBrainBERTEncoder(
+                upstream=upstream,
+                frozen_upstream=frozen_upstream,
+                num_electrodes=num_electrodes,
+                hidden_dim=hidden_dim,
+            )
+
         if not num_electrodes:
+            finetune_cfg = _dict_to_cfg(
+                {
+                    "name": "finetune_model",
+                    "frozen_upstream": frozen_upstream,
+                    "hidden_dim": hidden_dim,
+                }
+            )
+            finetune_model = build_model(finetune_cfg, upstream)
             if mlp_layer_sizes:
-                finetune_model.linear_out = MLPDecoder(
+                head_model = MLPDecoder(
                     input_dim=hidden_dim,
                     layer_sizes=mlp_layer_sizes + [output_dim],
                     dropout=dropout,
@@ -742,16 +757,33 @@ def create_finetuning_decoder(model_params):
                     output_activation="linear",
                 )
             else:
-                finetune_model.linear_out = nn.Linear(hidden_dim, output_dim)
+                head_model = nn.Linear(hidden_dim, output_dim)
+            finetune_model.linear_out = head_model
+        else:
+            finetune_model = None
+            input_dim = num_electrodes * hidden_dim
+            if mlp_layer_sizes:
+                layers = []
+                curr_dim = input_dim
+                for h_dim in mlp_layer_sizes:
+                    layers.append(nn.Linear(curr_dim, h_dim))
+                    layers.append(nn.ReLU())
+                    if dropout > 0:
+                        layers.append(nn.Dropout(dropout))
+                    curr_dim = h_dim
+                layers.append(nn.Linear(curr_dim, 1 if output_dim == 1 else output_dim))
+                head_model = nn.Sequential(*layers)
+            else:
+                head_model = nn.Linear(input_dim, output_dim)
+                nn.init.normal_(head_model.weight, mean=0.0, std=0.001)
+                nn.init.zeros_(head_model.bias)
 
         decoder = ReferenceBrainBERTDecoder(
-            finetune_model,
+            encoder_model=encoder_model,
+            projector=ReferenceBrainBERTHead(head_model),
             output_dim=output_dim,
-            num_electrodes=num_electrodes,
-            hidden_dim=hidden_dim,
-            mlp_layer_sizes=mlp_layer_sizes,
-            dropout=dropout,
             output_activation=_resolve_output_activation(model_params, output_dim),
+            finetune_model=finetune_model,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         decoder.to(device)
@@ -759,6 +791,12 @@ def create_finetuning_decoder(model_params):
     finally:
         for name, mod in original_modules.items():
             sys.modules[name] = mod
+
+
+@registry.register_model_constructor("brainbert_encoder")
+def create_brainbert_encoder(model_params):
+    decoder = create_finetuning_decoder(dict(model_params))
+    return decoder.encoder_model
 
 
 # =============================================================================
@@ -879,5 +917,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     model_params["sample_rate"] = int(sample_rate)
     if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
+
+    encoder_spec = _find_nested_encoder_model_spec(target_spec, "brainbert_encoder")
+    if encoder_spec is not None:
+        encoder_spec.params.update(model_params)
 
     return experiment_config

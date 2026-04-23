@@ -12,7 +12,15 @@ model_spec:
     output_dim: 1
     use_brainbert: true
     use_lip_coords: true
-  sub_models: {}
+  sub_models:
+    encoder_model:
+      constructor_name: caching_model
+      params: {}
+      sub_models:
+        inner_model:
+          constructor_name: popt_encoder
+          params: {}
+          sub_models: {}
 task_config:
   data_params:
     data_root: data

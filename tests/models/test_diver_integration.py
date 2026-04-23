@@ -190,6 +190,28 @@ class TestDIVERDecoderOutputActivation:
         # Linear output can be any value
         assert output.shape == (4, 5)
 
+    def test_uses_injected_encoder_and_head_when_provided(self):
+        class FixedEncoder(nn.Module):
+            def forward(self, x, **kwargs):
+                return torch.ones(x.shape[0], 3)
+
+        class FixedHead(nn.Module):
+            def forward(self, x, **kwargs):
+                return x.sum(dim=-1, keepdim=True)
+
+        decoder = DIVERDecoder(
+            MockDiverModel(output_dim=5),
+            output_activation="linear",
+            output_dim=1,
+            encoder_model=FixedEncoder(),
+            head_model=FixedHead(),
+        )
+
+        output = decoder(torch.randn(4, 10, 100))
+
+        assert output.shape == (4,)
+        torch.testing.assert_close(output, torch.full((4,), 3.0))
+
 
 class TestCreateDataInfoList:
     """Test the create_data_info_list helper function."""

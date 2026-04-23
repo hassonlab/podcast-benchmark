@@ -7,7 +7,15 @@ model_spec:
     mlp_layer_sizes: []
     model_dir: models/brainbert/pretrained_model
     output_dim: 5
-  sub_models: {}
+  sub_models:
+    encoder_model:
+      constructor_name: caching_model
+      params: {}
+      sub_models:
+        inner_model:
+          constructor_name: brainbert_encoder
+          params: {}
+          sub_models: {}
 task_config:
   data_params:
     data_root: data

@@ -54,5 +54,13 @@ model_spec:
     freeze_foundation: true
     mup_weights: true
     ft_mup: false
-  sub_models: {}
+  sub_models:
+    encoder_model:
+      constructor_name: caching_model
+      params: {}
+      sub_models:
+        inner_model:
+          constructor_name: diver_encoder
+          params: {}
+          sub_models: {}
   per_subject_feature_concat: true

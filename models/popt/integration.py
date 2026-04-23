@@ -599,36 +599,23 @@ def _load_brainbert_upstream(brainbert_foundation_dir):
     return upstream
 
 
-class ReferencePOPTDecoder(nn.Module):
+class ReferencePOPTEncoder(nn.Module):
     def __init__(
         self,
         upstream,
-        output_dim=1,
         hidden_dim=768,
-        mlp_layer_sizes=None,
-        dropout=0.0,
         input_dim=40,
         brainbert_upstream=None,
         use_lip_coords=False,
         brainbert_electrode_sequence=True,
-        output_activation="linear",
     ):
         super().__init__()
         self.upstream = upstream
         self.brainbert_upstream = brainbert_upstream
         self.use_lip_coords = use_lip_coords
         self.brainbert_electrode_sequence = brainbert_electrode_sequence
-        self.output_dim = output_dim
-        self.output_activation = output_activation
         self.cls_dim = BRAINBERT_OUTPUT_DIM if brainbert_upstream is not None else input_dim
         self.classifier_norm = nn.LayerNorm(hidden_dim)
-        self.head = MLPDecoder(
-            input_dim=hidden_dim,
-            layer_sizes=(mlp_layer_sizes or []) + [output_dim],
-            dropout=dropout,
-            use_layer_norm=True,
-            output_activation=output_activation,
-        )
 
     def _make_cls_token(self, batch_size, device, dtype):
         return torch.ones(batch_size, 1, self.cls_dim, device=device, dtype=dtype)
@@ -700,11 +687,28 @@ class ReferencePOPTDecoder(nn.Module):
             encoded = self.upstream(seq, pad_mask, intermediate_rep=True)
             cls_repr = encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
 
-        cls_repr = self.classifier_norm(cls_repr)
-        if kwargs.get('return_feature_emb_instead_of_projection', False):
-            #* used for feature caching
-            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-            return cls_repr
+        return self.classifier_norm(cls_repr)
+
+
+class ReferencePOPThead(nn.Module):
+    def __init__(self, head_model):
+        super().__init__()
+        self.head_model = head_model
+
+    def forward(self, x, **kwargs):
+        return self.head_model(x)
+
+
+class ReferencePOPTDecoder(nn.Module):
+    def __init__(self, encoder_model, head, output_dim=1, output_activation="linear"):
+        super().__init__()
+        self.encoder_model = encoder_model
+        self.head = head
+        self.output_dim = output_dim
+        self.output_activation = output_activation
+
+    def forward(self, x, **kwargs):
+        cls_repr = self.encoder_model(x, **kwargs)
         return self.head(cls_repr)
 
 
@@ -1216,16 +1220,33 @@ def create_finetuning_decoder(model_params):
             for p in upstream.parameters():
                 p.requires_grad = False
 
+        encoder_model = model_params.get("encoder_model")
+        if encoder_model is None:
+            encoder_model = ReferencePOPTEncoder(
+                upstream=upstream,
+                hidden_dim=getattr(upstream_cfg, "hidden_dim", 768),
+                input_dim=getattr(upstream_cfg, "input_dim", 40),
+                brainbert_upstream=brainbert_upstream,
+                use_lip_coords=use_lip_coords,
+                brainbert_electrode_sequence=brainbert_electrode_sequence,
+            )
+
+        head = model_params.get("head_model")
+        if head is None:
+            head = ReferencePOPThead(
+                MLPDecoder(
+                    input_dim=getattr(upstream_cfg, "hidden_dim", 768),
+                    layer_sizes=(mlp_layer_sizes or []) + [output_dim],
+                    dropout=dropout,
+                    use_layer_norm=True,
+                    output_activation=_resolve_output_activation(model_params),
+                )
+            )
+
         decoder = ReferencePOPTDecoder(
-            upstream=upstream,
+            encoder_model=encoder_model,
+            head=head,
             output_dim=output_dim,
-            hidden_dim=getattr(upstream_cfg, "hidden_dim", 768),
-            mlp_layer_sizes=mlp_layer_sizes,
-            dropout=dropout,
-            input_dim=getattr(upstream_cfg, "input_dim", 40),
-            brainbert_upstream=brainbert_upstream,
-            use_lip_coords=use_lip_coords,
-            brainbert_electrode_sequence=brainbert_electrode_sequence,
             output_activation=_resolve_output_activation(model_params),
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1234,6 +1255,13 @@ def create_finetuning_decoder(model_params):
     finally:
         for name, mod in original_modules.items():
             sys.modules[name] = mod
+
+
+@registry.register_model_constructor("popt_encoder")
+@registry.register_model_constructor("population_transformer_encoder")
+def create_popt_encoder(model_params):
+    decoder = create_finetuning_decoder(dict(model_params))
+    return decoder.encoder_model
 
 
 # =============================================================================
@@ -1276,6 +1304,18 @@ def _find_first_model_spec_by_constructors(model_spec, constructor_names):
         )
         if found is not None:
             return found
+    return None
+
+
+def _find_nested_encoder_model_spec(model_spec, encoder_constructor_names):
+    encoder_spec = model_spec.sub_models.get("encoder_model")
+    while encoder_spec is not None and encoder_spec.constructor_name == "caching_model":
+        encoder_spec = encoder_spec.sub_models.get("inner_model")
+    if (
+        encoder_spec is not None
+        and encoder_spec.constructor_name in encoder_constructor_names
+    ):
+        return encoder_spec
     return None
 
 
@@ -1390,5 +1430,12 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         model_params.setdefault("popt_position_encoding", "multi_subj_position_encoding")
     if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
+
+    encoder_spec = _find_nested_encoder_model_spec(
+        target_spec,
+        {"popt_encoder", "population_transformer_encoder"},
+    )
+    if encoder_spec is not None:
+        encoder_spec.params.update(model_params)
 
     return experiment_config

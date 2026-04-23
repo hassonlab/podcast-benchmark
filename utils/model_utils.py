@@ -6,11 +6,14 @@ from typing import Optional
 import torch
 
 from core.config import ModelSpec
-from core.registry import model_constructor_registry
+from core import registry
 
 
 def build_model_from_spec(
-    model_spec: ModelSpec, lag: Optional[int] = None, fold: Optional[int] = None
+    model_spec: ModelSpec,
+    lag: Optional[int] = None,
+    fold: Optional[int] = None,
+    build_context: Optional[dict] = None,
 ):
     """Recursively build a model from a ModelSpec, handling nested sub-models and checkpoints.
 
@@ -50,19 +53,21 @@ def build_model_from_spec(
         # 2. Load encoder checkpoint from checkpoints/encoder/lag_200/fold_3/best_model.pt
         # 3. Build parent: gpt2_brain(freeze_lm=True, encoder_model=<built_encoder>)
     """
-    if model_spec.constructor_name not in model_constructor_registry:
+    if model_spec.constructor_name not in registry.model_constructor_registry:
         raise KeyError(
             f"Model constructor '{model_spec.constructor_name}' not found in registry. "
-            f"Available constructors: {list(model_constructor_registry.keys())}"
+            f"Available constructors: {list(registry.model_constructor_registry.keys())}"
         )
 
     # Recursively build all sub-models (they will handle their own checkpoint loading)
     built_sub_models = {}
     for param_name, sub_spec in model_spec.sub_models.items():
-        built_sub_models[param_name] = build_model_from_spec(sub_spec, lag, fold)
+        built_sub_models[param_name] = build_model_from_spec(
+            sub_spec, lag, fold, build_context=build_context
+        )
 
     # Get the constructor function from registry (registry stores {"constructor": fn, "required_data_getter": str|None})
-    model_info = model_constructor_registry[model_spec.constructor_name]
+    model_info = registry.model_constructor_registry[model_spec.constructor_name]
     constructor_fn = model_info["constructor"]
 
     # Combine params and built sub-models into a single kwargs dict.
@@ -70,6 +75,8 @@ def build_model_from_spec(
     all_kwargs = {**model_spec.params, **built_sub_models}
     if "feature_cache" not in all_kwargs:
         all_kwargs["feature_cache"] = model_spec.feature_cache
+    if build_context is not None and "_cache_store" in build_context:
+        all_kwargs["_cache_store"] = build_context["_cache_store"]
 
     # Build the model
     model = constructor_fn(all_kwargs)
