@@ -16,6 +16,7 @@ from core import registry
 @dataclass
 class WordEmbeddingConfig(BaseTaskConfig):
     """Configuration for word_embedding_decoding_task."""
+
     embedding_type: str = "gpt-2xl"
     embedding_layer: Optional[int] = None  # Required if using gpt2-xl
     embedding_pca_dim: Optional[int] = None

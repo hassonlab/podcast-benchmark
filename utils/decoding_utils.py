@@ -523,15 +523,6 @@ def train_decoding_model(
             yb = yb.to(device)
 
             if is_train:
-                # example thing you could run to do sanity check the training mode and requires grad
-                # check_model_train_eval_and_requires_grads(model, True)
-
-                # if gpt2brain mode, get ready for train mode (nees to be done cuz llm freeze thing is complicated)
-                if model.__class__.__name__.startswith("GPT2Brain"):
-                    model.change_training_mode(
-                        freeze_lm=model_spec.params["freeze_lm"]
-                    )  # adhoc method...
-
                 # Forward pass
                 out = model(Xb, **inputs_dict)
                 # Loss calculation

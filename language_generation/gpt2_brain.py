@@ -65,6 +65,7 @@ class GPT2Brain(nn.Module):
 
         self.no_brain_encoder = no_brain_encoder
         self.no_brain_token_injection = no_brain_token_injection
+        self.freeze_lm = freeze_lm
 
         self.lm_model = lm_model
         self.tokenizer = tokenizer
@@ -90,31 +91,46 @@ class GPT2Brain(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.lm_model.config.pad_token_id = self.tokenizer.eos_token_id
 
-        # Freeze language model if requested
-        if freeze_lm:
-            self.lm_model.eval()  # Set to eval mode to disable dropout, etc.
-            for param in self.lm_model.parameters():
-                param.requires_grad = False
+        if self.freeze_lm and not self.no_brain_token_injection:
+            self._register_brain_token_gradient_hook()
 
-            # Enable gradients for the entire embedding layer
-            # (we can't set requires_grad on a view/subset of embeddings)
+        self._apply_train_eval_policy(training=self.training)
+
+    def _register_brain_token_gradient_hook(self):
+        """Mask embedding gradients so only brain separator tokens are updated."""
+
+        def zero_non_brain_gradients(grad):
+            """Zero out gradients for all embeddings except brain tokens."""
+            mask = torch.zeros_like(grad)
+            for token_id in self.brain_token_ids:
+                mask[token_id] = 1.0
+            return grad * mask
+
+        self.lm_model.transformer.wte.weight.register_hook(zero_non_brain_gradients)
+
+    def _set_lm_requires_grad(self, requires_grad):
+        for param in self.lm_model.parameters():
+            param.requires_grad = requires_grad
+
+    def _apply_train_eval_policy(self, training):
+        if self.freeze_lm:
+            self.lm_model.eval()
+            self._set_lm_requires_grad(False)
+
+            # We still train the brain separator embeddings even when the LM is frozen.
             if not self.no_brain_token_injection:
                 self.lm_model.transformer.wte.weight.requires_grad = True
+        else:
+            self.lm_model.train(training)
+            self._set_lm_requires_grad(True)
 
-                # Register backward hook to zero gradients for all embeddings
-                # except brain token embeddings
-                def zero_non_brain_gradients(grad):
-                    """Zero out gradients for all embeddings except brain tokens."""
-                    # Create a mask that's 1 for brain tokens, 0 for everything else
-                    mask = torch.zeros_like(grad)
-                    for token_id in self.brain_token_ids:
-                        mask[token_id] = 1.0
-                    # Zero gradients for non-brain tokens
-                    return grad * mask
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self._apply_train_eval_policy(training=mode)
+        return self
 
-                self.lm_model.transformer.wte.weight.register_hook(
-                    zero_non_brain_gradients
-                )
+    def eval(self):
+        return self.train(False)
 
     def _get_brain_separator_embeddings(self, batch_size, device):
         """Get embeddings for brain separator tokens."""
