@@ -229,6 +229,8 @@ class ExperimentConfig:
     task_config: TaskConfig = field(default_factory=lambda: TaskConfig())
     # Parameters for training.
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
+    # If true, train/evaluate subjects sequentially within one timestamped parent run.
+    train_one_subject_at_a_time: bool = False
     # Name for trial. Will be used for separating results in storage. Can use format strings such as
     # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""

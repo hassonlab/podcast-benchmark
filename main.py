@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from dataclasses import asdict
 
 import numpy as np
 import torch
@@ -113,6 +114,14 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
 
     # User defined model specification - will be built at each lag
     model_spec = experiment_config.model_spec
+    if (
+        experiment_config.train_one_subject_at_a_time
+        and model_spec.per_subject_feature_concat
+    ):
+        raise ValueError(
+            "train_one_subject_at_a_time only supports non-concat runs; "
+            "set model_spec.per_subject_feature_concat to False."
+        )
 
     # Generate trial name if user specified format string
     trial_name = experiment_config.trial_name
@@ -136,7 +145,6 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
 
     # Write config to output_dir so it is easy to tell what parameters led to these results
     import yaml
-    from dataclasses import asdict
 
     with open(os.path.join(output_dir, "config.yml"), "w") as fp:
         yaml.dump(asdict(experiment_config), fp, default_flow_style=False)
@@ -151,20 +159,52 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             experiment_config.training_params.lag_step_size,
         )
 
-    decoding_utils.run_training_over_lags(
-        lags,
-        raws,
-        task_df,
-        preprocessing_fns,
-        model_spec,
-        experiment_config.task_config.task_name,
-        training_params=experiment_config.training_params,
-        task_config=experiment_config.task_config,
-        output_dir=output_dir,
-        checkpoint_dir=checkpoint_dir,
-        tensorboard_dir=tensorboard_dir,
-        write_to_tensorboard=experiment_config.training_params.tensorboard_logging,
-    )
+    if not experiment_config.train_one_subject_at_a_time:
+        decoding_utils.run_training_over_lags(
+            lags,
+            raws,
+            task_df,
+            preprocessing_fns,
+            model_spec,
+            experiment_config.task_config.task_name,
+            training_params=experiment_config.training_params,
+            task_config=experiment_config.task_config,
+            output_dir=output_dir,
+            checkpoint_dir=checkpoint_dir,
+            tensorboard_dir=tensorboard_dir,
+            write_to_tensorboard=experiment_config.training_params.tensorboard_logging,
+        )
+        return checkpoint_dir
+
+    subject_ids = experiment_config.task_config.data_params.subject_ids
+    if len(raws) != len(subject_ids):
+        raise ValueError(
+            "train_one_subject_at_a_time requires one raw per configured subject_id."
+        )
+
+    for subject_id, raw in zip(subject_ids, raws):
+        subject_dir = f"subject_{subject_id}"
+        subject_output_dir = os.path.join(output_dir, subject_dir)
+        subject_checkpoint_dir = os.path.join(checkpoint_dir, subject_dir)
+        subject_tensorboard_dir = os.path.join(tensorboard_dir, subject_dir)
+        os.makedirs(subject_output_dir, exist_ok=True)
+        os.makedirs(subject_checkpoint_dir, exist_ok=True)
+        os.makedirs(subject_tensorboard_dir, exist_ok=True)
+
+        decoding_utils.run_training_over_lags(
+            lags,
+            [raw],
+            task_df,
+            preprocessing_fns,
+            model_spec,
+            experiment_config.task_config.task_name,
+            training_params=experiment_config.training_params,
+            task_config=experiment_config.task_config,
+            output_dir=subject_output_dir,
+            checkpoint_dir=subject_checkpoint_dir,
+            tensorboard_dir=subject_tensorboard_dir,
+            write_to_tensorboard=experiment_config.training_params.tensorboard_logging,
+        )
 
     return checkpoint_dir
 
