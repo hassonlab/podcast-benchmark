@@ -10,7 +10,13 @@ from utils import decoding_utils
 import random
 from utils.module_loader_utils import import_all_from_package
 from core import registry
-from core.config import TaskConfig, DataParams, MultiTaskConfig, ExperimentConfig, dict_to_config
+from core.config import (
+    TaskConfig,
+    DataParams,
+    MultiTaskConfig,
+    ExperimentConfig,
+    dict_to_config,
+)
 from utils.config_utils import (
     parse_known_args,
     load_config,
@@ -75,7 +81,9 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
 
     # Apply model data getter if needed (adds model-specific columns to task_df)
     model_spec = experiment_config.model_spec
-    model_info = registry.model_constructor_registry.get(model_spec.constructor_name, {})
+    model_info = registry.model_constructor_registry.get(
+        model_spec.constructor_name, {}
+    )
 
     # Resolve model_data_getter: explicit config takes precedence, else use model's required getter
     getter_name = (
@@ -95,8 +103,12 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
         task_df, added_columns = getter_fn(task_df, raws, model_spec.params)
 
         # Auto-extend input_fields with the added columns
-        existing_fields = experiment_config.task_config.task_specific_config.input_fields or []
-        experiment_config.task_config.task_specific_config.input_fields = existing_fields + added_columns
+        existing_fields = (
+            experiment_config.task_config.task_specific_config.input_fields or []
+        )
+        experiment_config.task_config.task_specific_config.input_fields = (
+            existing_fields + added_columns
+        )
         print(f"Model data getter '{getter_name}' added columns: {added_columns}")
 
     # User defined preprocessing function
@@ -183,6 +195,13 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
         )
 
     for subject_id, raw in zip(subject_ids, raws):
+        print(f"\n{'#' * 40}\nTRAINING ON SUBJECT {subject_id}\n{'#' * 40}\n")
+        # Apply config setters but just for this raw.
+        if experiment_config.config_setter_name:
+            for config_setter_name in experiment_config.config_setter_name:
+                config_setter_fn = registry.config_setter_registry[config_setter_name]
+                experiment_config = config_setter_fn(experiment_config, [raw], task_df)
+
         subject_dir = f"subject_{subject_id}"
         subject_output_dir = os.path.join(output_dir, subject_dir)
         subject_checkpoint_dir = os.path.join(checkpoint_dir, subject_dir)
@@ -219,7 +238,9 @@ def run_multi_task(multi_config: MultiTaskConfig):
 
     for task_idx, task_config in enumerate(multi_config.tasks):
         print("\n" + "=" * 80)
-        print(f"RUNNING TASK {task_idx + 1}/{len(multi_config.tasks)}: {task_config.trial_name}")
+        print(
+            f"RUNNING TASK {task_idx + 1}/{len(multi_config.tasks)}: {task_config.trial_name}"
+        )
         print("=" * 80 + "\n")
 
         # Interpolate {prev_checkpoint_dir} in model_spec if this is not the first task
@@ -239,7 +260,9 @@ def run_multi_task(multi_config: MultiTaskConfig):
         # Update prev_checkpoint_dir for next task
         prev_checkpoint_dir = checkpoint_dir
 
-        print(f"\nTask {task_idx + 1} completed. Checkpoint directory: {checkpoint_dir}\n")
+        print(
+            f"\nTask {task_idx + 1} completed. Checkpoint directory: {checkpoint_dir}\n"
+        )
 
 
 def main():
