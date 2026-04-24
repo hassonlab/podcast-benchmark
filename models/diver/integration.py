@@ -456,8 +456,12 @@ class DIVERDecoder(nn.Module):
         Returns:
             Output tensor [batch_size, output_dim] (probabilities if activation applied)
         """
+        return_feature_emb = kwargs.pop("return_feature_emb_instead_of_projection", False)
         if self.encoder_model is not None and self.head_model is not None:
-            output = self.head_model(self.encoder_model(x, **kwargs), **kwargs)
+            encoder_out = self.encoder_model(x, **kwargs)
+            if return_feature_emb:
+                return encoder_out
+            output = self.head_model(encoder_out, **kwargs)
         else:
             xyz_id = kwargs.get("xyz_id", None)
             data_info_list = kwargs.get("data_info_list", None)
@@ -482,7 +486,9 @@ class DIVERDecoder(nn.Module):
                 data_info_list = create_data_info_list(batch_size, num_channels)
 
             output = self.diver_model(x, data_info_list=data_info_list)
-        
+            if return_feature_emb:
+                return output
+
         # Apply output activation to convert logits to probabilities
         if self.output_activation == "sigmoid":
             output = torch.sigmoid(output)

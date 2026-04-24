@@ -708,7 +708,10 @@ class ReferencePOPTDecoder(nn.Module):
         self.output_activation = output_activation
 
     def forward(self, x, **kwargs):
+        return_feature_emb = kwargs.pop("return_feature_emb_instead_of_projection", False)
         cls_repr = self.encoder_model(x, **kwargs)
+        if return_feature_emb:
+            return cls_repr
         return self.head(cls_repr)
 
 
