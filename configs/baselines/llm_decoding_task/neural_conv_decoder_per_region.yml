@@ -34,7 +34,7 @@ training_params:
   metrics: []
   early_stopping_metric: cross_entropy
   smaller_is_better: true
-trial_name: llm_decoding_per_subject
+trial_name: llm_decoding_per_region
 model_spec:
   constructor_name: gpt2_brain
   params:
@@ -49,4 +49,4 @@ model_spec:
         dropout: 0.2
         num_models: 10
         embedding_dim: 768
-train_one_subject_at_a_time: true
+run_mode: per_region

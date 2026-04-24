@@ -26,7 +26,7 @@ training_params:
   epochs: 20
   loss_name: mse
   metrics: [cosine_sim]
-train_one_subject_at_a_time: true
+run_mode: per_subject
 trial_name: temp_test
 """
 

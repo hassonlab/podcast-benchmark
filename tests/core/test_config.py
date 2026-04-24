@@ -8,7 +8,14 @@ import pytest
 import yaml
 from dataclasses import asdict
 
-from core.config import DataParams, TrainingParams, ExperimentConfig, dict_to_config, ModelSpec
+from core.config import (
+    DataParams,
+    TrainingParams,
+    ExperimentConfig,
+    RunMode,
+    dict_to_config,
+    ModelSpec,
+)
 
 
 @pytest.fixture
@@ -120,7 +127,7 @@ class TestDictToConfig:
 
         assert config.model_spec.constructor_name == "test_model"
         assert config.training_params.batch_size == 128
-        assert config.train_one_subject_at_a_time is False
+        assert config.run_mode == RunMode.COMBINED
         # Check defaults are preserved
         assert config.training_params.epochs == 100  # default
         assert config.training_params.learning_rate == 0.001  # default
@@ -163,8 +170,13 @@ class TestYAMLIntegration:
         assert config.training_params.batch_size == 64
         assert config.training_params.learning_rate == 0.001
         assert config.training_params.epochs == 20
-        assert config.train_one_subject_at_a_time is True
+        assert config.run_mode == RunMode.PER_SUBJECT
         assert config.trial_name == "temp_test"
+
+    def test_run_mode_string_deserializes_to_enum(self):
+        config = dict_to_config({"run_mode": "per_region"}, ExperimentConfig)
+
+        assert config.run_mode == RunMode.PER_REGION
 
     def test_roundtrip_conversion(self, sample_experiment_config):
         """Test that config can be converted to dict and back without loss."""

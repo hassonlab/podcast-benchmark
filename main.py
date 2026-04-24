@@ -1,16 +1,29 @@
 import os
 from datetime import datetime
 from dataclasses import asdict
+from copy import deepcopy
 
 import numpy as np
 import torch
 
 from utils import data_utils
 from utils import decoding_utils
+from utils.atlas_utils import (
+    REGION_GROUPS,
+    build_electrode_region_map,
+    slugify_region_name,
+)
 import random
 from utils.module_loader_utils import import_all_from_package
 from core import registry
-from core.config import TaskConfig, DataParams, MultiTaskConfig, ExperimentConfig, dict_to_config
+from core.config import (
+    TaskConfig,
+    DataParams,
+    MultiTaskConfig,
+    ExperimentConfig,
+    RunMode,
+    dict_to_config,
+)
 from utils.config_utils import (
     parse_known_args,
     load_config,
@@ -62,64 +75,18 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
     task_name = experiment_config.task_config.task_name
     task_info = registry.task_registry[task_name]
 
-    # Load all data
-    raws = data_utils.load_raws(experiment_config.task_config.data_params)
+    # Shared setup
+    base_raws = data_utils.load_raws(experiment_config.task_config.data_params)
     task_getter = task_info["getter"]
-    task_df = task_getter(experiment_config.task_config)
+    base_task_df = task_getter(experiment_config.task_config)
 
-    # Apply config setters
-    if experiment_config.config_setter_name:
-        for config_setter_name in experiment_config.config_setter_name:
-            config_setter_fn = registry.config_setter_registry[config_setter_name]
-            experiment_config = config_setter_fn(experiment_config, raws, task_df)
-
-    # Apply model data getter if needed (adds model-specific columns to task_df)
-    model_spec = experiment_config.model_spec
-    model_info = registry.model_constructor_registry.get(model_spec.constructor_name, {})
-
-    # Resolve model_data_getter: explicit config takes precedence, else use model's required getter
-    getter_name = (
-        model_spec.model_data_getter  # Explicit override in config
-        or model_info.get("required_data_getter")  # Model's declared requirement
-    )
-
-    if getter_name:
-        if getter_name not in registry.model_data_getter_registry:
-            raise ValueError(
-                f"Model '{model_spec.constructor_name}' requires data getter "
-                f"'{getter_name}' but it is not registered. "
-                f"Available getters: {list(registry.model_data_getter_registry.keys())}"
-            )
-
-        getter_fn = registry.model_data_getter_registry[getter_name]
-        task_df, added_columns = getter_fn(task_df, raws, model_spec.params)
-
-        # Auto-extend input_fields with the added columns
-        existing_fields = experiment_config.task_config.task_specific_config.input_fields or []
-        experiment_config.task_config.task_specific_config.input_fields = existing_fields + added_columns
-        print(f"Model data getter '{getter_name}' added columns: {added_columns}")
-
-    # User defined preprocessing function
-    preprocessing_fns = None
-    if experiment_config.task_config.data_params.preprocessing_fn_name:
-        if not isinstance(
-            experiment_config.task_config.data_params.preprocessing_fn_name, list
-        ):
-            experiment_config.task_config.data_params.preprocessing_fn_name = [
-                experiment_config.task_config.data_params.preprocessing_fn_name
-            ]
-        preprocessing_fns = []
-        for fn_name in experiment_config.task_config.data_params.preprocessing_fn_name:
-            preprocessing_fns.append(registry.data_preprocessor_registry[fn_name])
-
-    # User defined model specification - will be built at each lag
     model_spec = experiment_config.model_spec
     if (
-        experiment_config.train_one_subject_at_a_time
+        experiment_config.run_mode != RunMode.COMBINED
         and model_spec.per_subject_feature_concat
     ):
         raise ValueError(
-            "train_one_subject_at_a_time only supports non-concat runs; "
+            "Split run modes only support non-concat runs; "
             "set model_spec.per_subject_feature_concat to False."
         )
 
@@ -159,54 +126,178 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             experiment_config.training_params.lag_step_size,
         )
 
-    if not experiment_config.train_one_subject_at_a_time:
-        decoding_utils.run_training_over_lags(
-            lags,
-            raws,
-            task_df,
-            preprocessing_fns,
-            model_spec,
-            experiment_config.task_config.task_name,
-            training_params=experiment_config.training_params,
-            task_config=experiment_config.task_config,
-            output_dir=output_dir,
-            checkpoint_dir=checkpoint_dir,
-            tensorboard_dir=tensorboard_dir,
-            write_to_tensorboard=experiment_config.training_params.tensorboard_logging,
-        )
-        return checkpoint_dir
-
     subject_ids = experiment_config.task_config.data_params.subject_ids
-    if len(raws) != len(subject_ids):
+    if len(base_raws) != len(subject_ids):
         raise ValueError(
-            "train_one_subject_at_a_time requires one raw per configured subject_id."
+            "Loaded raws must align one-to-one with configured subject_ids."
         )
 
-    for subject_id, raw in zip(subject_ids, raws):
-        subject_dir = f"subject_{subject_id}"
-        subject_output_dir = os.path.join(output_dir, subject_dir)
-        subject_checkpoint_dir = os.path.join(checkpoint_dir, subject_dir)
-        subject_tensorboard_dir = os.path.join(tensorboard_dir, subject_dir)
-        os.makedirs(subject_output_dir, exist_ok=True)
-        os.makedirs(subject_checkpoint_dir, exist_ok=True)
-        os.makedirs(subject_tensorboard_dir, exist_ok=True)
+    run_units = _build_run_units(experiment_config, base_raws)
+    for run_unit in run_units:
+        unit_config = deepcopy(experiment_config)
+        unit_task_df = base_task_df.copy(deep=True)
+        unit_config.task_config.data_params.subject_ids = list(run_unit["subject_ids"])
+        unit_config.task_config.data_params.per_subject_electrodes = deepcopy(
+            run_unit["per_subject_electrodes"]
+        )
+
+        unit_raws = run_unit["raws"]
+
+        if unit_config.config_setter_name:
+            for config_setter_name in _iter_config_setter_names(
+                unit_config.config_setter_name
+            ):
+                config_setter_fn = registry.config_setter_registry[config_setter_name]
+                unit_config = config_setter_fn(unit_config, unit_raws, unit_task_df)
+
+        unit_model_spec = unit_config.model_spec
+        model_info = registry.model_constructor_registry.get(
+            unit_model_spec.constructor_name, {}
+        )
+        getter_name = (
+            unit_model_spec.model_data_getter
+            or model_info.get("required_data_getter")
+        )
+
+        if getter_name:
+            if getter_name not in registry.model_data_getter_registry:
+                raise ValueError(
+                    f"Model '{unit_model_spec.constructor_name}' requires data getter "
+                    f"'{getter_name}' but it is not registered. "
+                    f"Available getters: {list(registry.model_data_getter_registry.keys())}"
+                )
+
+            getter_fn = registry.model_data_getter_registry[getter_name]
+            unit_task_df, added_columns = getter_fn(
+                unit_task_df, unit_raws, unit_model_spec.params
+            )
+            existing_fields = (
+                unit_config.task_config.task_specific_config.input_fields or []
+            )
+            unit_config.task_config.task_specific_config.input_fields = (
+                existing_fields + added_columns
+            )
+            print(f"Model data getter '{getter_name}' added columns: {added_columns}")
+
+        preprocessing_fns = _resolve_preprocessing_fns(unit_config)
+
+        unit_output_dir = (
+            output_dir
+            if run_unit["dir_name"] is None
+            else os.path.join(output_dir, run_unit["dir_name"])
+        )
+        unit_checkpoint_dir = (
+            checkpoint_dir
+            if run_unit["dir_name"] is None
+            else os.path.join(checkpoint_dir, run_unit["dir_name"])
+        )
+        unit_tensorboard_dir = (
+            tensorboard_dir
+            if run_unit["dir_name"] is None
+            else os.path.join(tensorboard_dir, run_unit["dir_name"])
+        )
+        os.makedirs(unit_output_dir, exist_ok=True)
+        os.makedirs(unit_checkpoint_dir, exist_ok=True)
+        os.makedirs(unit_tensorboard_dir, exist_ok=True)
 
         decoding_utils.run_training_over_lags(
             lags,
-            [raw],
-            task_df,
+            unit_raws,
+            unit_task_df,
             preprocessing_fns,
-            model_spec,
-            experiment_config.task_config.task_name,
-            training_params=experiment_config.training_params,
-            task_config=experiment_config.task_config,
-            output_dir=subject_output_dir,
-            checkpoint_dir=subject_checkpoint_dir,
-            tensorboard_dir=subject_tensorboard_dir,
-            write_to_tensorboard=experiment_config.training_params.tensorboard_logging,
+            unit_model_spec,
+            unit_config.task_config.task_name,
+            training_params=unit_config.training_params,
+            task_config=unit_config.task_config,
+            output_dir=unit_output_dir,
+            checkpoint_dir=unit_checkpoint_dir,
+            tensorboard_dir=unit_tensorboard_dir,
+            write_to_tensorboard=unit_config.training_params.tensorboard_logging,
         )
 
     return checkpoint_dir
+
+
+def _resolve_preprocessing_fns(experiment_config: ExperimentConfig):
+    preprocessing_names = experiment_config.task_config.data_params.preprocessing_fn_name
+    if not preprocessing_names:
+        return None
+
+    if not isinstance(preprocessing_names, list):
+        preprocessing_names = [preprocessing_names]
+        experiment_config.task_config.data_params.preprocessing_fn_name = preprocessing_names
+
+    return [registry.data_preprocessor_registry[fn_name] for fn_name in preprocessing_names]
+
+
+def _iter_config_setter_names(config_setter_name):
+    if not config_setter_name:
+        return []
+    if isinstance(config_setter_name, list):
+        return config_setter_name
+    return [config_setter_name]
+
+
+def _build_run_units(experiment_config: ExperimentConfig, base_raws):
+    subject_ids = experiment_config.task_config.data_params.subject_ids
+    per_subject_electrodes = experiment_config.task_config.data_params.per_subject_electrodes
+
+    if experiment_config.run_mode == RunMode.COMBINED:
+        return [
+            {
+                "dir_name": None,
+                "subject_ids": list(subject_ids),
+                "per_subject_electrodes": deepcopy(per_subject_electrodes),
+                "raws": list(base_raws),
+            }
+        ]
+
+    if experiment_config.run_mode == RunMode.PER_SUBJECT:
+        return [
+            {
+                "dir_name": f"subject_{subject_id}",
+                "subject_ids": [subject_id],
+                "per_subject_electrodes": (
+                    {subject_id: per_subject_electrodes[subject_id]}
+                    if per_subject_electrodes and subject_id in per_subject_electrodes
+                    else None
+                ),
+                "raws": [raw],
+            }
+            for subject_id, raw in zip(subject_ids, base_raws)
+        ]
+
+    if experiment_config.run_mode == RunMode.PER_REGION:
+        region_map = build_electrode_region_map(
+            subject_ids=subject_ids,
+            raws=base_raws,
+            region_groups=REGION_GROUPS,
+        )
+
+        run_units = []
+        for region_name, region_subjects in region_map.items():
+            region_raws = []
+            region_subject_ids = []
+            for subject_id, raw in zip(subject_ids, base_raws):
+                if subject_id in region_subjects:
+                    region_raws.append(raw)
+                    region_subject_ids.append(subject_id)
+
+            if not region_raws:
+                continue
+
+            run_units.append(
+                {
+                    "dir_name": f"region_{slugify_region_name(region_name)}",
+                    "subject_ids": region_subject_ids,
+                    "per_subject_electrodes": deepcopy(region_subjects),
+                    "raws": region_raws,
+                }
+            )
+
+        return run_units
+
+    raise ValueError(f"Unsupported run mode: {experiment_config.run_mode}")
 
 
 def run_multi_task(multi_config: MultiTaskConfig):

@@ -64,8 +64,7 @@ See [Baseline Results](baseline-results.md) for performance benchmarks across al
 To modify data, behavior, or hyperparameters:
 
 Edit the relevant configuration file in `configs/`:
-- `configs/baselines/neural_conv_decoder/` - Neural convolutional decoder baselines
-- `configs/baselines/time_pooling_model/` - Time-pooling regression baselines
+- `configs/baselines/<task_name>/` - Task-grouped baseline configs, including supersubject, per-subject, and per-region variants
 - `configs/examples/example_foundation_model/` - Example foundation-model configs
 - `configs/foundation_models/` - Production foundation-model configs
 - `configs/controls/llm_decoding/` - Control runs for LLM decoding

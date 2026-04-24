@@ -42,16 +42,18 @@ training_params:
   - r2
   - corr
   early_stopping_metric: r2
-  weight_decay: 0.001
-  learning_rate: 0.05
-trial_name: volume_level_torch_ridge_per_subject
+  weight_decay: 0.0001
+  learning_rate: 0.005
+trial_name: volume_level_simple_per_subject
 output_dir: results
 tensorboard_dir: event_logs
 model_spec:
-  constructor_name: torch_ridge_model
+  constructor_name: simple_temporal_model
   params:
     device: cuda
     embedding_dim: 1
-    bias: true
+    hidden_dim: 256
+    dropout: 0.2
+    output_activation: null
   sub_models: {}
-train_one_subject_at_a_time: true
+run_mode: per_subject

@@ -17,7 +17,14 @@ from experimental.lazy_volume_level import runner as experimental_runner
 import random
 from utils.module_loader_utils import import_all_from_package
 from core import registry
-from core.config import TaskConfig, DataParams, MultiTaskConfig, ExperimentConfig, dict_to_config
+from core.config import (
+    TaskConfig,
+    DataParams,
+    MultiTaskConfig,
+    ExperimentConfig,
+    RunMode,
+    dict_to_config,
+)
 from utils.config_utils import (
     parse_known_args,
     load_config,
@@ -122,11 +129,11 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
     # User defined model specification - will be built at each lag
     model_spec = experiment_config.model_spec
     if (
-        experiment_config.train_one_subject_at_a_time
+        experiment_config.run_mode != RunMode.COMBINED
         and model_spec.per_subject_feature_concat
     ):
         raise ValueError(
-            "train_one_subject_at_a_time only supports non-concat runs; "
+            "Split run modes only support non-concat runs; "
             "set model_spec.per_subject_feature_concat to False."
         )
 
@@ -179,7 +186,7 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
     if use_lazy_volume_runner:
         print("Using experimental lazy-STFT runner for volume_level.")
 
-    if not experiment_config.train_one_subject_at_a_time:
+    if experiment_config.run_mode == RunMode.COMBINED:
         runner_fn(
             lags,
             raws,
@@ -199,7 +206,7 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
     subject_ids = experiment_config.task_config.data_params.subject_ids
     if len(raws) != len(subject_ids):
         raise ValueError(
-            "train_one_subject_at_a_time requires one raw per configured subject_id."
+            "Split run modes require one raw per configured subject_id."
         )
 
     for subject_id, raw in zip(subject_ids, raws):

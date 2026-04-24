@@ -10,7 +10,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ## Content/Non-Content Classification
 
-**Config:** `configs/baselines/neural_conv_decoder/content_noncontent.yml`
+**Config:** `configs/baselines/content_noncontent_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_2025-12-19-00-34-17/lag_performance.csv`
 
@@ -33,7 +33,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### Arbitrary
 
-**Config:** `configs/baselines/neural_conv_decoder/arbitrary.yml`
+**Config:** `configs/baselines/word_embedding_decoding_task/neural_conv_decoder_arbitrary_supersubject.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_arbitrary_2025-12-19-00-17-32/lag_performance.csv`
 
@@ -44,7 +44,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### GloVe
 
-**Config:** `configs/baselines/neural_conv_decoder/glove.yml`
+**Config:** `configs/baselines/word_embedding_decoding_task/neural_conv_decoder_glove_supersubject.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_glove_2025-12-19-00-17-41/lag_performance.csv`
 
@@ -55,7 +55,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 #### GPT-2
 
-**Config:** `configs/baselines/neural_conv_decoder/gpt2.yml`
+**Config:** `configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_supersubject.yml`
 
 **Detailed Results:** `baseline-results/ensemble_model_10_gpt2_2026-02-17-19-54-55/lag_performance.csv`
 
@@ -68,7 +68,7 @@ Baseline results for all of our tasks using a simple deep network, trained only 
 
 ## Whisper Embedding Decoding
 
-**Config:** `configs/baselines/neural_conv_decoder/whisper_embedding.yml`
+**Config:** `configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/neural_conv_whisper_embedding_2026-02-17-19-25-13/lag_performance.csv`
 
@@ -100,7 +100,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## GPT Surprisal (Regression)
 
-**Config:** `configs/baselines/neural_conv_decoder/gpt_surprise.yml`
+**Config:** `configs/baselines/gpt_surprise_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-44/lag_performance.csv`
 
@@ -115,7 +115,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## GPT Surprisal (Multiclass)
 
-**Config:** `configs/baselines/neural_conv_decoder/gpt_surprise_multiclass.yml`
+**Config:** `configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/gpt_surprise_2025-12-19-00-18-43/lag_performance.csv`
 
@@ -130,7 +130,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Part of Speech
 
-**Config:** `configs/baselines/neural_conv_decoder/pos.yml`
+**Config:** `configs/baselines/pos_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/pos_task_sig_elecs_without_other_classes_2025-12-19-00-34-17/lag_performance.csv`
 
@@ -145,7 +145,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Sentence Onset Detection
 
-**Config:** `configs/baselines/neural_conv_decoder/sentence_onset.yml`
+**Config:** `configs/baselines/sentence_onset_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/sentence_onset_lr_2025-12-19-00-18-44/lag_performance.csv`
 
@@ -160,7 +160,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Intonation Unit Boundary Detection
 
-**Config:** `configs/baselines/neural_conv_decoder/iu_boundaries.yml`
+**Config:** `configs/baselines/iu_boundary_task/neural_conv_decoder_supersubject.yml`
 
 **Detailed Results:** `baseline-results/iu_boundary_lr_2026-02-26-09-46-13/lag_performance.csv`
 
@@ -175,7 +175,7 @@ The multimodal score combines word embedding decoding (GPT-2) and whisper embedd
 
 ## Volume Level Prediction
 
-**Config:** `configs/baselines/time_pooling_model/simple_model.yml`
+**Config:** `configs/baselines/volume_level_decoding_task/time_pooling_model_simple_supersubject.yml`
 
 **Detailed Results:** `baseline-results/volume_level_simple_2025-12-19-00-34-56/lag_performance.csv`
 
@@ -196,7 +196,7 @@ This section compares two approaches to LLM-based decoding from brain activity: 
 
 ### LLM Token Finetuning (Brain Data)
 
-**Config:** `configs/baselines/neural_conv_decoder/llm_two_stage_multi.yml`
+**Config:** `configs/baselines/llm_decoding_task/neural_conv_decoder_two_stage_multi_supersubject.yml`
 
 **Detailed Results:** `baseline-results/llm_token_finetune_2025-12-26-12-44-36/lag_performance.csv`
 
