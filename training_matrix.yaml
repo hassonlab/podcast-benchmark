@@ -8,24 +8,41 @@ controls/llm_decoding:
 baselines/neural_conv_decoder:
   word_embedding_decoding_task:
     - gpt2.yml
+    - gpt2_per_subject.yml
     - glove.yml
+    - glove_per_subject.yml
     - arbitrary.yml
+    - arbitrary_per_subject.yml
   sentence_onset_task:
     - sentence_onset.yml
+    - sentence_onset_per_subject.yml
   gpt_surprise_task:
     - gpt_surprise.yml
+    - gpt_surprise_per_subject.yml
   gpt_surprise_multiclass_task:
     - gpt_surprise_multiclass.yml
+    - gpt_surprise_multiclass_per_subject.yml
   content_noncontent_task:
     - content_noncontent.yml
+    - content_noncontent_per_subject.yml
   pos_task:
     - pos.yml
+    - pos_per_subject.yml
   llm_decoding_task:
     - llm_two_stage_multi.yml
+    - llm_two_stage_multi_per_subject.yml
+  whisper_embedding_decoding_task:
+    - whisper_embedding.yml
+    - whisper_embedding_per_subject.yml
+  iu_boundary_task:
+    - iu_boundaries.yml
+    - iu_boundaries_per_subject.yml
 baselines/time_pooling_model:
   volume_level_decoding_task:
     - simple_model.yml
+    - simple_model_per_subject.yml
     - torch_ridge.yml
+    - torch_ridge_per_subject.yml
 
 # Add more model/task combinations as needed
 # Example:

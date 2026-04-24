@@ -34,7 +34,7 @@ train-all:
 	if [ -n "$(MODELS)" ]; then models_arg="--models $(MODELS)"; fi; \
 	tasks_arg=""; \
 	if [ -n "$(TASKS)" ]; then tasks_arg="--tasks $(TASKS)"; fi; \
-	for target in $$(python scripts/generate_training_targets.py $$models_arg $$tasks_arg 2>&1 | grep -v "^Generated" | grep -v "^Warning" | grep -v "Models:" | grep -v "Tasks:"); do \
+	for target in $$(python scripts/generate_training_targets.py $$models_arg $$tasks_arg); do \
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \

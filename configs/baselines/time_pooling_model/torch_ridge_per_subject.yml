@@ -5,10 +5,20 @@ task_config:
   task_name: volume_level_decoding_task
   data_params:
     data_root: data
-    electrode_file_path: processed_data/all_subject_sig.csv
+    electrode_file_path: null
     channel_reg_ex: null
     window_width: 0.2
     preprocessing_fn_name: window_rms
+    subject_ids:
+    - 1
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    per_subject_electrodes: null
   task_specific_config:
     audio_path: stimuli/podcast.wav
     target_sr: 512
@@ -32,17 +42,16 @@ training_params:
   - r2
   - corr
   early_stopping_metric: r2
-  weight_decay: 0.0001
-  learning_rate: 0.005
-trial_name: volume_level_simple_supersubject
+  weight_decay: 0.001
+  learning_rate: 0.05
+trial_name: volume_level_torch_ridge_per_subject
 output_dir: results
 tensorboard_dir: event_logs
 model_spec:
-  constructor_name: simple_temporal_model
+  constructor_name: torch_ridge_model
   params:
     device: cuda
     embedding_dim: 1
-    hidden_dim: 256
-    dropout: 0.2
-    output_activation: null
+    bias: true
   sub_models: {}
+train_one_subject_at_a_time: true

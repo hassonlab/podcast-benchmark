@@ -1,17 +1,28 @@
 config_setter_name: neural_conv
 task_config:
-  task_name: iu_boundary_task
+  task_name: sentence_onset_task
   data_params:
     data_root: data
-    electrode_file_path: processed_data/all_subject_sig.csv
+    electrode_file_path: null
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
       num_average_samples: 32
+    subject_ids:
+    - 1
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    channel_reg_ex: null
+    per_subject_electrodes: null
   task_specific_config:
-    negatives_per_positive: 2
-    negative_margin_s: 0.5
-    iu_boundaries_csv_path: processed_data/iu_boundaries.csv
+    negatives_per_positive: 5
+    negative_margin_s: 0.75
+    sentence_csv_path: processed_data/all_sentences_podcast.csv
 training_params:
   batch_size: 32
   epochs: 50
@@ -32,7 +43,7 @@ training_params:
   - precision
   early_stopping_metric: f1
   smaller_is_better: false
-trial_name: iu_boundary_lr_supersubject
+trial_name: sentence_onset_lr_per_subject
 model_spec:
   constructor_name: ensemble_pitom_model
   params:
@@ -42,3 +53,4 @@ model_spec:
     embedding_dim: 1
     output_activation: sigmoid
   sub_models: {}
+train_one_subject_at_a_time: true
