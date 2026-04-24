@@ -20,8 +20,8 @@ training_params:
   early_stopping_patience: 10
   n_folds: 5
   min_lag: -1000
-  max_lag: 1000
-  lag_step_size: 200
+  max_lag: 1250
+  lag_step_size: 250
   losses:
   - bce
   metrics:
@@ -32,7 +32,7 @@ training_params:
   - precision
   early_stopping_metric: f1
   smaller_is_better: false
-trial_name: sentence_onset_lr
+trial_name: sentence_onset_lr_supersubject
 model_spec:
   constructor_name: ensemble_pitom_model
   params:

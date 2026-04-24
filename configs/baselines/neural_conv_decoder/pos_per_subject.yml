@@ -1,20 +1,36 @@
 config_setter_name: neural_conv
 task_config:
-  task_name: gpt_surprise_multiclass_task
+  task_name: pos_task
   data_params:
     data_root: data
-    electrode_file_path: processed_data/all_subject_sig.csv
+    electrode_file_path: null
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
-      num_average_samples: 32
+      num_average_samples: 8
+    subject_ids:
+    - 1
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    channel_reg_ex: null
+    per_subject_electrodes: null
   task_specific_config:
-    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+    pos_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
   batch_size: 32
-  epochs: 50
+  epochs: 100
   learning_rate: 0.001
   weight_decay: 0.0001
+  use_lr_scheduler: true
+  scheduler_params:
+    factor: 0.5
+    patience: 10
+    min_lr: 1e-6
   early_stopping_patience: 100
   n_folds: 5
   min_lag: -1000
@@ -29,13 +45,15 @@ training_params:
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
   logistic_regression_baseline: true
-trial_name: gpt_surprise_supersubject
+  visualize_fold_distribution: false
+trial_name: pos_task_sig_elecs_without_other_classes_per_subject
 model_spec:
   constructor_name: ensemble_pitom_model
   params:
     conv_filters: 128
     dropout: 0.2
     num_models: 10
-    embedding_dim: 3
+    embedding_dim: 5
     output_activation: softmax
   sub_models: {}
+train_one_subject_at_a_time: true

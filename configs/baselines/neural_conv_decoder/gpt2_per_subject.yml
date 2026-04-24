@@ -4,14 +4,33 @@ task_config:
   data_params:
     data_root: data
     word_column: word
-    electrode_file_path: processed_data/all_subject_sig.csv
+    electrode_file_path: null
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
       num_average_samples: 32
+    subject_ids:
+    - 1
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    channel_reg_ex: null
+    per_subject_electrodes: null
   task_specific_config:
     embedding_type: glove
     embedding_layer: 24
+model_spec:
+  constructor_name: ensemble_pitom_model
+  params:
+    conv_filters: 128
+    dropout: 0.2
+    num_models: 10
+    embedding_dim: 50
+  sub_models: {}
 training_params:
   batch_size: 32
   epochs: 100
@@ -26,12 +45,5 @@ training_params:
   - nll_embedding
   - cosine_sim
   - pairwise_accuracy
-trial_name: ensemble_model_10_glove_supersubject
-model_spec:
-  constructor_name: ensemble_pitom_model
-  params:
-    conv_filters: 128
-    dropout: 0.2
-    num_models: 10
-    embedding_dim: 50
-  sub_models: {}
+trial_name: ensemble_model_10_gpt2_per_subject
+train_one_subject_at_a_time: true
