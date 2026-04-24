@@ -1233,10 +1233,16 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
                     )
 
             subject_embeddings = []
+            n_subjects = len(subject_chunks)
             for s_idx, chunk in enumerate(subject_chunks):
                 sub_kwargs = {"return_feature_emb_instead_of_projection": True}
                 for coord_key, chunks in coord_chunks.items():
                     sub_kwargs[coord_key] = chunks[s_idx]
+                if "cache_key" in inputs_dict:
+                    ck = inputs_dict["cache_key"]
+                    if torch.is_tensor(ck):
+                        ck = ck.to(device)
+                    sub_kwargs["cache_key"] = ck * n_subjects + s_idx
                 emb = model(chunk, **sub_kwargs)
                 subject_embeddings.append(emb)
 
