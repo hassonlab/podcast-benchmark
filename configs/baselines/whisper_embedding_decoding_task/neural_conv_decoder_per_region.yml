@@ -1,8 +1,9 @@
 config_setter_name: neural_conv
 task_config:
-  task_name: gpt_surprise_multiclass_task
+  task_name: whisper_embedding_decoding_task
   data_params:
     data_root: data
+    word_column: word
     electrode_file_path: null
     window_width: 0.625
     preprocessing_fn_name: window_average_neural_data
@@ -20,34 +21,31 @@ task_config:
     channel_reg_ex: null
     per_subject_electrodes: null
   task_specific_config:
-    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+    embedding_pca_dim: 50
 training_params:
   batch_size: 32
-  epochs: 50
+  epochs: 100
   learning_rate: 0.001
   weight_decay: 0.0001
-  early_stopping_patience: 100
+  early_stopping_patience: 10
   n_folds: 5
   min_lag: -1000
   max_lag: 1250
   lag_step_size: 250
   losses:
-  - cross_entropy
+  - mse
   metrics:
-  - roc_auc_multiclass
-  - f1
-  - confusion_matrix
-  early_stopping_metric: roc_auc_multiclass
+  - cosine_sim
+  - pairwise_accuracy
+  early_stopping_metric: cosine_sim
   smaller_is_better: false
-  logistic_regression_baseline: true
-trial_name: gpt_surprise_per_subject
+trial_name: neural_conv_whisper_embedding_per_region
 model_spec:
   constructor_name: ensemble_pitom_model
   params:
     conv_filters: 128
     dropout: 0.2
     num_models: 10
-    embedding_dim: 3
-    output_activation: softmax
+    embedding_dim: 50
   sub_models: {}
-train_one_subject_at_a_time: true
+run_mode: per_region

@@ -1,0 +1,57 @@
+config_setter_name:
+- volume_level_config_setter
+- set_input_channels
+task_config:
+  task_name: volume_level_decoding_task
+  data_params:
+    data_root: data
+    electrode_file_path: null
+    channel_reg_ex: null
+    window_width: 0.2
+    preprocessing_fn_name: window_rms
+    subject_ids:
+    - 1
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    per_subject_electrodes: null
+  task_specific_config:
+    audio_path: stimuli/podcast.wav
+    target_sr: 512
+    cutoff_hz: 8.0
+    butter_order: 4
+    zero_phase: true
+    allow_resample_audio: true
+    window_size: 200.0
+    hop_size: 25.0
+training_params:
+  min_lag: -1000
+  max_lag: 1250
+  lag_step_size: 250
+  lag: null
+  batch_size: 64
+  epochs: 50
+  n_folds: 5
+  losses:
+  - mse
+  metrics:
+  - r2
+  - corr
+  early_stopping_metric: r2
+  weight_decay: 0.001
+  learning_rate: 0.05
+trial_name: volume_level_torch_ridge_per_region
+output_dir: results
+tensorboard_dir: event_logs
+model_spec:
+  constructor_name: torch_ridge_model
+  params:
+    device: cuda
+    embedding_dim: 1
+    bias: true
+  sub_models: {}
+run_mode: per_region

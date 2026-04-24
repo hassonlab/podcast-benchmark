@@ -1,5 +1,5 @@
 tasks:
-- trial_name: llm_embedding_pretrain_per_subject
+- trial_name: llm_embedding_pretrain_per_region
   config_setter_name: neural_conv
   task_config:
     task_name: llm_embedding_pretraining_task
@@ -53,8 +53,8 @@ tasks:
   output_dir: results/llm_two_stage/embedding_pretrain
   checkpoint_dir: checkpoints/llm_two_stage/embedding_pretrain
   tensorboard_dir: event_logs/llm_two_stage/embedding_pretrain
-  train_one_subject_at_a_time: true
-- trial_name: llm_token_finetune_per_subject
+  run_mode: per_region
+- trial_name: llm_token_finetune_per_region
   config_setter_name: neural_conv
   task_config:
     task_name: llm_decoding_task
@@ -104,7 +104,7 @@ tasks:
   output_dir: results/llm_two_stage/token_finetune
   checkpoint_dir: checkpoints/llm_two_stage/token_finetune
   tensorboard_dir: event_logs/llm_two_stage/token_finetune
-  train_one_subject_at_a_time: true
+  run_mode: per_region
 shared_params:
   training_params.n_folds: 5
   training_params.min_lag: -1000

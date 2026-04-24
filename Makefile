@@ -12,13 +12,17 @@ JOB_NAME ?= "$(PREFIX)-$(USR)-$(DT)"
 # To batch on slurm
 CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
-# Specify model and a single config to use.
+# Specify a single config to use.
 # Usage:
-#   make train MODEL_NAME=baselines/neural_conv_decoder CONFIG=gpt2.yml
+#   make train-config CONFIG=configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_supersubject.yml
 train-config:
+	@if [ -z "$(CONFIG)" ]; then \
+		echo "CONFIG is required"; \
+		exit 1; \
+	fi
 	mkdir -p logs
 	$(CMD) main.py \
-		--config "configs/$(MODEL_NAME)/$(CONFIG)"
+		--config "$(CONFIG)"
 
 # Train all configs from training_matrix.yaml, optionally filtered by MODELS and/or TASKS
 # Usage:
@@ -41,7 +45,7 @@ train-all:
 		config_tag=$$(basename $$config .yml); \
 		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
-		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config MODEL_NAME="$$model" CONFIG="$$config"; \
+		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config"; \
 	done
 
 # Development and testing targets
