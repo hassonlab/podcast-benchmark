@@ -11,13 +11,22 @@ model_spec:
         deepspeed_pth_format: true
         e_layer: 12
         foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-        freeze_foundation: false
+        freeze_foundation: true
         ft_config: flatten_linear
         ft_mup: false
         mup_weights: true
         output_dim: 768
         patch_sampling_rate: 500
         patch_size: 50
+      sub_models:
+        encoder_model:
+          constructor_name: caching_model
+          params: {}
+          sub_models:
+            inner_model:
+              constructor_name: diver_encoder
+              params: {}
+              sub_models: {}
 task_config:
   data_params:
     data_root: data

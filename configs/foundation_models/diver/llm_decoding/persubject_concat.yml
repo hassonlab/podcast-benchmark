@@ -57,7 +57,16 @@ model_spec:
         ft_config: flatten_linear
         deepspeed_pth_format: true
         output_dim: 768
-        freeze_foundation: false
+        freeze_foundation: true
         mup_weights: true
         ft_mup: false
+      sub_models:
+        encoder_model:
+          constructor_name: caching_model
+          params: {}
+          sub_models:
+            inner_model:
+              constructor_name: diver_encoder
+              params: {}
+              sub_models: {}
   per_subject_feature_concat: true

@@ -9,7 +9,7 @@ model_spec:
       params:
         brainbert_model_dir: models/brainbert/pretrained_model
         dropout: 0.0
-        freeze_foundation: false
+        freeze_foundation: true
         max_coord_value: 5000
         mlp_layer_sizes: []
         model_dir: models/popt/pretrained_model
@@ -17,6 +17,15 @@ model_spec:
         output_dim: 768
         use_brainbert: true
         use_lip_coords: true
+      sub_models:
+        encoder_model:
+          constructor_name: caching_model
+          params: {}
+          sub_models:
+            inner_model:
+              constructor_name: popt_encoder
+              params: {}
+              sub_models: {}
 task_config:
   data_params:
     data_root: data

@@ -8,11 +8,20 @@ model_spec:
       constructor_name: brainbert_finetune
       params:
         dropout: 0.0
-        freeze_foundation: false
+        freeze_foundation: true
         mlp_layer_sizes: []
         model_dir: models/brainbert/pretrained_model
         num_frozen_layers: 0
         output_dim: 768
+      sub_models:
+        encoder_model:
+          constructor_name: caching_model
+          params: {}
+          sub_models:
+            inner_model:
+              constructor_name: brainbert_encoder
+              params: {}
+              sub_models: {}
 task_config:
   data_params:
     data_root: data
