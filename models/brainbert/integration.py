@@ -503,7 +503,10 @@ class ReferenceBrainBERTDecoder(nn.Module):
         self.finetune_model = finetune_model
 
     def forward(self, x, **kwargs):
+        return_feature_emb = kwargs.pop("return_feature_emb_instead_of_projection", False)
         latents = self.encoder_model(x, **kwargs)
+        if return_feature_emb:
+            return latents
         out = self.projector(latents)
 
         if self.output_activation == "sigmoid":
