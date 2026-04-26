@@ -357,6 +357,758 @@ def should_update_gradient_accumulation(
     ) == total_batches
 
 
+def _maybe_shuffle_targets(Y: torch.Tensor, training_params: TrainingParams):
+    if not training_params.shuffle_targets:
+        return Y
+
+    print("WARNING: Shuffling targets for sanity check. Model should perform poorly.")
+    rng = np.random.default_rng(training_params.random_seed)
+    shuffle_indices = rng.permutation(len(Y))
+    return Y[shuffle_indices]
+
+
+def _get_fold_indices(
+    neural_data: torch.Tensor,
+    data_df: pd.DataFrame,
+    task_config: TaskConfig,
+    training_params: TrainingParams,
+):
+    if training_params.fold_type == "sequential_folds":
+        return get_sequential_folds(neural_data, num_folds=training_params.n_folds)
+    if training_params.fold_type == "zero_shot_folds":
+        return get_zero_shot_folds(
+            data_df[task_config.data_params.word_column].values,
+            num_folds=training_params.n_folds,
+        )
+    raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
+
+
+def _select_requested_folds(fold_indices, training_params: TrainingParams):
+    fold_nums = list(range(1, len(fold_indices) + 1))
+    fold_ids = getattr(training_params, "fold_ids", None)
+    if fold_ids is None:
+        return fold_indices, fold_nums
+
+    if len(fold_ids) == 0:
+        raise ValueError(
+            "training_params.fold_ids is empty. Provide at least one fold id or omit it."
+        )
+
+    bad = [k for k in fold_ids if (k < 1 or k > len(fold_indices))]
+    if bad:
+        raise ValueError(
+            f"fold_ids must be 1-based integers in [1, {len(fold_indices)}]. "
+            f"Got invalid: {bad}. If you intended the first fold, use [1] (not [0])."
+        )
+
+    seen = set()
+    selected_fold_nums = [k for k in fold_ids if not (k in seen or seen.add(k))]
+    selected_fold_indices = [fold_indices[k - 1] for k in selected_fold_nums]
+    return selected_fold_indices, selected_fold_nums
+
+
+def _maybe_visualize_fold_distribution(
+    Y, fold_indices, task_name: str, lag: int, training_params: TrainingParams
+):
+    if not training_params.visualize_fold_distribution:
+        return
+
+    from utils.analysis_utils import visualize_fold_distribution
+
+    Y_np = Y.cpu().numpy() if isinstance(Y, torch.Tensor) else Y
+    visualize_fold_distribution(Y_np, fold_indices, task_name=task_name, lag=lag)
+
+
+def _word_embedding_metric_names(training_params: TrainingParams):
+    embedding_metrics = [
+        "test_word_avg_auc_roc",
+        "test_word_train_weighted_auc_roc",
+        "test_word_test_weighted_auc_roc",
+        "test_word_perplexity",
+        "test_occurence_perplexity",
+    ]
+    for k_val in training_params.top_k_thresholds:
+        for test_type in ["word", "occurence"]:
+            embedding_metrics.append(f"test_{test_type}_top_{k_val}")
+    return embedding_metrics
+
+
+def _init_cv_results(metric_names, task_name: str, training_params: TrainingParams):
+    phases = ("train", "val", "test")
+    cv_results = {
+        f"{phase}_{name}": []
+        for phase in phases
+        for name in metric_names
+        if name != "confusion_matrix"
+    }
+    cv_results["num_epochs"] = []
+    cv_results["fold_nums"] = []
+
+    embedding_metrics = None
+    if task_name == "word_embedding_decoding_task":
+        embedding_metrics = _word_embedding_metric_names(training_params)
+        for metric in embedding_metrics:
+            cv_results[metric] = []
+
+    return cv_results, embedding_metrics
+
+
+def _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx):
+    print(f"Fold {fold}")
+    print(f"Train indices: {tr_idx}")
+    print(f"Validation indices: {va_idx}")
+    print(f"Test indices: {te_idx}")
+    print(f"Train size: {len(tr_idx)}")
+    print(f"Validation size: {len(va_idx)}")
+    print(f"Test size: {len(te_idx)}")
+    print(f"Train Input shape: {neural_data[tr_idx].shape}")
+    print(f"Train targets: {Y[tr_idx]}, shape: {Y[tr_idx].shape}")
+    print(f"Validation targets: {Y[va_idx]}, shape: {Y[va_idx].shape}")
+    print(f"Test targets: {Y[te_idx]}, shape: {Y[te_idx].shape}")
+
+
+def _create_tensorboard_writer(write_to_tensorboard, tensorboard_dir, lag, fold):
+    if not write_to_tensorboard:
+        return None
+    if not TENSORBOARD_AVAILABLE:
+        raise ImportError(
+            "TensorBoard is not available. Please install it with: "
+            "pip install tensorboard"
+        )
+    tb_path = os.path.join(tensorboard_dir, f"lag_{lag}", f"fold_{fold}")
+    return SummaryWriter(log_dir=tb_path)
+
+
+def _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params: TrainingParams):
+    if not training_params.normalize_targets:
+        return {"train": Y[tr_idx], "val": Y[va_idx], "test": Y[te_idx]}
+
+    print("Normalizing targets...")
+    Y_train = Y[tr_idx]
+    y_mean = Y_train.mean(dim=0, keepdim=True)
+    y_std = Y_train.std(dim=0, keepdim=True)
+    y_std = torch.where(y_std < 1e-6, torch.ones_like(y_std), y_std)
+    return {
+        "train": (Y_train - y_mean) / y_std,
+        "val": (Y[va_idx] - y_mean) / y_std,
+        "test": (Y[te_idx] - y_mean) / y_std,
+    }
+
+
+def _build_fold_loaders(
+    neural_data,
+    data_df,
+    task_config: TaskConfig,
+    split_indices,
+    target_splits,
+    training_params: TrainingParams,
+):
+    input_fields = task_config.task_specific_config.input_fields
+    extra_inputs = {
+        phase: data_utils.df_columns_to_tensors(data_df, input_fields, indices)
+        for phase, indices in split_indices.items()
+    }
+    datasets = {
+        phase: NeuralDictDataset(
+            neural_data[indices], extra_inputs[phase], target_splits[phase]
+        )
+        for phase, indices in split_indices.items()
+    }
+    return {
+        phase: DataLoader(
+            ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
+        )
+        for phase, ds in datasets.items()
+    }
+
+
+def _create_optimizer(model, training_params: TrainingParams):
+    if training_params.optimizer == "MuAdamW":
+        print("Using MuAdamW optimizer")
+        return MuAdamW(
+            model.parameters(),
+            lr=float(training_params.learning_rate),
+            weight_decay=float(training_params.weight_decay),
+        )
+
+    print("Using AdamW optimizer")
+    return optim.AdamW(
+        model.parameters(),
+        lr=float(training_params.learning_rate),
+        weight_decay=float(training_params.weight_decay),
+    )
+
+
+def _create_training_scheduler(optimizer, loaders, training_params: TrainingParams):
+    scheduler = None
+    if training_params.lr_scheduler:
+        print(f"Using {training_params.lr_scheduler} LR scheduler")
+        if training_params.lr_scheduler == "cosine_annealing":
+            updates_per_epoch = math.ceil(
+                len(loaders["train"])
+                / max(1, int(training_params.grad_accumulation_steps))
+            )
+            t_max = max(1, int(training_params.epochs) * updates_per_epoch)
+            eta_min = float(training_params.learning_rate) * float(
+                getattr(training_params, "cosine_eta_min_factor", 1e-2)
+            )
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=t_max, eta_min=eta_min
+            )
+        else:
+            raise ValueError(
+                f"Unknown lr_scheduler: {training_params.lr_scheduler}. "
+                "Supported: None, 'cosine_annealing'"
+            )
+
+    scheduler = create_lr_scheduler(optimizer, training_params)
+    return scheduler
+
+
+def _build_model_optimizer_scheduler(
+    model_spec,
+    lag,
+    fold,
+    loaders,
+    training_params,
+    device,
+):
+    model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
+    optimizer = _create_optimizer(model, training_params)
+    scheduler = _create_training_scheduler(optimizer, loaders, training_params)
+    return model, optimizer, scheduler
+
+
+def _create_training_history(metric_names):
+    history = {
+        f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
+    }
+    if "cross_entropy" in metric_names:
+        for phase in ("train", "val"):
+            history[f"{phase}_perplexity"] = []
+    history["train_loss"] = []
+    history["val_loss"] = []
+    history["num_epochs"] = None
+    return history
+
+
+def _move_batch_to_device(batch_data, device):
+    Xb, inputs_dict, yb = batch_data
+    Xb = Xb.to(device)
+    inputs_dict = {
+        k: v.to(device) if torch.is_tensor(v) else v
+        for k, v in inputs_dict.items()
+    }
+    yb = yb.to(device)
+    return Xb, inputs_dict, yb
+
+
+def _accumulate_batch_metrics(sums, batch_metrics):
+    for name, val in batch_metrics.items():
+        if sums[name] is None:
+            sums[name] = val
+        else:
+            sums[name] += val
+
+
+def _run_epoch(
+    model,
+    loader,
+    device,
+    training_params,
+    all_fns,
+    metric_names,
+    model_params,
+    optimizer=None,
+    scheduler=None,
+):
+    is_train = optimizer is not None
+    if is_train:
+        model.train()
+    else:
+        model.eval()
+
+    sums = {name: None if name == "confusion_matrix" else 0.0 for name in metric_names}
+    sums["loss"] = 0.0
+    grad_steps = training_params.grad_accumulation_steps
+
+    if is_train:
+        optimizer.zero_grad()
+
+    for i, batch_data in enumerate(loader):
+        Xb, inputs_dict, yb = _move_batch_to_device(batch_data, device)
+
+        if is_train:
+            out = model(Xb, **inputs_dict)
+            loss = compute_loss(out, yb, training_params, all_fns)
+            loss = loss / grad_steps
+            loss.backward()
+
+            if should_update_gradient_accumulation(i, len(loader), grad_steps):
+                if (
+                    getattr(training_params, "clip_grad_norm", 0.0)
+                    and float(training_params.clip_grad_norm) > 0.0
+                ):
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        max_norm=float(training_params.clip_grad_norm),
+                    )
+                optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
+                optimizer.zero_grad()
+        else:
+            with torch.no_grad():
+                out = model(Xb, **inputs_dict)
+                loss = compute_loss(out, yb, training_params, all_fns)
+
+        batch_metrics = compute_all_metrics(out, yb, all_fns, model_params)
+        _accumulate_batch_metrics(sums, batch_metrics)
+
+        if torch.is_tensor(loss):
+            loss = loss.detach().mean().item()
+        sums["loss"] += loss
+
+    result = {
+        name: sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
+        for name in sums
+    }
+
+    if "cross_entropy" in result:
+        result["perplexity"] = np.exp(result["cross_entropy"])
+
+    return result
+
+
+def _train_and_eval_baseline(
+    training_fn,
+    neural_data,
+    split_indices,
+    target_splits,
+    all_fns,
+    model_params,
+    **kwargs,
+):
+    tr_idx = split_indices["train"]
+    model = training_fn(
+        neural_data[tr_idx].cpu().numpy(),
+        target_splits["train"].cpu().numpy(),
+        **kwargs,
+    )
+    X_splits = {
+        phase: neural_data[indices].cpu().numpy()
+        for phase, indices in split_indices.items()
+    }
+    Y_splits = {
+        phase: targets.cpu().numpy() for phase, targets in target_splits.items()
+    }
+    return compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params)
+
+
+def _train_enabled_baselines(
+    neural_data,
+    split_indices,
+    target_splits,
+    training_params,
+    all_fns,
+    model_params,
+):
+    results = {}
+    if training_params.logistic_regression_baseline:
+        print("Training logistic regression baseline...")
+        results["logistic_regression"] = _train_and_eval_baseline(
+            train_logistic_regression,
+            neural_data,
+            split_indices,
+            target_splits,
+            all_fns,
+            model_params,
+        )
+    if training_params.linear_regression_baseline:
+        print("Training linear regression baseline...")
+        results["linear_regression"] = _train_and_eval_baseline(
+            train_linear_regression,
+            neural_data,
+            split_indices,
+            target_splits,
+            all_fns,
+            model_params,
+        )
+    if training_params.ridge_regression_baseline:
+        print("Training ridge regression baseline...")
+        results["ridge_regression"] = _train_and_eval_baseline(
+            train_ridge_regression,
+            neural_data,
+            split_indices,
+            target_splits,
+            all_fns,
+            model_params,
+            alpha=training_params.ridge_alpha,
+        )
+    return results
+
+
+def _append_baseline_results(all_baseline_results, fold_baseline_results):
+    for name, metrics_dict in fold_baseline_results.items():
+        all_baseline_results[name].append(metrics_dict)
+
+
+def _maybe_prepare_per_subject_concat_model(
+    model,
+    loaders,
+    model_spec,
+    subject_channel_counts,
+    training_params,
+    device,
+):
+    if not getattr(model_spec, "per_subject_feature_concat", False):
+        return model, loaders, None
+
+    if subject_channel_counts is None or len(subject_channel_counts) <= 1:
+        raise ValueError(
+            "per_subject_feature_concat requires multiple subjects. "
+            "Got subject_channel_counts={subject_channel_counts}"
+        )
+
+    cache_loader_generation_start_time = time.time()
+    loaders = {
+        "train": generate_loaders_from_features(
+            *extract_per_subject_concat_features(
+                model, loaders["train"], subject_channel_counts, device
+            ),
+            training_params.batch_size,
+            shuffle=True,
+        ),
+        "val": generate_loaders_from_features(
+            *extract_per_subject_concat_features(
+                model, loaders["val"], subject_channel_counts, device
+            ),
+            training_params.batch_size,
+            shuffle=False,
+        ),
+        "test": generate_loaders_from_features(
+            *extract_per_subject_concat_features(
+                model, loaders["test"], subject_channel_counts, device
+            ),
+            training_params.batch_size,
+            shuffle=False,
+        ),
+    }
+    print(
+        "Time taken for per-subject feature extraction and concat: "
+        f"{time.time() - cache_loader_generation_start_time}"
+    )
+
+    output_dim = getattr(model, "output_dim", None)
+    if output_dim is None:
+        raise NotImplementedError(
+            "per_subject_feature_concat requires the model to expose "
+            f"output_dim. Got model: {model.__class__.__name__}"
+        )
+
+    sample_batch = next(iter(loaders["train"]))
+    concat_dim = sample_batch[0].shape[-1]
+    print(f"Linear probe: {concat_dim} -> {output_dim}")
+
+    probe = nn.Linear(concat_dim, output_dim)
+    model = SqueezeWrapper(
+        feature_head=MakeIgnoreKwargsDuringForward(probe), output_dim=output_dim
+    ).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(training_params.learning_rate),
+        weight_decay=float(training_params.weight_decay),
+    )
+    return model, loaders, optimizer
+
+
+def _maybe_prepare_feature_cache_model(model, loaders, training_params, device):
+    if not getattr(model_spec, "feature_cache", False):
+        return model, loaders
+
+    cache_loader_generation_start_time = time.time()
+    loaders = {
+        "train": generate_loaders_from_features(
+            *extract_features_for_caching(model, loaders["train"], device),
+            training_params.batch_size,
+            shuffle=True,
+        ),
+        "val": generate_loaders_from_features(
+            *extract_features_for_caching(model, loaders["val"], device),
+            training_params.batch_size,
+            shuffle=False,
+        ),
+        "test": generate_loaders_from_features(
+            *extract_features_for_caching(model, loaders["test"], device),
+            training_params.batch_size,
+            shuffle=False,
+        ),
+    }
+    print(
+        "Time taken for feature extraction and loader generation: "
+        f"{time.time() - cache_loader_generation_start_time}"
+    )
+
+    if not hasattr(model, "forward_from_features"):
+        raise NotImplementedError(
+            "Feature caching requires the model to implement "
+            f"forward_from_features(...). Got model: {model.__class__.__name__}"
+        )
+    return CachedFeatureModel(model).to(device), loaders
+
+
+def _save_checkpoint(model, model_path):
+    if hasattr(model, "save_checkpoint") and callable(getattr(model, "save_checkpoint")):
+        model.save_checkpoint(model_path)
+    else:
+        torch.save(model.state_dict(), model_path)
+
+
+def _load_checkpoint(model, model_path):
+    if hasattr(model, "load_checkpoint") and callable(getattr(model, "load_checkpoint")):
+        model.load_checkpoint(model_path)
+    else:
+        model.load_state_dict(torch.load(model_path))
+
+
+def _append_epoch_metrics(history, train_mets, val_mets):
+    for name, val in train_mets.items():
+        history[f"train_{name}"].append(val)
+    for name, val in val_mets.items():
+        history[f"val_{name}"].append(val)
+
+
+def _train_fold(
+    model,
+    loaders,
+    optimizer,
+    scheduler,
+    model_path,
+    lag,
+    fold,
+    training_params,
+    all_fns,
+    metric_names,
+    model_params,
+    device,
+    writer=None,
+):
+    best_val, patience = setup_early_stopping_state(training_params)
+    best_epoch = 0
+    history = _create_training_history(metric_names)
+    loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
+
+    loop_start_time = time.time()
+    for epoch in loop:
+        train_mets = _run_epoch(
+            model,
+            loaders["train"],
+            device,
+            training_params,
+            all_fns,
+            metric_names,
+            model_params,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
+        val_mets = _run_epoch(
+            model,
+            loaders["val"],
+            device,
+            training_params,
+            all_fns,
+            metric_names,
+            model_params,
+        )
+        _append_epoch_metrics(history, train_mets, val_mets)
+
+        if writer is not None:
+            log_metrics_to_tensorboard(writer, train_mets, "model", "train", epoch)
+            log_metrics_to_tensorboard(writer, val_mets, "model", "val", epoch)
+
+        cur = val_mets[training_params.early_stopping_metric]
+        if should_update_best(cur, best_val, training_params.smaller_is_better):
+            best_val = cur
+            best_epoch = epoch
+            _save_checkpoint(model, model_path)
+            patience = 0
+        else:
+            patience += 1
+            if patience >= training_params.early_stopping_patience:
+                break
+
+        if scheduler is not None:
+            scheduler.step(cur)
+
+        if writer is not None:
+            current_lr = optimizer.param_groups[0]["lr"]
+            writer.add_scalar("learning_rate", current_lr, epoch)
+
+        loop.set_postfix(
+            {
+                training_params.early_stopping_metric: f"{best_val:.4f}",
+                **{f"train_{name}": val for name, val in train_mets.items()},
+                **{f"val_{name}": val for name, val in val_mets.items()},
+            }
+        )
+    print(f"Time taken for training loop: {time.time() - loop_start_time}")
+
+    history["num_epochs"] = best_epoch + 1
+    _load_checkpoint(model, model_path)
+    test_mets = _run_epoch(
+        model,
+        loaders["test"],
+        device,
+        training_params,
+        all_fns,
+        metric_names,
+        model_params,
+    )
+    return history, test_mets, best_epoch
+
+
+def _record_fold_results(cv_results, history, test_mets, metric_names, best_epoch):
+    conf_matrices = {}
+    for name in metric_names:
+        if name != "confusion_matrix":
+            cv_results[f"train_{name}"].append(history[f"train_{name}"][best_epoch])
+            cv_results[f"val_{name}"].append(history[f"val_{name}"][best_epoch])
+            cv_results[f"test_{name}"].append(test_mets[name])
+        else:
+            conf_matrices = {
+                "train": history[f"train_{name}"][best_epoch],
+                "val": history[f"val_{name}"][best_epoch],
+                "test": test_mets[name],
+            }
+    cv_results["num_epochs"].append(history["num_epochs"])
+    return conf_matrices
+
+
+def _log_fold_tensorboard_results(writer, test_mets, fold_baseline_results, fold):
+    if writer is None:
+        return
+
+    log_metrics_to_tensorboard(writer, test_mets, "model", "test", fold)
+    for model_name, metrics_dict in fold_baseline_results.items():
+        log_metrics_to_tensorboard(writer, metrics_dict, model_name, None, fold)
+    writer.close()
+
+
+def _collect_loader_features(loader):
+    test_features = []
+    test_targets = []
+    with torch.no_grad():
+        for batch_data in loader:
+            features, _, y_b = batch_data
+            test_features.append(features)
+            test_targets.append(y_b)
+    return torch.cat(test_features, dim=0), torch.cat(test_targets, dim=0)
+
+
+def _maybe_compute_word_embedding_metrics(
+    cv_results,
+    embedding_metrics,
+    loaders,
+    model,
+    device,
+    data_df,
+    task_config,
+    tr_idx,
+    te_idx,
+    training_params,
+):
+    if embedding_metrics is None:
+        return
+
+    test_extra_inputs = data_utils.df_columns_to_tensors(
+        data_df, task_config.task_specific_config.input_fields, te_idx
+    )
+    test_features, test_targets = _collect_loader_features(loaders["test"])
+    results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
+        test_features,
+        test_targets,
+        model,
+        device,
+        data_df[task_config.data_params.word_column],
+        te_idx,
+        tr_idx,
+        training_params.top_k_thresholds,
+        training_params.min_train_freq_auc,
+        training_params.min_test_freq_auc,
+        extra_inputs=test_extra_inputs,
+        preserve_ensemble=True,
+    )
+    for key, val in results.items():
+        cv_results[key].append(val)
+
+
+def _print_single_baseline_summary(title, baseline_results):
+    if not baseline_results:
+        return
+
+    print("\n" + "=" * 60)
+    print(title)
+    print("=" * 60)
+    for metric_name in baseline_results[0].keys():
+        values = [result[metric_name] for result in baseline_results]
+        if np.isscalar(values[0]) or (
+            isinstance(values[0], np.ndarray) and values[0].size == 1
+        ):
+            print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
+
+
+def _print_baseline_summaries(training_params, baseline_results):
+    if training_params.logistic_regression_baseline:
+        _print_single_baseline_summary(
+            "LOGISTIC REGRESSION BASELINE RESULTS",
+            baseline_results["logistic_regression"],
+        )
+    if training_params.linear_regression_baseline:
+        _print_single_baseline_summary(
+            "LINEAR REGRESSION BASELINE RESULTS",
+            baseline_results["linear_regression"],
+        )
+    if training_params.ridge_regression_baseline:
+        _print_single_baseline_summary(
+            f"RIDGE REGRESSION BASELINE RESULTS (alpha={training_params.ridge_alpha})",
+            baseline_results["ridge_regression"],
+        )
+
+
+def _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_metrics):
+    print("\n" + "=" * 60)
+    print("MAIN MODEL CROSS-VALIDATION RESULTS")
+    print("=" * 60)
+
+    for phase in ("train", "val", "test"):
+        for name in metric_names:
+            if name != "confusion_matrix":
+                vals = cv_results[f"{phase}_{name}"]
+                print(f"--- Individual Folds ({phase}_{name}) ---")
+                fold_nums = cv_results.get("fold_nums", list(range(1, len(vals) + 1)))
+                for i, val in enumerate(vals):
+                    fold_num = fold_nums[i]
+                    print(f"Fold {fold_num}: {val:.4f}")
+                print(
+                    f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}\n"
+                )
+            elif name == "confusion_matrix":
+                print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
+
+    if "cross_entropy" in metric_names:
+        for phase in ("train", "val", "test"):
+            ce_vals = cv_results[f"{phase}_cross_entropy"]
+            ppl_vals = np.exp(ce_vals)
+            print(
+                f"Mean {phase} perplexity: {np.mean(ppl_vals):.4f} ± {np.std(ppl_vals):.4f}"
+            )
+
+    if embedding_metrics is not None:
+        for metric_name in embedding_metrics:
+            vals = cv_results[metric_name]
+            print(f"Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
+
 def train_decoding_model(
     neural_data: torch.Tensor,
     Y: torch.Tensor,
@@ -375,617 +1127,114 @@ def train_decoding_model(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    if training_params.shuffle_targets:
-        print(
-            "WARNING: Shuffling targets for sanity check. Model should perform poorly."
-        )
-        # Set seed for reproducibility
-        rng = np.random.default_rng(training_params.random_seed)
-        shuffle_indices = rng.permutation(len(Y))
-        Y = Y[shuffle_indices]
+    Y = _maybe_shuffle_targets(Y, training_params)
+    fold_indices = _get_fold_indices(neural_data, data_df, task_config, training_params)
+    fold_indices, fold_nums = _select_requested_folds(fold_indices, training_params)
+    _maybe_visualize_fold_distribution(Y, fold_indices, task_name, lag, training_params)
 
-    # 3. Get fold indices
-    if training_params.fold_type == "sequential_folds":
-        fold_indices = get_sequential_folds(
-            neural_data, num_folds=training_params.n_folds
-        )
-    elif training_params.fold_type == "zero_shot_folds":
-        fold_indices = get_zero_shot_folds(
-            data_df[task_config.data_params.word_column].values,
-            num_folds=training_params.n_folds,
-        )
-    else:
-        raise ValueError(f"Unknown fold_type: {training_params.fold_type}")
-
-    # 3.25. Optionally restrict to specific folds
-    # Internal fold numbering in this file is 1..n_folds (see enumerate(start=1) below).
-    fold_nums_all = list(range(1, len(fold_indices) + 1))  # [1..n]
-    fold_ids = getattr(training_params, "fold_ids", None)
-    if fold_ids is not None:
-        if len(fold_ids) == 0:
-            raise ValueError(
-                "training_params.fold_ids is empty. Provide at least one fold id or omit it."
-            )
-
-        bad = [k for k in fold_ids if (k < 1 or k > len(fold_indices))]
-        if bad:
-            raise ValueError(
-                f"fold_ids must be 1-based integers in [1, {len(fold_indices)}]. "
-                f"Got invalid: {bad}. If you intended the first fold, use [1] (not [0])."
-            )
-        selected_fold_nums = list(fold_ids)
-
-        # Keep order as provided by user; de-duplicate while preserving order
-        seen = set()
-        selected_fold_nums = [
-            k for k in selected_fold_nums if not (k in seen or seen.add(k))
-        ]
-
-        fold_indices = [
-            fold_indices[k - 1] for k in selected_fold_nums
-        ]  # map to 0-based list index
-        fold_nums_all = (
-            selected_fold_nums  # now fold_nums_all matches fold_indices order
-        )
-
-    # 3.5. Visualize fold distribution if requested
-    if training_params.visualize_fold_distribution:
-        from utils.analysis_utils import visualize_fold_distribution
-
-        # Convert Y to numpy if it's a tensor
-        Y_np = Y.cpu().numpy() if isinstance(Y, torch.Tensor) else Y
-        visualize_fold_distribution(Y_np, fold_indices, task_name=task_name, lag=lag)
-
-    # 4. Build a single dict of all metric functions (including loss)
     all_fns = setup_metrics_and_loss(training_params)
     metric_names = all_fns.keys()
-
-    # 5. Initialize CV containers
-    phases = ("train", "val", "test")
-    # cv_results = {f"{phase}_{name}": [] for phase in phases for name in metric_names}
-
-    cv_results = {
-        f"{phase}_{name}": []
-        for phase in phases
-        for name in metric_names
-        if name != "confusion_matrix"
-    }
-
-    cv_results["num_epochs"] = []
-    cv_results["fold_nums"] = []
-
-    # Hardcode embedding task metrics for now since they need to be handled a bit differently.
-    # Clean this up later. Hardcoding for now since generalizing this like other metrics would
-    # get complicated.
-    is_word_embedding_decoding_task = task_name == "word_embedding_decoding_task"
-    if is_word_embedding_decoding_task:
-        # Test type is split between "word" and "occ" where word is averaged over
-        # each time a word occurs and occ is per-each occurence of the word so is
-        # more difficult and depends on contextual embeddings.
-        embedding_metrics = [
-            "test_word_avg_auc_roc",
-            "test_word_train_weighted_auc_roc",
-            "test_word_test_weighted_auc_roc",
-            "test_word_perplexity",
-            "test_occurence_perplexity",
-        ]
-
-        # Top-K metrics.
-        for k_val in training_params.top_k_thresholds:
-            for test_type in ["word", "occurence"]:
-                embedding_metrics.append(f"test_{test_type}_top_{k_val}")
-
-        for metric in embedding_metrics:
-            cv_results[metric] = []
+    cv_results, embedding_metrics = _init_cv_results(
+        metric_names, task_name, training_params
+    )
 
     models, histories = [], []
+    baseline_results = {
+        "logistic_regression": [],
+        "linear_regression": [],
+        "ridge_regression": [],
+    }
+    conf_matrices = {}
 
-    # Store baseline results across folds
-    logistic_regression_results = []
-    linear_regression_results = []
-    ridge_regression_results = []
-
-    def run_epoch(model, loader, optimizer=None):
-        """
-        If optimizer is provided: does a training pass.
-        Otherwise: does an eval pass.
-        Returns a dict { metric_name: average_value }.
-        """
-        is_train = optimizer is not None
-        if is_train:
-            model.train()
-            # *note that this is not enough for gpt2brain, which is why we have a seprate `change_training_mode`
-        else:
-            model.eval()
-
-        # Initialize sums with None for confusion matrix, 0.0 for others
-        sums = {}
-        for name in metric_names:
-            sums[name] = None if name == "confusion_matrix" else 0.0
-        sums["loss"] = 0.0
-
-        grad_steps = training_params.grad_accumulation_steps
-
-        if is_train:
-            optimizer.zero_grad()
-
-        for i, batch_data in enumerate(loader):
-            # NeuralDictDataset returns (X, inputs_dict, Y)
-            Xb, inputs_dict, yb = batch_data
-            Xb = Xb.to(device)
-            # Move all input tensors to device (handles data_info_list and other inputs)
-            inputs_dict = {
-                k: v.to(device) if torch.is_tensor(v) else v
-                for k, v in inputs_dict.items()
-            }
-            yb = yb.to(device)
-
-            if is_train:
-                # Forward pass
-                out = model(Xb, **inputs_dict)
-                # Loss calculation
-                loss = compute_loss(out, yb, training_params, all_fns)
-                # Normalize loss to account for gradient accumulation
-                loss = loss / grad_steps
-                # Backward pass
-                loss.backward()
-
-                if should_update_gradient_accumulation(i, len(loader), grad_steps):
-                    if (
-                        getattr(training_params, "clip_grad_norm", 0.0)
-                        and float(training_params.clip_grad_norm) > 0.0
-                    ):
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(),
-                            max_norm=float(training_params.clip_grad_norm),
-                        )
-                    optimizer.step()
-                    if scheduler is not None:
-                        scheduler.step()
-                    optimizer.zero_grad()
-            else:
-                with torch.no_grad():
-                    out = model(Xb, **inputs_dict)
-                    # Loss calculation
-                    loss = compute_loss(out, yb, training_params, all_fns)
-
-            # Compute all metrics for this batch using the helper function
-            batch_metrics = compute_all_metrics(out, yb, all_fns, model_spec.params)
-
-            # Accumulate metrics
-            for name, val in batch_metrics.items():
-                if sums[name] is None:
-                    # First batch - initialize with the value
-                    sums[name] = val
-                else:
-                    # Accumulate (works for both scalars and arrays)
-                    sums[name] += val
-
-            # Add loss to sums
-            if torch.is_tensor(loss):
-                loss = loss.detach().mean().item()
-            sums["loss"] += loss
-
-        result = {
-            name: (
-                sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
-            )
-            for name in sums
-        }
-
-        # Calculate perplexity as derived metric from averaged cross_entropy
-        if "cross_entropy" in result:
-            result["perplexity"] = np.exp(result["cross_entropy"])
-
-        return result
-
-    # 6. Cross‐val loop
-    for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums_all, fold_indices):
-        print(f"Fold {fold}")
-        print(f"Train indices: {tr_idx}")
-        print(f"Validation indices: {va_idx}")
-        print(f"Test indices: {te_idx}")
-        print(f"Train size: {len(tr_idx)}")
-        print(f"Validation size: {len(va_idx)}")
-        print(f"Test size: {len(te_idx)}")
-        print(f"Train Input shape: {neural_data[tr_idx].shape}")
-        print(f"Train targets: {Y[tr_idx]}, shape: {Y[tr_idx].shape}")
-        print(f"Validation targets: {Y[va_idx]}, shape: {Y[va_idx].shape}")
-        print(f"Test targets: {Y[te_idx]}, shape: {Y[te_idx].shape}")
+    for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
+        _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
         cv_results["fold_nums"].append(fold)
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
-
-        # TensorBoard writer
-        if write_to_tensorboard:
-            if not TENSORBOARD_AVAILABLE:
-                raise ImportError(
-                    "TensorBoard is not available. Please install it with: "
-                    "pip install tensorboard"
-                )
-            tb_path = os.path.join(tensorboard_dir, f"lag_{lag}", f"fold_{fold}")
-            writer = SummaryWriter(log_dir=tb_path)
-
-        # Normalize targets if requested (compute stats on training set only)
-        if training_params.normalize_targets:
-            print("Normalizing targets...")
-            Y_train = Y[tr_idx]
-            Y_val = Y[va_idx]
-            Y_test = Y[te_idx]
-
-            # Compute mean and std on training set only
-            y_mean = Y_train.mean(dim=0, keepdim=True)
-            y_std = Y_train.std(dim=0, keepdim=True)
-
-            # Prevent division by zero
-            y_std = torch.where(y_std < 1e-6, torch.ones_like(y_std), y_std)
-
-            # Apply normalization using training statistics
-            Y_train_norm = (Y_train - y_mean) / y_std
-            Y_val_norm = (Y_val - y_mean) / y_std
-            Y_test_norm = (Y_test - y_mean) / y_std
-        else:
-            Y_train_norm = Y[tr_idx]
-            Y_val_norm = Y[va_idx]
-            Y_test_norm = Y[te_idx]
-
-        # DataLoaders - unified path using NeuralDictDataset for all models
-        # Model-specific columns (like data_info_list) are added via model_data_getter
-        # and included in input_fields, so they flow through automatically
-        extra_train_inputs = data_utils.df_columns_to_tensors(
-            data_df, task_config.task_specific_config.input_fields, tr_idx
+        writer = _create_tensorboard_writer(
+            write_to_tensorboard, tensorboard_dir, lag, fold
         )
-        extra_val_inputs = data_utils.df_columns_to_tensors(
-            data_df, task_config.task_specific_config.input_fields, va_idx
+
+        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        target_splits = _normalize_fold_targets(
+            Y, tr_idx, va_idx, te_idx, training_params
         )
-        extra_test_inputs = data_utils.df_columns_to_tensors(
-            data_df, task_config.task_specific_config.input_fields, te_idx
+        loaders = _build_fold_loaders(
+            neural_data,
+            data_df,
+            task_config,
+            split_indices,
+            target_splits,
+            training_params,
         )
-        datasets = {
-            "train": NeuralDictDataset(
-                neural_data[tr_idx], extra_train_inputs, Y_train_norm
-            ),
-            "val": NeuralDictDataset(neural_data[va_idx], extra_val_inputs, Y_val_norm),
-            "test": NeuralDictDataset(
-                neural_data[te_idx], extra_test_inputs, Y_test_norm
-            ),
-        }
-        loaders = {
-            phase: DataLoader(
-                ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
-            )
-            for phase, ds in datasets.items()
-        }
 
-        # Train baseline models and compute all metrics
-        def train_and_eval_baseline(training_fn, **kwargs):
-            model = training_fn(
-                neural_data[tr_idx].cpu().numpy(),
-                Y_train_norm.cpu().numpy(),
-                **kwargs,
-            )
-            # Prepare data splits for metric computation (use normalized targets)
-            X_splits = {
-                "train": neural_data[tr_idx].cpu().numpy(),
-                "val": neural_data[va_idx].cpu().numpy(),
-                "test": neural_data[te_idx].cpu().numpy(),
-            }
-            Y_splits = {
-                "train": Y_train_norm.cpu().numpy(),
-                "val": Y_val_norm.cpu().numpy(),
-                "test": Y_test_norm.cpu().numpy(),
-            }
-            # Compute all metrics
-            return compute_baseline_metrics(
-                model, X_splits, Y_splits, all_fns, model_spec.params
-            )
+        fold_baseline_results = _train_enabled_baselines(
+            neural_data,
+            split_indices,
+            target_splits,
+            training_params,
+            all_fns,
+            model_spec.params,
+        )
+        _append_baseline_results(baseline_results, fold_baseline_results)
 
-        if training_params.logistic_regression_baseline:
-            print("Training logistic regression baseline...")
-            logistic_baseline_metrics = train_and_eval_baseline(
-                train_logistic_regression
-            )
-            logistic_regression_results.append(logistic_baseline_metrics)
-        if training_params.linear_regression_baseline:
-            print("Training linear regression baseline...")
-            linear_baseline_metrics = train_and_eval_baseline(train_linear_regression)
-            linear_regression_results.append(linear_baseline_metrics)
-        if training_params.ridge_regression_baseline:
-            print("Training ridge regression baseline...")
-            ridge_baseline_metrics = train_and_eval_baseline(
-                train_ridge_regression, alpha=training_params.ridge_alpha
-            )
-            ridge_regression_results.append(ridge_baseline_metrics)
+        model, optimizer, scheduler = _build_model_optimizer_scheduler(
+            model_spec,
+            lag,
+            fold,
+            loaders,
+            training_params,
+            device,
+        )
 
-        # Model, optimizer, early‐stop setup
-        model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
-
-        if training_params.optimizer == "MuAdamW":
-            print("Using MuAdamW optimizer")
-            optimizer = MuAdamW(
-                model.parameters(),
-                lr=float(training_params.learning_rate),
-                weight_decay=float(training_params.weight_decay),
-            )
-
-        else:
-            print("Using AdamW optimizer")
-            optimizer = optim.AdamW(
-                model.parameters(),
-                lr=float(training_params.learning_rate),
-                weight_decay=float(training_params.weight_decay),
-            )
-
-        # Optional LR scheduler (per optimizer update, not per epoch).
-        scheduler = None
-        if training_params.lr_scheduler:
-            print(f"Using {training_params.lr_scheduler} LR scheduler")
-            if training_params.lr_scheduler == "cosine_annealing":
-                updates_per_epoch = math.ceil(
-                    len(loaders["train"])
-                    / max(1, int(training_params.grad_accumulation_steps))
-                )
-                t_max = max(1, int(training_params.epochs) * updates_per_epoch)
-                eta_min = float(training_params.learning_rate) * float(
-                    getattr(training_params, "cosine_eta_min_factor", 1e-2)
-                )
-                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=t_max, eta_min=eta_min
-                )
-            else:
-                raise ValueError(
-                    f"Unknown lr_scheduler: {training_params.lr_scheduler}. "
-                    "Supported: None, 'cosine_annealing'"
-                )
-
-        # Create learning rate scheduler if specified
-        scheduler = create_lr_scheduler(optimizer, training_params)
-
-        best_val, patience = setup_early_stopping_state(training_params)
-        best_epoch = 0
-
-        # per‐fold history (only train & val, for plotting)
-        history = {
-            f"{phase}_{name}": [] for phase in ("train", "val") for name in metric_names
-        }
-
-        if "cross_entropy" in metric_names:
-            for phase in ("train", "val"):
-                history[f"{phase}_perplexity"] = []
-        history["train_loss"] = []
-        history["val_loss"] = []
-        history["num_epochs"] = None
-
-        loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
-
-        # if per_subject_feature_concat, extract per-subject embeddings, concat, and train linear probe
-        if getattr(model_spec, "per_subject_feature_concat", False):
-            if subject_channel_counts is None or len(subject_channel_counts) <= 1:
-                raise ValueError(
-                    "per_subject_feature_concat requires multiple subjects. "
-                    "Got subject_channel_counts={subject_channel_counts}"
-                )
-            cache_loader_generation_start_time = time.time()
-            # import warnings
-            # warnings.warn("per_subject_feature_concat ALWAYS to caching. regardless of model_spec.feature_cache)")
-            loaders = {
-                "train": generate_loaders_from_features(
-                    *extract_per_subject_concat_features(
-                        model, loaders["train"], subject_channel_counts, device
-                    ),
-                    training_params.batch_size,
-                    shuffle=True,
-                ),
-                "val": generate_loaders_from_features(
-                    *extract_per_subject_concat_features(
-                        model, loaders["val"], subject_channel_counts, device
-                    ),
-                    training_params.batch_size,
-                    shuffle=False,
-                ),
-                "test": generate_loaders_from_features(
-                    *extract_per_subject_concat_features(
-                        model, loaders["test"], subject_channel_counts, device
-                    ),
-                    training_params.batch_size,
-                    shuffle=False,
-                ),
-            }
-            print(
-                f"Time taken for per-subject feature extraction and concat: {time.time() - cache_loader_generation_start_time}"
-            )
-
-            output_dim = getattr(model, "output_dim", None)
-            if output_dim is None:
-                raise NotImplementedError(
-                    "per_subject_feature_concat requires the model to expose "
-                    f"output_dim. Got model: {model.__class__.__name__}"
-                )
-
-            # Get concat feature dim from the first batch
-            sample_batch = next(iter(loaders["train"]))
-            concat_dim = sample_batch[0].shape[-1]
-            print(f"Linear probe: {concat_dim} -> {output_dim}")
-
-            probe = nn.Linear(concat_dim, output_dim)
-            model = SqueezeWrapper(
-                feature_head=MakeIgnoreKwargsDuringForward(probe), output_dim=output_dim
-            ).to(device)
-
-            # Re-create optimizer for the new model
-            optimizer = torch.optim.AdamW(
-                model.parameters(),
-                lr=float(training_params.learning_rate),
-                weight_decay=float(training_params.weight_decay),
-            )
-
-        # elif feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
+        model, loaders, probe_optimizer = _maybe_prepare_per_subject_concat_model(
+            model,
+            loaders,
+            model_spec,
+            subject_channel_counts,
+            training_params,
+            device,
+        )
+        if probe_optimizer is not None:
+            optimizer = probe_optimizer
         elif getattr(model_spec, "feature_cache", False):
-            cache_loader_generation_start_time = time.time()
-            # redfining loaders (with cached model)
-            loaders = {
-                "train": generate_loaders_from_features(
-                    *extract_features_for_caching(model, loaders["train"], device),
-                    training_params.batch_size,
-                    shuffle=True,
-                ),  # training already shuffled but we still shuffle since each epoch should see data in different order for better convergence
-                "val": generate_loaders_from_features(
-                    *extract_features_for_caching(model, loaders["val"], device),
-                    training_params.batch_size,
-                    shuffle=False,
-                ),
-                "test": generate_loaders_from_features(
-                    *extract_features_for_caching(model, loaders["test"], device),
-                    training_params.batch_size,
-                    shuffle=False,
-                ),
-            }
-            print(
-                f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}"
+            model, loaders = _maybe_prepare_feature_cache_model(
+                model, loaders, training_params, device
             )
 
-            if not hasattr(model, "forward_from_features"):
-                raise NotImplementedError(
-                    "Feature caching requires the model to implement "
-                    f"forward_from_features(...). Got model: {model.__class__.__name__}"
-                )
-            model = CachedFeatureModel(model).to(device)
+        history, test_mets, best_epoch = _train_fold(
+            model,
+            loaders,
+            optimizer,
+            scheduler,
+            model_path,
+            lag,
+            fold,
+            training_params,
+            all_fns,
+            metric_names,
+            model_spec.params,
+            device,
+            writer,
+        )
+        fold_conf_matrices = _record_fold_results(
+            cv_results, history, test_mets, metric_names, best_epoch
+        )
+        if fold_conf_matrices:
+            conf_matrices = fold_conf_matrices
 
-        loop_start_time = time.time()  #! remove later
-        for epoch in loop:
-            train_mets = run_epoch(model, loaders["train"], optimizer)
-            val_mets = run_epoch(model, loaders["val"])
-
-            # record + TensorBoard
-            for name, val in train_mets.items():
-                history[f"train_{name}"].append(val)
-            if write_to_tensorboard:
-                log_metrics_to_tensorboard(writer, train_mets, "model", "train", epoch)
-
-            for name, val in val_mets.items():
-                history[f"val_{name}"].append(val)
-            if write_to_tensorboard:
-                log_metrics_to_tensorboard(writer, val_mets, "model", "val", epoch)
-
-            # early stopping on requested metric
-            cur = val_mets[training_params.early_stopping_metric]
-            if should_update_best(cur, best_val, training_params.smaller_is_better):
-                best_val = cur
-                best_epoch = epoch
-                # Use model's save_checkpoint method if available, otherwise save state_dict
-                if hasattr(model, "save_checkpoint") and callable(
-                    getattr(model, "save_checkpoint")
-                ):
-                    model.save_checkpoint(model_path)
-                else:
-                    torch.save(model.state_dict(), model_path)
-                patience = 0
-            else:
-                patience += 1
-                if patience >= training_params.early_stopping_patience:
-                    break
-
-            # learning rate scheduler
-            if scheduler is not None:
-                scheduler.step(cur)
-
-            # Log learning rate to TensorBoard
-            if write_to_tensorboard:
-                current_lr = optimizer.param_groups[0]["lr"]
-                writer.add_scalar("learning_rate", current_lr, epoch)
-
-            loop.set_postfix(
-                {
-                    training_params.early_stopping_metric: f"{best_val:.4f}",
-                    **{f"train_{name}": val for name, val in train_mets.items()},
-                    **{f"val_{name}": val for name, val in val_mets.items()},
-                }
-            )
-        print(
-            f"Time taken for training loop: {time.time() - loop_start_time}"
-        )  #! remove later
-
-        history["num_epochs"] = best_epoch + 1
-
-        # load best and eval on test set
-        # Use model's load_checkpoint method if available, otherwise save state_dict
-        if hasattr(model, "load_checkpoint") and callable(
-            getattr(model, "load_checkpoint")
-        ):
-            model.load_checkpoint(model_path)
-        else:
-            model.load_state_dict(torch.load(model_path))
-        test_mets = run_epoch(model, loaders["test"])
-
-        # record into cv_results
-        for name in metric_names:
-
-            if name != "confusion_matrix":
-                cv_results[f"train_{name}"].append(history[f"train_{name}"][best_epoch])
-                cv_results[f"val_{name}"].append(history[f"val_{name}"][best_epoch])
-                cv_results[f"test_{name}"].append(test_mets[name])
-            elif name == "confusion_matrix":
-                conf_matrix_train = history[f"train_{name}"][best_epoch]
-                conf_matrix_val = history[f"val_{name}"][best_epoch]
-                conf_matrix_test = test_mets[name]
-        cv_results["num_epochs"].append(history["num_epochs"])
-
-        if write_to_tensorboard:
-            # Log main model test metrics
-            log_metrics_to_tensorboard(writer, test_mets, "model", "test", fold)
-
-            # Log baseline metrics
-            if training_params.logistic_regression_baseline:
-                log_metrics_to_tensorboard(
-                    writer, logistic_baseline_metrics, "logistic_regression", None, fold
-                )
-            if training_params.linear_regression_baseline:
-                log_metrics_to_tensorboard(
-                    writer, linear_baseline_metrics, "linear_regression", None, fold
-                )
-            if training_params.ridge_regression_baseline:
-                log_metrics_to_tensorboard(
-                    writer, ridge_baseline_metrics, "ridge_regression", None, fold
-                )
-
-            writer.close()
-
-        # word‐level ROC and top-k. Only useful for word embedding task.
-        # Hardcoded for now since this would be a bit complicated
-        # to generalize at the moment.
-        if is_word_embedding_decoding_task:
-            # Get extra inputs for test set (includes model-specific data like data_info_list)
-            test_extra_inputs = data_utils.df_columns_to_tensors(
-                data_df, task_config.task_specific_config.input_fields, te_idx
-            )
-
-            test_features = []
-            test_targets = []
-            with torch.no_grad():
-                for batch_data in loaders["test"]:
-                    features, _, y_b = batch_data
-                    test_features.append(features)
-                    test_targets.append(y_b)
-            test_features, test_targets = (
-                torch.cat(test_features, dim=0),
-                torch.cat(test_targets, dim=0),
-            )
-
-            results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
-                test_features,
-                test_targets,
-                model,
-                device,
-                data_df[task_config.data_params.word_column],
-                te_idx,
-                tr_idx,
-                training_params.top_k_thresholds,
-                training_params.min_train_freq_auc,
-                training_params.min_test_freq_auc,
-                extra_inputs=test_extra_inputs,
-                preserve_ensemble=True,
-            )
-            for key, val in results.items():
-                cv_results[key].append(val)
+        _log_fold_tensorboard_results(writer, test_mets, fold_baseline_results, fold)
+        _maybe_compute_word_embedding_metrics(
+            cv_results,
+            embedding_metrics,
+            loaders,
+            model,
+            device,
+            data_df,
+            task_config,
+            tr_idx,
+            te_idx,
+            training_params,
+        )
 
         models.append(model)
         histories.append(history)
@@ -993,91 +1242,8 @@ def train_decoding_model(
         if plot_results:
             plot_training_history(history, fold=fold)
 
-    # 7. Print CV summary
-    if training_params.logistic_regression_baseline and logistic_regression_results:
-        print("\n" + "=" * 60)
-        print("LOGISTIC REGRESSION BASELINE RESULTS")
-        print("=" * 60)
-
-        # Aggregate metrics across folds
-        for metric_name in logistic_regression_results[0].keys():
-            values = [result[metric_name] for result in logistic_regression_results]
-            if np.isscalar(values[0]) or (
-                isinstance(values[0], np.ndarray) and values[0].size == 1
-            ):
-                print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
-
-    if training_params.linear_regression_baseline and linear_regression_results:
-        print("\n" + "=" * 60)
-        print("LINEAR REGRESSION BASELINE RESULTS")
-        print("=" * 60)
-
-        # Aggregate metrics across folds
-        for metric_name in linear_regression_results[0].keys():
-            values = [result[metric_name] for result in linear_regression_results]
-            if np.isscalar(values[0]) or (
-                isinstance(values[0], np.ndarray) and values[0].size == 1
-            ):
-                print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
-
-    if training_params.ridge_regression_baseline and ridge_regression_results:
-        print("\n" + "=" * 60)
-        print(
-            f"RIDGE REGRESSION BASELINE RESULTS (alpha={training_params.ridge_alpha})"
-        )
-        print("=" * 60)
-
-        # Aggregate metrics across folds
-        for metric_name in ridge_regression_results[0].keys():
-            values = [result[metric_name] for result in ridge_regression_results]
-            if np.isscalar(values[0]) or (
-                isinstance(values[0], np.ndarray) and values[0].size == 1
-            ):
-                print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
-
-    print("\n" + "=" * 60)
-    print("MAIN MODEL CROSS-VALIDATION RESULTS")
-    print("=" * 60)
-
-    if "confusion_matrix" in metric_names:
-        conf_matrices = {
-            "train": conf_matrix_train,
-            "val": conf_matrix_val,
-            "test": conf_matrix_test,
-        }
-
-    for phase in ("train", "val", "test"):
-        for name in metric_names:
-            if name != "confusion_matrix":
-                vals = cv_results[f"{phase}_{name}"]
-
-                # Individual Folds
-                print(f"--- Individual Folds ({phase}_{name}) ---")
-                fold_nums = cv_results.get("fold_nums", list(range(1, len(vals) + 1)))
-                for i, val in enumerate(vals):
-                    fold_num = fold_nums[i]
-                    print(f"Fold {fold_num}: {val:.4f}")
-
-                # Mean
-                print(
-                    f"Mean {phase} {name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}\n"
-                )
-
-            elif name == "confusion_matrix":
-                print(f"{phase} confusion matrix:\n{conf_matrices[phase]}")
-
-    if "cross_entropy" in metric_names:
-        for phase in phases:
-            ce_vals = cv_results[f"{phase}_cross_entropy"]
-            ppl_vals = np.exp(ce_vals)
-            print(
-                f"Mean {phase} perplexity: {np.mean(ppl_vals):.4f} ± {np.std(ppl_vals):.4f}"
-            )
-
-    if is_word_embedding_decoding_task:
-        for metric_name in embedding_metrics:
-            vals = cv_results[metric_name]
-            print(f"Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+    _print_baseline_summaries(training_params, baseline_results)
+    _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_metrics)
 
     if plot_results:
         plot_cv_results(cv_results)
