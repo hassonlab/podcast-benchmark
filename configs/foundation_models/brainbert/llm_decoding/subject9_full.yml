@@ -1,18 +1,13 @@
 config_setter_name: brainbert_finetune
 model_spec:
-  constructor_name: gpt2_brain
+  constructor_name: brainbert_finetune
   params:
-    freeze_lm: true
-  sub_models:
-    encoder_model:
-      constructor_name: brainbert_finetune
-      params:
-        dropout: 0.0
-        freeze_foundation: false
-        mlp_layer_sizes: []
-        model_dir: models/brainbert/pretrained_model
-        num_frozen_layers: 0
-        output_dim: 768
+    dropout: 0.0
+    freeze_foundation: false
+    mlp_layer_sizes: []
+    model_dir: models/brainbert/pretrained_model
+    num_frozen_layers: 0
+    output_dim: 768
 task_config:
   data_params:
     data_root: data

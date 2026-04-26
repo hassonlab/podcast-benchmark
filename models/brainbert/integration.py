@@ -454,7 +454,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
         else:
             self.projector = None
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         if x.ndim != 4:
             raise ValueError(
                 "BrainBERT finetuning expects STFT input with shape [batch, channels, time, freq]."
@@ -489,15 +489,13 @@ class ReferenceBrainBERTDecoder(nn.Module):
                 pooled = features.mean(dim=0)
 
             pooled = pooled.view(batch_size, num_channels, -1)
-            flattened = pooled.reshape(batch_size, -1)
-            if kwargs.get('return_feature_emb_instead_of_projection', False):
-                assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-                #* used for feature caching
-                return flattened
-            out = self.projector(flattened)
-        else:
-            out = self.finetune_model(inputs, pad_mask)
-            out = out.view(batch_size, num_channels, -1).mean(dim=1)
+            return pooled.view(batch_size, num_channels, -1).reshape(batch_size, -1)
+
+        out = self.finetune_model(inputs, pad_mask)
+        return out.view(batch_size, num_channels, -1).mean(dim=1)
+
+    def forward_from_features(self, features, **kwargs):
+        out = self.projector(features) if self.projector is not None else features
 
         if self.output_activation == "sigmoid":
             out = torch.sigmoid(out)
@@ -507,6 +505,12 @@ class ReferenceBrainBERTDecoder(nn.Module):
         if self.output_dim == 1 and out.shape[-1] == 1:
             out = out.squeeze(-1)
         return out
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("brainbert_mlp")
@@ -603,12 +607,12 @@ class BrainBERTDecoder(nn.Module):
             output_activation=output_activation,
         )
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         """
-        Forward pass through foundation model and decoder head.
+        Compute foundation features before the decoder head.
 
         Args:
-            x: Input tensor 
+            x: Input tensor
                 - [batch_size, num_channels, seq_len] for raw signals
                 - [batch_size, num_channels, time_stft, freq_channels] for STFT preprocessed data
             **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
@@ -644,10 +648,28 @@ class BrainBERTDecoder(nn.Module):
             # Get features from foundation model
             features = self.foundation_model(x, return_sequence=False)
 
-        # Pass through decoder head
-        output = self.decoder_head(features)
+        return features
 
-        return output
+    def forward_from_features(self, features, **kwargs):
+        return self.decoder_head(features)
+
+    def forward(self, x, **kwargs):
+        """
+        Forward pass through foundation model and decoder head.
+
+        Args:
+            x: Input tensor
+                - [batch_size, num_channels, seq_len] for raw signals
+                - [batch_size, num_channels, time_stft, freq_channels] for STFT preprocessed data
+            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
+
+        Returns:
+            Output tensor [batch_size, output_dim]
+        """
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("brainbert_finetune")

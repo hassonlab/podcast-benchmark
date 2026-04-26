@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Optional, Any
+from copy import deepcopy
 
 import pandas as pd
 import numpy as np
 
-from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
+from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig, ModelSpec
 from core import registry
 from language_generation.gpt2_brain import load_gpt2_model_and_tokenizer
-from models.shared_config_setters import set_model_spec_fields
 
 
 @dataclass
@@ -30,6 +30,10 @@ class LlmDecodingConfig(BaseTaskConfig):
     prepend_space: bool = True
     model_name: str = "gpt2"
     cache_dir: str = "./model_cache"
+    freeze_lm: bool = True
+    encoder_forward_kwargs: dict[str, Any] = field(default_factory=dict)
+    no_brain_encoder: bool = False
+    no_brain_token_injection: bool = False
 
 
 @dataclass
@@ -59,15 +63,44 @@ class LlmEmbeddingPretrainingConfig(BaseTaskConfig):
 def llm_decoding_config_setter(
     experiment_config: ExperimentConfig, _raws, _task_df
 ) -> ExperimentConfig:
-    """Config setter for llm_decoding task."""
-    if not set_model_spec_fields(
-        experiment_config.model_spec,
-        {"cache_dir": experiment_config.task_config.task_specific_config.cache_dir},
-        ["gpt2_brain"],
-    ):
-        raise ValueError(
-            "Could not set cache_dir for gpt2_brain in llm_decoding_config_setter."
-        )
+    """Wrap the configured brain encoder in GPT2Brain for llm_decoding."""
+    config = experiment_config.task_config.task_specific_config
+    gpt2_params = {
+        "cache_dir": config.cache_dir,
+        "model_name": config.model_name,
+        "freeze_lm": config.freeze_lm,
+        "encoder_forward_kwargs": config.encoder_forward_kwargs,
+        "no_brain_encoder": config.no_brain_encoder,
+        "no_brain_token_injection": config.no_brain_token_injection,
+    }
+
+    if experiment_config.model_spec.constructor_name == "gpt2_brain":
+        experiment_config.model_spec.params = {
+            **gpt2_params,
+            **experiment_config.model_spec.params,
+        }
+        return experiment_config
+
+    encoder_spec = deepcopy(experiment_config.model_spec)
+    sub_models = {}
+    if not config.no_brain_encoder:
+        sub_models["encoder_model"] = encoder_spec
+    experiment_config.model_spec = ModelSpec(
+        constructor_name="gpt2_brain",
+        params=gpt2_params,
+        feature_cache=encoder_spec.feature_cache,
+        per_subject_feature_concat=encoder_spec.per_subject_feature_concat,
+        sub_models=sub_models,
+        checkpoint_path=None,
+        model_data_getter=encoder_spec.model_data_getter,
+    )
+    experiment_config.model_spec.feature_cache = encoder_spec.feature_cache
+    experiment_config.model_spec.per_subject_feature_concat = (
+        encoder_spec.per_subject_feature_concat
+    )
+    if not config.no_brain_encoder:
+        encoder_spec.feature_cache = False
+        encoder_spec.per_subject_feature_concat = False
     return experiment_config
 
 
@@ -78,6 +111,7 @@ def llm_decoding_task(task_config: TaskConfig, tokenizer=None):
     if tokenizer is None:
         _, tokenizer = load_gpt2_model_and_tokenizer(
             cache_dir=task_config.task_specific_config.cache_dir,
+            model_name=task_config.task_specific_config.model_name,
         )
     max_context = config.max_context
     max_target_tokens = config.max_target_tokens

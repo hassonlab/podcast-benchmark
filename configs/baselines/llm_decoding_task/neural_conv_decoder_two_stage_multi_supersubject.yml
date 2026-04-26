@@ -60,6 +60,8 @@ tasks:
       prepend_space: true
       model_name: gpt2
       cache_dir: ./model_cache
+      encoder_forward_kwargs:
+        preserve_ensemble: true
   training_params:
     batch_size: 16
     epochs: 50
@@ -72,20 +74,13 @@ tasks:
     early_stopping_metric: cross_entropy
     smaller_is_better: true
   model_spec:
-    constructor_name: gpt2_brain
+    constructor_name: ensemble_pitom_model
     params:
-      freeze_lm: true
-      encoder_forward_kwargs:
-        preserve_ensemble: true
-    sub_models:
-      encoder_model:
-        constructor_name: ensemble_pitom_model
-        params:
-          num_models: 10
-          conv_filters: 128
-          dropout: 0.2
-          embedding_dim: 768
-        checkpoint_path: '{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt'
+      num_models: 10
+      conv_filters: 128
+      dropout: 0.2
+      embedding_dim: 768
+    checkpoint_path: '{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt'
   output_dir: results/llm_two_stage/token_finetune
   checkpoint_dir: checkpoints/llm_two_stage/token_finetune
   tensorboard_dir: event_logs/llm_two_stage/token_finetune

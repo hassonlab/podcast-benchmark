@@ -12,8 +12,121 @@ import tempfile
 import os
 from unittest.mock import Mock
 
-from tasks.llm_decoding import llm_decoding_task, LlmDecodingConfig
-from core.config import TaskConfig, DataParams
+from tasks.llm_decoding import (
+    llm_decoding_task,
+    LlmDecodingConfig,
+    llm_decoding_config_setter,
+)
+from core.config import TaskConfig, DataParams, ExperimentConfig, ModelSpec
+
+
+class TestLLMDecodingConfigSetter:
+    """Test llm_decoding config normalization."""
+
+    def test_encoder_only_model_spec_is_wrapped_in_gpt2_brain(self):
+        encoder_spec = ModelSpec(
+            constructor_name="brainbert_finetune",
+            params={"output_dim": 768},
+            feature_cache=True,
+            checkpoint_path="checkpoints/encoder.pt",
+        )
+        config = ExperimentConfig(
+            task_config=TaskConfig(
+                task_name="llm_decoding_task",
+                data_params=DataParams(subject_ids=[1]),
+                task_specific_config=LlmDecodingConfig(
+                    model_name="gpt2-medium",
+                    cache_dir="./custom_cache",
+                ),
+            ),
+            model_spec=encoder_spec,
+        )
+
+        result = llm_decoding_config_setter(config, _raws=[], _task_df=None)
+
+        assert result.model_spec.constructor_name == "gpt2_brain"
+        assert result.model_spec.params["model_name"] == "gpt2-medium"
+        assert result.model_spec.params["cache_dir"] == "./custom_cache"
+        assert result.model_spec.feature_cache is True
+        assert "encoder_model" in result.model_spec.sub_models
+        wrapped_encoder = result.model_spec.sub_models["encoder_model"]
+        assert wrapped_encoder.constructor_name == "brainbert_finetune"
+        assert wrapped_encoder.params == {"output_dim": 768}
+        assert wrapped_encoder.checkpoint_path == "checkpoints/encoder.pt"
+        assert wrapped_encoder.feature_cache is False
+
+    def test_legacy_gpt2_brain_model_spec_is_preserved(self):
+        config = ExperimentConfig(
+            task_config=TaskConfig(
+                task_name="llm_decoding_task",
+                data_params=DataParams(subject_ids=[1]),
+                task_specific_config=LlmDecodingConfig(cache_dir="./task_cache"),
+            ),
+            model_spec=ModelSpec(
+                constructor_name="gpt2_brain",
+                params={"freeze_lm": False, "cache_dir": "./model_cache"},
+                sub_models={
+                    "encoder_model": ModelSpec(
+                        constructor_name="brainbert_finetune",
+                        params={"output_dim": 768},
+                    )
+                },
+            ),
+        )
+
+        result = llm_decoding_config_setter(config, _raws=[], _task_df=None)
+
+        assert result.model_spec.constructor_name == "gpt2_brain"
+        assert result.model_spec.params["freeze_lm"] is False
+        assert result.model_spec.params["cache_dir"] == "./model_cache"
+        assert result.model_spec.params["model_name"] == "gpt2"
+        assert result.model_spec.sub_models["encoder_model"].constructor_name == (
+            "brainbert_finetune"
+        )
+
+    def test_task_config_forwards_gpt2_brain_options_for_encoder_only_spec(self):
+        config = ExperimentConfig(
+            task_config=TaskConfig(
+                task_name="llm_decoding_task",
+                data_params=DataParams(subject_ids=[1]),
+                task_specific_config=LlmDecodingConfig(
+                    freeze_lm=False,
+                    encoder_forward_kwargs={"preserve_ensemble": True},
+                    no_brain_token_injection=True,
+                ),
+            ),
+            model_spec=ModelSpec(
+                constructor_name="ensemble_pitom_model",
+                params={"embedding_dim": 768},
+            ),
+        )
+
+        result = llm_decoding_config_setter(config, _raws=[], _task_df=None)
+
+        assert result.model_spec.constructor_name == "gpt2_brain"
+        assert result.model_spec.params["freeze_lm"] is False
+        assert result.model_spec.params["encoder_forward_kwargs"] == {
+            "preserve_ensemble": True
+        }
+        assert result.model_spec.params["no_brain_token_injection"] is True
+        assert result.model_spec.sub_models["encoder_model"].constructor_name == (
+            "ensemble_pitom_model"
+        )
+
+    def test_no_brain_task_config_builds_gpt2_brain_without_encoder_submodel(self):
+        config = ExperimentConfig(
+            task_config=TaskConfig(
+                task_name="llm_decoding_task",
+                data_params=DataParams(subject_ids=[1]),
+                task_specific_config=LlmDecodingConfig(no_brain_encoder=True),
+            ),
+        )
+
+        result = llm_decoding_config_setter(config, _raws=[], _task_df=None)
+
+        assert result.model_spec.constructor_name == "gpt2_brain"
+        assert result.model_spec.params["no_brain_encoder"] is True
+        assert result.model_spec.sub_models == {}
 
 
 class MockTokenizer:

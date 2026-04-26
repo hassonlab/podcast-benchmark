@@ -50,6 +50,7 @@ class GPT2Brain(nn.Module):
         encoder_forward_kwargs={},
         no_brain_encoder=False,
         no_brain_token_injection=False,
+        feature_cache=False,
     ):
         """
         Initialize GPT2Brain model.
@@ -70,6 +71,7 @@ class GPT2Brain(nn.Module):
         self.no_brain_encoder = no_brain_encoder
         self.no_brain_token_injection = no_brain_token_injection
         self.freeze_lm = freeze_lm
+        self.feature_cache = feature_cache
 
         self.lm_model = lm_model
         self.tokenizer = tokenizer
@@ -201,6 +203,91 @@ class GPT2Brain(nn.Module):
 
         return target_logits
 
+    def encode_features(self, neural_data, **encoder_inputs):
+        """Compute cacheable encoder features before the encoder readout."""
+        if self.no_brain_encoder:
+            return None
+
+        encoder_kwargs = dict(self.encoder_forward_kwargs)
+        encoder_kwargs.update(self._filter_encoder_cache_kwargs(encoder_inputs))
+        if hasattr(self.encoder_model, "encode_features"):
+            return self.encoder_model.encode_features(neural_data, **encoder_kwargs)
+
+        encoder_kwargs["return_feature_emb_instead_of_projection"] = True
+        return self.encoder_model(neural_data, **encoder_kwargs)
+
+    def forward_from_features(
+        self,
+        features,
+        all_input_ids,
+        all_attention_mask,
+        target_attention_mask=None,
+        return_all_preds=False,
+        **encoder_inputs,
+    ):
+        neural_embedding = self._get_neural_embedding_from_features(
+            features, **encoder_inputs
+        )
+        prompt_embeddings, prompt_attention_mask = self._build_prompt_embeddings(
+            neural_embedding, all_input_ids, all_attention_mask, **encoder_inputs
+        )
+        output = self.lm_model(
+            inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
+        )
+
+        if return_all_preds:
+            return output, prompt_attention_mask
+
+        if target_attention_mask is None:
+            raise ValueError(
+                "target_attention_mask must be provided when return_all_preds=False"
+            )
+        return self._get_target_predictions(
+            output, prompt_attention_mask, target_attention_mask
+        )
+
+    def _filter_encoder_cache_kwargs(self, encoder_inputs):
+        return {
+            k: v
+            for k, v in encoder_inputs.items()
+            if k
+            not in {
+                "all_input_ids",
+                "all_attention_mask",
+                "target_attention_mask",
+                "return_all_preds",
+                "return_feature_emb_instead_of_projection",
+            }
+        }
+
+    def _get_neural_embedding_from_features(self, features, **encoder_inputs):
+        if self.no_brain_encoder:
+            return None
+        if hasattr(self.encoder_model, "forward_from_features"):
+            return self.encoder_model.forward_from_features(features, **encoder_inputs)
+        return features
+
+    def _get_neural_embedding(
+        self,
+        neural_data,
+        return_feature_emb_instead_of_projection=False,
+        **encoder_inputs,
+    ):
+        if self.no_brain_encoder:
+            return None
+
+        if self.feature_cache and not return_feature_emb_instead_of_projection:
+            return self._get_neural_embedding_from_features(
+                neural_data, **encoder_inputs
+            )
+
+        if return_feature_emb_instead_of_projection:
+            return self.encode_features(neural_data, **encoder_inputs)
+
+        encoder_kwargs = dict(self.encoder_forward_kwargs)
+        encoder_kwargs.update(encoder_inputs)
+        return self.encoder_model(neural_data, **encoder_kwargs)
+
     def _convert_to_embeddings(
         self, neural_data, input_ids, attention_mask, **encoder_inputs
     ):
@@ -216,23 +303,17 @@ class GPT2Brain(nn.Module):
             prompt_embeddings: [batch_size, brain_prompt_len + seq_len, hidden_size]
             prompt_attention_mask: [batch_size, brain_prompt_len + seq_len]
         """
-        if not self.no_brain_encoder:
-            encoder_kwargs = dict(self.encoder_forward_kwargs)
-            encoder_kwargs.update(encoder_inputs)
-            neural_embedding = self.encoder_model(
-                neural_data, **encoder_kwargs
-            )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
-            # * neural_data : [4, 99, 13, 40 ] becomes neural_embedding : torch.Size([4, 768])
+        return_features = encoder_inputs.pop(
+            "return_feature_emb_instead_of_projection", False
+        )
+        neural_embedding = self._get_neural_embedding(
+            neural_data,
+            return_feature_emb_instead_of_projection=return_features,
+            **encoder_inputs,
+        )
+        if return_features:
+            return neural_embedding, None
 
-            if "return_feature_emb_instead_of_projection" in encoder_inputs:
-                return (
-                    neural_embedding,
-                    None,
-                )  # i.e. the should run the rest of the parts... (after changing neural-embedding to )
-        else:
-            neural_embedding = None
-
-        # if not return_feature_emb_instead_of_projection or no brain encoder, keep the default, doing the projection to lm_model's embedding dimension and concatenation and stuff
         return self._build_prompt_embeddings(
             neural_embedding, input_ids, attention_mask, **encoder_inputs
         )
@@ -242,7 +323,11 @@ class GPT2Brain(nn.Module):
     ):
 
         device = input_ids.device
-        batch_size = neural_embedding.shape[0]
+        batch_size = (
+            neural_embedding.shape[0]
+            if neural_embedding is not None
+            else input_ids.shape[0]
+        )
 
         all_tokens = []
         num_neural_tokens = 0
@@ -320,11 +405,7 @@ class GPT2Brain(nn.Module):
             If return_all_preds=False:
                 target_logits: Predictions for target tokens [batch_size, max_target_tokens, vocab_size]
         """
-        if not return_all_preds and target_attention_mask is None:
-            raise ValueError(
-                "target_attention_mask must be provided when return_all_preds=False"
-            )
-        if "return_feature_emb_instead_of_projection" in encoder_inputs:
+        if encoder_inputs.get("return_feature_emb_instead_of_projection", False):
             assert (
                 self.encoder_model is not None
             ), "Encoder model must be provided if using return_feature_emb_instead_of_projection"
@@ -333,6 +414,15 @@ class GPT2Brain(nn.Module):
             ]  # *no popping! used later
         else:
             self.return_features_instead_of_projection = False
+
+        if (
+            not self.return_features_instead_of_projection
+            and not return_all_preds
+            and target_attention_mask is None
+        ):
+            raise ValueError(
+                "target_attention_mask must be provided when return_all_preds=False"
+            )
 
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
             neural_data, all_input_ids, all_attention_mask, **encoder_inputs
@@ -540,7 +630,8 @@ class GPT2Brain(nn.Module):
 def gpt2_brain_model_constructor(model_params):
     """Construct GPT2Brain model from model_spec."""
     lm_model, tokenizer = load_gpt2_model_and_tokenizer(
-        cache_dir=model_params.get("cache_dir", None)
+        cache_dir=model_params.get("cache_dir", None),
+        model_name=model_params.get("model_name", "gpt2"),
     )
     encoder_model = model_params.get("encoder_model", None)
     freeze_lm = model_params.get("freeze_lm", True)
@@ -553,6 +644,7 @@ def gpt2_brain_model_constructor(model_params):
         encoder_forward_kwargs=model_params.get("encoder_forward_kwargs", {}),
         no_brain_encoder=model_params.get("no_brain_encoder", False),
         no_brain_token_injection=model_params.get("no_brain_token_injection", False),
+        feature_cache=model_params.get("feature_cache", False),
     )
 
     return model

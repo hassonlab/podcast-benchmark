@@ -45,7 +45,7 @@ def get_podcast_task_info(
 ):
     """
     Get task info dict for Podcast task using podcast-benchmark's information.
-    
+
     Args:
         task_name: Task name (e.g., "word_embedding", "volume_level")
         subject_id: Subject ID (for logging)
@@ -359,7 +359,77 @@ class DIVERDecoder(nn.Module):
         self.diver_model = diver_model
         self.output_activation = output_activation
         self.output_dim = output_dim
-    
+
+    def _get_data_info_list(self, x, **kwargs):
+        xyz_id = kwargs.get('xyz_id', None)
+        data_info_list = kwargs.get('data_info_list', None)
+        batch_size = x.shape[0]
+        num_channels = x.shape[1]
+
+        if xyz_id is not None:
+            data_info_list = []
+            for i in range(batch_size):
+                coords = xyz_id[i]
+                if torch.is_tensor(coords):
+                    coords = coords.cpu().numpy()
+                data_info_list.append({
+                    'num_channels': num_channels,
+                    'modality': 'iEEG',
+                    'xyz_id': coords,
+                })
+        elif data_info_list is None:
+            data_info_list = create_data_info_list(batch_size, num_channels)
+        return data_info_list
+
+    def encode_features(self, x, **kwargs):
+        if not all(
+            hasattr(self.diver_model, attr)
+            for attr in (
+                "backbone",
+                "feature_extraction_func",
+                "ft_model_input_adapter",
+            )
+        ):
+            raise NotImplementedError(
+                "DIVER feature caching requires backbone, feature_extraction_func, "
+                "and ft_model_input_adapter on the wrapped DIVER model."
+            )
+        data_info_list = self._get_data_info_list(x, **kwargs)
+        return self.diver_model.ft_model_input_adapter(
+            self.diver_model.feature_extraction_func(
+                self.diver_model.backbone(
+                    x,
+                    data_info_list=data_info_list,
+                    use_mask=False,
+                    return_encoder_output=True,
+                ),
+                data_info_list=data_info_list,
+            ),
+            data_info_list=data_info_list,
+        )
+
+    def forward_from_features(self, features, **kwargs):
+        if not all(
+            hasattr(self.diver_model, attr)
+            for attr in ("ft_core_model", "ft_model_output_adapter")
+        ):
+            raise NotImplementedError(
+                "DIVER cached training requires ft_core_model and "
+                "ft_model_output_adapter on the wrapped DIVER model."
+            )
+        core_out = self.diver_model.ft_core_model(features)
+        output = self.diver_model.ft_model_output_adapter(core_out)
+
+        if self.output_activation == "sigmoid":
+            output = torch.sigmoid(output)
+        elif self.output_activation == "softmax":
+            output = F.softmax(output, dim=-1)
+
+        if output.shape[-1] == 1:
+            output = output.squeeze(-1)
+
+        return output
+
     def forward(self, x, **kwargs):
         """
         Forward pass through DIVER model.
@@ -373,56 +443,11 @@ class DIVERDecoder(nn.Module):
         Returns:
             Output tensor [batch_size, output_dim] (probabilities if activation applied)
         """
-        # Accept xyz_id directly (flattened approach) or legacy data_info_list
-        xyz_id = kwargs.get('xyz_id', None)
-        data_info_list = kwargs.get('data_info_list', None)
-
-        batch_size = x.shape[0]
-        num_channels = x.shape[1]
-
-        # Build data_info_list for underlying DIVER-1 model
-        if xyz_id is not None:
-            # xyz_id is [batch_size, num_channels, 3]
-            data_info_list = []
-            for i in range(batch_size):
-                # Convert tensor to numpy if needed
-                coords = xyz_id[i]
-                if torch.is_tensor(coords):
-                    coords = coords.cpu().numpy()
-                data_info_list.append({
-                    'num_channels': num_channels,
-                    'modality': 'iEEG',
-                    'xyz_id': coords,
-                })
-        elif data_info_list is None:
-            # Fallback: create default data_info_list without coordinates
-            data_info_list = create_data_info_list(batch_size, num_channels)
         if kwargs.get('return_feature_emb_instead_of_projection', False):
-            # DIVER model forward (outputs logits)
-            # for ref : model.diver_model.backbone/ft_core_model/ft_core_model/ft_model_output_adapter
-            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-            return self.diver_model.ft_model_input_adapter(
-                self.diver_model.feature_extraction_func(
-                    self.diver_model.backbone(
-                        x, data_info_list=data_info_list, use_mask=False, return_encoder_output=True
-                        ), 
-                    data_info_list=data_info_list), 
-                data_info_list=data_info_list)
-        
-        output = self.diver_model(x, data_info_list=data_info_list)
-        
-        # Apply output activation to convert logits to probabilities
-        if self.output_activation == "sigmoid":
-            output = torch.sigmoid(output)
-        elif self.output_activation == "softmax":
-            output = F.softmax(output, dim=-1)
-        # "linear" means no activation (default for regression)
-        
-        # Squeeze if output_dim == 1 (for binary classification compatibility)
-        if output.shape[-1] == 1:
-            output = output.squeeze(-1)
-        
-        return output
+            return self.encode_features(x, **kwargs)
+
+        features = self.encode_features(x, **kwargs)
+        return self.forward_from_features(features, **kwargs)
 
 
 # =============================================================================

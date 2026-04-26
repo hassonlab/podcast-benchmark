@@ -42,21 +42,16 @@ training_params:
   - 5
 trial_name: diver_supersubject_llm_decoding
 model_spec:
-  constructor_name: gpt2_brain
+  constructor_name: diver_finetune
   params:
-    freeze_lm: true
-  sub_models:
-    encoder_model:
-      constructor_name: diver_finetune
-      params:
-        foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-        patch_sampling_rate: 500
-        patch_size: 50
-        d_model: 256
-        e_layer: 12
-        ft_config: flatten_linear
-        deepspeed_pth_format: true
-        output_dim: 768
-        freeze_foundation: false
-        mup_weights: true
-        ft_mup: false
+    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    patch_sampling_rate: 500
+    patch_size: 50
+    d_model: 256
+    e_layer: 12
+    ft_config: flatten_linear
+    deepspeed_pth_format: true
+    output_dim: 768
+    freeze_foundation: false
+    mup_weights: true
+    ft_mup: false

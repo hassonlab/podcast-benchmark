@@ -648,7 +648,7 @@ class ReferencePOPTDecoder(nn.Module):
         )
         return lip_coords, seq_ids
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         if x.ndim != 4:
             raise ValueError(
                 "PopT finetuning expects STFT input with shape [batch, channels, time, freq]."
@@ -700,12 +700,16 @@ class ReferencePOPTDecoder(nn.Module):
             encoded = self.upstream(seq, pad_mask, intermediate_rep=True)
             cls_repr = encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
 
-        cls_repr = self.classifier_norm(cls_repr)
+        return self.classifier_norm(cls_repr)
+
+    def forward_from_features(self, features, **kwargs):
+        return self.head(features)
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
         if kwargs.get('return_feature_emb_instead_of_projection', False):
-            #* used for feature caching
-            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-            return cls_repr
-        return self.head(cls_repr)
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("population_transformer_mlp")
@@ -905,9 +909,9 @@ class PopulationTransformerDecoder(nn.Module):
             output_activation=output_activation,
         )
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         """
-        Forward pass through STFT → BrainBERT (if enabled) → PopT foundation model.
+        Compute PopT foundation features before the decoder head.
 
         Matches original DIVER_CLIP PopT implementation:
         - Supports data_info_list (original approach)
@@ -1041,10 +1045,32 @@ class PopulationTransformerDecoder(nn.Module):
             else:
                 features = self.foundation_model(x, return_sequence=False)
 
-        # Pass through decoder head
-        output = self.decoder_head(features)
+        return features
 
-        return output
+    def forward_from_features(self, features, **kwargs):
+        return self.decoder_head(features)
+
+    def forward(self, x, **kwargs):
+        """
+        Forward pass through STFT → BrainBERT (if enabled) → PopT foundation model.
+
+        Matches original DIVER_CLIP PopT implementation:
+        - Supports data_info_list (original approach)
+        - Also supports lip_coords directly (backward compatibility)
+
+        Args:
+            x: Input tensor [batch_size, num_channels, seq_len] - raw neural signals
+            data_info_list: List of dicts with 'LIP_id' key (original DIVER_CLIP approach)
+            lip_coords: Optional LIP coordinates [batch_size, num_channels, 3] LongTensor (backward compatibility)
+            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
+
+        Returns:
+            Output tensor [batch_size, output_dim]
+        """
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_data_getter("popt_lip_coords")

@@ -794,17 +794,11 @@ def train_decoding_model(
                 f"Time taken for per-subject feature extraction and concat: {time.time() - cache_loader_generation_start_time}"
             )
 
-            # Determine output_dim from model
-            model_name = str(model.__class__.__name__)
-            if model_name == "ReferenceBrainBERTDecoder":
-                output_dim = model.output_dim
-            elif model_name == "ReferencePOPTDecoder":
-                output_dim = model.output_dim
-            elif model_name == "DIVERDecoder":
-                output_dim = model.output_dim
-            else:
+            output_dim = getattr(model, "output_dim", None)
+            if output_dim is None:
                 raise NotImplementedError(
-                    f"per_subject_feature_concat not implemented for model: {model_name}"
+                    "per_subject_feature_concat requires the model to expose "
+                    f"output_dim. Got model: {model.__class__.__name__}"
                 )
 
             # Get concat feature dim from the first batch
@@ -849,28 +843,12 @@ def train_decoding_model(
                 f"Time taken for feature extraction and loader generation: {time.time() - cache_loader_generation_start_time}"
             )
 
-            # redefining model
-            model_name = str(model.__class__.__name__)
-            if model_name == "ReferenceBrainBERTDecoder":  # *brainbert
-                model = SqueezeWrapper(
-                    feature_head=model.projector, output_dim=model.output_dim
-                ).to(device)
-            elif model_name == "ReferencePOPTDecoder":  # *popt
-                model = MakeIgnoreKwargsDuringForward(model.head).to(device)
-            elif model_name == "DIVERDecoder":  # *DIVFER
-                model = DIVERCachedFeatureAdapterModel(
-                    model.diver_model.ft_core_model,
-                    model.diver_model.ft_model_output_adapter,
-                ).to(device)
-            elif model_name == "GPT2Brain":  # * GPT2Brain and such
+            if not hasattr(model, "forward_from_features"):
                 raise NotImplementedError(
-                    f"Feature caching is not yet implemented for GPT2Brain. Got model: {model_name}"
+                    "Feature caching requires the model to implement "
+                    f"forward_from_features(...). Got model: {model.__class__.__name__}"
                 )
-                # raise NotImplementedError(f"Feature caching and loader generation after feature extraction is not yet implemented for GPT2Brain and similar models. Got model: {model_name}")
-            else:
-                raise NotImplementedError(
-                    f"Feature caching and loader generation after feature extraction is only implemented for BrainBERT, PopT, and DIVER for now. Got model: {model_name}"
-                )
+            model = CachedFeatureModel(model).to(device)
 
         loop_start_time = time.time()  #! remove later
         for epoch in loop:
@@ -1215,6 +1193,11 @@ def run_training_over_lags(
 ### below : are stuff for feature caching!
 def extract_features_for_caching(model, loader, device):
     model.eval()
+    if not hasattr(model, "encode_features"):
+        raise NotImplementedError(
+            "Feature caching requires the model to implement "
+            f"encode_features(...). Got model: {model.__class__.__name__}"
+        )
 
     # feature aggregation
     all_features, input_dicts, y_bs = [], [], []
@@ -1226,9 +1209,7 @@ def extract_features_for_caching(model, loader, device):
                 k: v.to(device) if torch.is_tensor(v) else v
                 for k, v in inputs_dict.items()
             }
-            features = model(
-                Xb, **inputs_dict, return_feature_emb_instead_of_projection=True
-            )
+            features = model.encode_features(Xb, **inputs_dict)
             all_features.append(features)
             input_dicts.append(inputs_dict)
             y_bs.append(y_b)
@@ -1247,6 +1228,11 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
         targets: [n_samples]
     """
     model.eval()
+    if not hasattr(model, "encode_features"):
+        raise NotImplementedError(
+            "per_subject_feature_concat requires the model to implement "
+            f"encode_features(...). Got model: {model.__class__.__name__}"
+        )
     all_features, y_bs = [], []
     with torch.no_grad():
         for batch_data in loader:
@@ -1269,10 +1255,10 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
 
             subject_embeddings = []
             for s_idx, chunk in enumerate(subject_chunks):
-                sub_kwargs = {"return_feature_emb_instead_of_projection": True}
+                sub_kwargs = {}
                 for coord_key, chunks in coord_chunks.items():
                     sub_kwargs[coord_key] = chunks[s_idx]
-                emb = model(chunk, **sub_kwargs)
+                emb = model.encode_features(chunk, **sub_kwargs)
                 subject_embeddings.append(emb)
 
             # Concatenate per-subject embeddings: [batch, n_subjects * embed_dim]
@@ -1346,100 +1332,28 @@ class MakeIgnoreKwargsDuringForward(nn.Module):
         return self.module(x)
 
 
-class DIVERCachedFeatureAdapterModel(nn.Module):
-    def __init__(self, core_module, output_adapter):
+class CachedFeatureModel(nn.Module):
+    def __init__(self, model):
         super().__init__()
-        self.core_module = core_module
-        self.output_adapter = output_adapter
+        self.model = model
+        self.output_dim = getattr(model, "output_dim", None)
 
     def forward(self, x, **kwargs):
-        core_out = self.core_module(x)
-        adapted_out = self.output_adapter(core_out)
-        if adapted_out.shape[-1] == 1:
-            adapted_out = adapted_out.squeeze(-1)
-        return adapted_out
+        return self.model.forward_from_features(x, **kwargs)
 
-
-def _build_gpt2_cached_feature_head(encoder_model: nn.Module) -> nn.Module:
-    """
-    Build FM-specific adapter that maps cached encoder features -> neural embeddings
-    expected by GPT2Brain prompt construction.
-    """
-    encoder_name = encoder_model.__class__.__name__
-
-    if encoder_name == "ReferenceBrainBERTDecoder":
-        return SqueezeWrapper(
-            feature_head=MakeIgnoreKwargsDuringForward(encoder_model.projector),
-            output_dim=getattr(encoder_model, "output_dim", None),
-        )
-
-    if encoder_name == "ReferencePOPTDecoder":
-        return MakeIgnoreKwargsDuringForward(encoder_model.head)
-
-    if encoder_name == "DIVERDecoder":
-        return DIVERCachedFeatureAdapterModel(
-            encoder_model.diver_model.ft_core_model,
-            encoder_model.diver_model.ft_model_output_adapter,
-        )
-
-    raise NotImplementedError(
-        f"GPT2Brain feature-cache adapter not implemented for encoder: {encoder_name}"
-    )
-
-
-class GPT2BrainCachedFeatureAdapterModel(nn.Module):
-    def __init__(self, gpt2_brain_model: nn.Module, cached_feature_head: nn.Module):
-        super().__init__()
-        self.gpt2_brain_model = gpt2_brain_model
-        self.cached_feature_head = cached_feature_head
-
-    def change_training_mode(self, freeze_lm=True):
-        if freeze_lm:
-            for param in self.gpt2_brain_model.lm_model.parameters():
-                param.requires_grad = False
-            self.gpt2_brain_model.lm_model.eval()
-        else:
-            self.gpt2_brain_model.lm_model.train()
-
-        self.gpt2_brain_model.encoder_model.eval()
-
-        for param in self.cached_feature_head.parameters():
-            param.requires_grad = True
-        self.cached_feature_head.train()
-        if not self.gpt2_brain_model.no_brain_token_injection:
-            self.gpt2_brain_model.lm_model.transformer.wte.weight.requires_grad = True
-
-    def forward(
-        self,
-        x,
-        all_input_ids,
-        all_attention_mask,
-        target_attention_mask=None,
-        return_all_preds=False,
-        **kwargs,
-    ):
-        neural_embeddings = self.cached_feature_head(x, **kwargs)
-        prompt_embeddings, prompt_attention_mask = (
-            self.gpt2_brain_model._build_prompt_embeddings(
-                neural_embeddings, all_input_ids, all_attention_mask
-            )
-        )
-        output = self.gpt2_brain_model.lm_model(
-            inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
-        )
-
-        if return_all_preds:
-            return output.logits, prompt_attention_mask
-
-        if (
-            hasattr(self.gpt2_brain_model, "_get_target_predictions")
-            and target_attention_mask is not None
+    def save_checkpoint(self, path):
+        if hasattr(self.model, "save_checkpoint") and callable(
+            getattr(self.model, "save_checkpoint")
         ):
-            return self.gpt2_brain_model._get_target_predictions(
-                output, prompt_attention_mask, target_attention_mask
-            )
+            return self.model.save_checkpoint(path)
+        return torch.save(self.model.state_dict(), path)
 
-        return output.logits[:, -1, :]
+    def load_checkpoint(self, path):
+        if hasattr(self.model, "load_checkpoint") and callable(
+            getattr(self.model, "load_checkpoint")
+        ):
+            return self.model.load_checkpoint(path)
+        return self.model.load_state_dict(torch.load(path, map_location="cpu"))
 
 
 def check_model_train_eval_and_requires_grads(

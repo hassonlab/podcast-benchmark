@@ -1,23 +1,18 @@
 config_setter_name: diver_finetune
 model_spec:
-  constructor_name: gpt2_brain
+  constructor_name: diver_finetune
   params:
-    freeze_lm: true
-  sub_models:
-    encoder_model:
-      constructor_name: diver_finetune
-      params:
-        d_model: 256
-        deepspeed_pth_format: true
-        e_layer: 12
-        foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-        freeze_foundation: false
-        ft_config: flatten_linear
-        ft_mup: false
-        mup_weights: true
-        output_dim: 768
-        patch_sampling_rate: 500
-        patch_size: 50
+    d_model: 256
+    deepspeed_pth_format: true
+    e_layer: 12
+    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    freeze_foundation: false
+    ft_config: flatten_linear
+    ft_mup: false
+    mup_weights: true
+    output_dim: 768
+    patch_sampling_rate: 500
+    patch_size: 50
 task_config:
   data_params:
     data_root: data

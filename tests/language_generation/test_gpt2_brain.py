@@ -40,6 +40,29 @@ class MockEncoderMultiEmbed(nn.Module):
         )  # [batch, num_tokens, output_dim]
 
 
+class MockCachedFeatureEncoder(nn.Module):
+    """Mock encoder with cacheable upstream features and a projector."""
+
+    def __init__(self, input_channels=64, feature_dim=32, output_dim=256):
+        super().__init__()
+        self.output_dim = output_dim
+        self.upstream = nn.Linear(input_channels, feature_dim)
+        self.projector = nn.Linear(feature_dim, output_dim)
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
+            return features
+        return self.forward_from_features(features, **kwargs)
+
+    def encode_features(self, x, **kwargs):
+        x_avg = x.mean(dim=2)
+        return self.upstream(x_avg)
+
+    def forward_from_features(self, features, **kwargs):
+        return self.projector(features)
+
+
 class MockTransformer(nn.Module):
     """Mock transformer for proper parameter handling"""
 
@@ -188,6 +211,12 @@ def mock_encoder_single():
 def mock_encoder_multi():
     """Fixture providing a mock encoder with multiple embedding outputs"""
     return MockEncoderMultiEmbed(input_channels=64, output_dim=256, num_tokens=3)
+
+
+@pytest.fixture
+def mock_cached_feature_encoder():
+    """Fixture providing an encoder with explicit cached feature behavior."""
+    return MockCachedFeatureEncoder(input_channels=64, feature_dim=32, output_dim=256)
 
 
 @pytest.fixture
@@ -525,6 +554,46 @@ class TestGPT2BrainForwardMultiEmbed:
         # Original attention pattern should be preserved after brain prompt
         assert torch.allclose(
             updated_attention_mask[:, brain_prompt_len:], attention_mask
+        )
+
+
+class TestGPT2BrainFeatureCache:
+    """Test GPT2Brain feature-cache behavior."""
+
+    def test_feature_cache_extracts_features_then_reuses_them_for_forward(
+        self, mock_cached_feature_encoder, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_cached_feature_encoder,
+            freeze_lm=True,
+            feature_cache=True,
+        )
+
+        cached_features = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_feature_emb_instead_of_projection=True,
+        )
+
+        assert cached_features.shape == (sample_batch["neural_data"].shape[0], 32)
+
+        target_attention_mask = torch.ones(sample_batch["input_ids"].shape[0], 3)
+        target_logits = model(
+            neural_data=cached_features,
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            target_attention_mask=target_attention_mask,
+        )
+
+        assert target_logits.shape == (
+            sample_batch["input_ids"].shape[0],
+            3,
+            len(model.tokenizer),
         )
 
 

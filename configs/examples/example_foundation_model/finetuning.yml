@@ -28,24 +28,6 @@ training_params:
   - nll_embedding
   early_stopping_metric: cosine_sim
   smaller_is_better: false
-<<<<<<< HEAD
-=======
-
-# Data parameters
-data_params:
-  data_root: data
-  word_column: word
-  electrode_file_path: processed_data/all_subject_sig.csv
-  embedding_type: gpt-2xl
-  embedding_layer: 24
-  embedding_pca_dim: 50
-  subject_ids: [1, 2, 3]
-
-  # No preprocessing function needed - raw data goes directly to model
-  # window_width will be set automatically by config_setter
-
-# Trial identifier
->>>>>>> 8e54602540327232ddbfc9ca795b4eab08e17474
 trial_name: example_foundation_finetune
 model_spec:
   constructor_name: example_foundation_finetune
