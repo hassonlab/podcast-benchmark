@@ -522,6 +522,94 @@ def _build_fold_loaders(
     }
 
 
+def _build_full_lag_loader(
+    neural_data,
+    data_df,
+    Y,
+    task_config: TaskConfig,
+    training_params: TrainingParams,
+):
+    input_fields = task_config.task_specific_config.input_fields
+    indices = np.arange(len(neural_data))
+    extra_inputs = data_utils.df_columns_to_tensors(data_df, input_fields, indices)
+    dataset = NeuralDictDataset(neural_data, extra_inputs, Y)
+    return DataLoader(dataset, batch_size=training_params.batch_size, shuffle=False)
+
+
+def _as_index_tensor(indices, device=None):
+    if isinstance(indices, np.ndarray):
+        return torch.as_tensor(indices, dtype=torch.long, device=device)
+    if torch.is_tensor(indices):
+        return indices.to(device=device, dtype=torch.long)
+    return torch.tensor(indices, dtype=torch.long, device=device)
+
+
+def _slice_input_dict(inputs, indices):
+    if torch.is_tensor(indices):
+        base_indices = indices.to(dtype=torch.long)
+    elif isinstance(indices, np.ndarray):
+        base_indices = torch.as_tensor(indices, dtype=torch.long)
+    else:
+        base_indices = torch.tensor(indices, dtype=torch.long)
+
+    sliced = {}
+    for key, val in inputs.items():
+        if torch.is_tensor(val):
+            sliced[key] = val[base_indices.to(device=val.device)]
+        else:
+            sliced[key] = val
+    return sliced
+
+
+def _build_cached_fold_loaders(
+    cached_features,
+    cached_extra_inputs,
+    split_indices,
+    target_splits,
+    training_params: TrainingParams,
+):
+    datasets = {
+        phase: NeuralDictDataset(
+            cached_features[_as_index_tensor(indices, device=cached_features.device)],
+            _slice_input_dict(cached_extra_inputs, indices),
+            target_splits[phase],
+        )
+        for phase, indices in split_indices.items()
+    }
+    return {
+        phase: DataLoader(
+            ds, batch_size=training_params.batch_size, shuffle=(phase == "train")
+        )
+        for phase, ds in datasets.items()
+    }
+
+
+def _model_spec_has_fold_checkpoint_template(model_spec: ModelSpec):
+    checkpoint_path = getattr(model_spec, "checkpoint_path", None)
+    if isinstance(checkpoint_path, str) and "{fold}" in checkpoint_path:
+        return True
+
+    for sub_spec in getattr(model_spec, "sub_models", {}).values():
+        if _model_spec_has_fold_checkpoint_template(sub_spec):
+            return True
+    return False
+
+
+def _validate_lag_level_feature_cache(model_spec: ModelSpec):
+    if not (
+        getattr(model_spec, "feature_cache", False)
+        or getattr(model_spec, "per_subject_feature_concat", False)
+    ):
+        return
+
+    if _model_spec_has_fold_checkpoint_template(model_spec):
+        raise ValueError(
+            "Lag-level feature caching cannot be used with checkpoint_path values "
+            "containing '{fold}', because fold-specific encoders cannot safely share "
+            "one activation cache."
+        )
+
+
 def _create_optimizer(model, training_params: TrainingParams):
     if training_params.optimizer == "MuAdamW":
         print("Using MuAdamW optimizer")
@@ -757,47 +845,11 @@ def _maybe_prepare_per_subject_concat_model(
     model,
     loaders,
     model_spec,
-    subject_channel_counts,
     training_params,
     device,
 ):
     if not getattr(model_spec, "per_subject_feature_concat", False):
         return model, loaders, None
-
-    if subject_channel_counts is None or len(subject_channel_counts) <= 1:
-        raise ValueError(
-            "per_subject_feature_concat requires multiple subjects. "
-            "Got subject_channel_counts={subject_channel_counts}"
-        )
-
-    cache_loader_generation_start_time = time.time()
-    loaders = {
-        "train": generate_loaders_from_features(
-            *extract_per_subject_concat_features(
-                model, loaders["train"], subject_channel_counts, device
-            ),
-            training_params.batch_size,
-            shuffle=True,
-        ),
-        "val": generate_loaders_from_features(
-            *extract_per_subject_concat_features(
-                model, loaders["val"], subject_channel_counts, device
-            ),
-            training_params.batch_size,
-            shuffle=False,
-        ),
-        "test": generate_loaders_from_features(
-            *extract_per_subject_concat_features(
-                model, loaders["test"], subject_channel_counts, device
-            ),
-            training_params.batch_size,
-            shuffle=False,
-        ),
-    }
-    print(
-        "Time taken for per-subject feature extraction and concat: "
-        f"{time.time() - cache_loader_generation_start_time}"
-    )
 
     output_dim = getattr(model, "output_dim", None)
     if output_dim is None:
@@ -822,39 +874,46 @@ def _maybe_prepare_per_subject_concat_model(
     return model, loaders, optimizer
 
 
-def _maybe_prepare_feature_cache_model(model, loaders, training_params, device):
-    if not getattr(model_spec, "feature_cache", False):
-        return model, loaders
+def _maybe_prepare_feature_cache_model(
+    model_spec,
+    lag,
+    full_lag_loader,
+    training_params,
+    device,
+    subject_channel_counts=None,
+):
+    if not (
+        getattr(model_spec, "feature_cache", False)
+        or getattr(model_spec, "per_subject_feature_concat", False)
+    ):
+        return None
 
     cache_loader_generation_start_time = time.time()
-    loaders = {
-        "train": generate_loaders_from_features(
-            *extract_features_for_caching(model, loaders["train"], device),
-            training_params.batch_size,
-            shuffle=True,
-        ),
-        "val": generate_loaders_from_features(
-            *extract_features_for_caching(model, loaders["val"], device),
-            training_params.batch_size,
-            shuffle=False,
-        ),
-        "test": generate_loaders_from_features(
-            *extract_features_for_caching(model, loaders["test"], device),
-            training_params.batch_size,
-            shuffle=False,
-        ),
-    }
+    cache_model = build_model_from_spec(model_spec, lag=lag, fold=1).to(device)
+    features, input_dicts, _ = extract_features_for_caching(
+        cache_model,
+        full_lag_loader,
+        device,
+        subject_channel_counts=subject_channel_counts,
+    )
     print(
         "Time taken for feature extraction and loader generation: "
         f"{time.time() - cache_loader_generation_start_time}"
     )
 
-    if not hasattr(model, "forward_from_features"):
+    if subject_channel_counts is not None:
+        n_subjects = len(subject_channel_counts)
+        embed_dim = features.shape[-1] // n_subjects
+        print(
+            "Per-subject-concat features: "
+            f"{n_subjects} subjects x {embed_dim}d = {features.shape[-1]}d total"
+        )
+    elif not hasattr(cache_model, "forward_from_features"):
         raise NotImplementedError(
             "Feature caching requires the model to implement "
-            f"forward_from_features(...). Got model: {model.__class__.__name__}"
+            f"forward_from_features(...). Got model: {cache_model.__class__.__name__}"
         )
-    return CachedFeatureModel(model).to(device), loaders
+    return features, _merge_input_dicts(input_dicts)
 
 
 def _save_checkpoint(model, model_path):
@@ -1145,6 +1204,28 @@ def train_decoding_model(
         "ridge_regression": [],
     }
     conf_matrices = {}
+    cached_lag_features = None
+    cached_lag_extra_inputs = None
+    use_lag_feature_cache = getattr(model_spec, "feature_cache", False) or getattr(
+        model_spec, "per_subject_feature_concat", False
+    )
+    if use_lag_feature_cache:
+        _validate_lag_level_feature_cache(model_spec)
+        full_lag_loader = _build_full_lag_loader(
+            neural_data, data_df, Y, task_config, training_params
+        )
+        cached_lag_features, cached_lag_extra_inputs = _maybe_prepare_feature_cache_model(
+            model_spec,
+            lag,
+            full_lag_loader,
+            training_params,
+            device,
+            subject_channel_counts=(
+                subject_channel_counts
+                if getattr(model_spec, "per_subject_feature_concat", False)
+                else None
+            ),
+        )
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
         _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
@@ -1158,14 +1239,23 @@ def train_decoding_model(
         target_splits = _normalize_fold_targets(
             Y, tr_idx, va_idx, te_idx, training_params
         )
-        loaders = _build_fold_loaders(
-            neural_data,
-            data_df,
-            task_config,
-            split_indices,
-            target_splits,
-            training_params,
-        )
+        if use_lag_feature_cache:
+            loaders = _build_cached_fold_loaders(
+                cached_lag_features,
+                cached_lag_extra_inputs,
+                split_indices,
+                target_splits,
+                training_params,
+            )
+        else:
+            loaders = _build_fold_loaders(
+                neural_data,
+                data_df,
+                task_config,
+                split_indices,
+                target_splits,
+                training_params,
+            )
 
         fold_baseline_results = _train_enabled_baselines(
             neural_data,
@@ -1190,16 +1280,14 @@ def train_decoding_model(
             model,
             loaders,
             model_spec,
-            subject_channel_counts,
             training_params,
             device,
         )
         if probe_optimizer is not None:
             optimizer = probe_optimizer
+            scheduler = _create_training_scheduler(optimizer, loaders, training_params)
         elif getattr(model_spec, "feature_cache", False):
-            model, loaders = _maybe_prepare_feature_cache_model(
-                model, loaders, training_params, device
-            )
+            model = CachedFeatureModel(model).to(device)
 
         history, test_mets, best_epoch = _train_fold(
             model,
@@ -1357,12 +1445,17 @@ def run_training_over_lags(
 
 
 ### below : are stuff for feature caching!
-def extract_features_for_caching(model, loader, device):
+def extract_features_for_caching(model, loader, device, subject_channel_counts=None):
     model.eval()
     if not hasattr(model, "encode_features"):
         raise NotImplementedError(
             "Feature caching requires the model to implement "
             f"encode_features(...). Got model: {model.__class__.__name__}"
+        )
+    if subject_channel_counts is not None and len(subject_channel_counts) <= 1:
+        raise ValueError(
+            "per_subject_feature_concat requires multiple subjects. "
+            f"Got subject_channel_counts={subject_channel_counts}"
         )
 
     # feature aggregation
@@ -1375,9 +1468,29 @@ def extract_features_for_caching(model, loader, device):
                 k: v.to(device) if torch.is_tensor(v) else v
                 for k, v in inputs_dict.items()
             }
-            features = model.encode_features(Xb, **inputs_dict)
+            if subject_channel_counts is None:
+                features = model.encode_features(Xb, **inputs_dict)
+            else:
+                subject_chunks = torch.split(Xb, subject_channel_counts, dim=1)
+                coord_chunks = {}
+                for coord_key in ("xyz_id", "lip_coords"):
+                    if coord_key in inputs_dict and torch.is_tensor(
+                        inputs_dict[coord_key]
+                    ):
+                        coord_chunks[coord_key] = torch.split(
+                            inputs_dict[coord_key], subject_channel_counts, dim=1
+                        )
+
+                subject_embeddings = []
+                for s_idx, chunk in enumerate(subject_chunks):
+                    sub_kwargs = {
+                        coord_key: chunks[s_idx]
+                        for coord_key, chunks in coord_chunks.items()
+                    }
+                    subject_embeddings.append(model.encode_features(chunk, **sub_kwargs))
+                features = torch.cat(subject_embeddings, dim=-1)
             all_features.append(features)
-            input_dicts.append(inputs_dict)
+            input_dicts.append({} if subject_channel_counts is not None else inputs_dict)
             y_bs.append(y_b)
     return torch.cat(all_features, dim=0), input_dicts, torch.cat(y_bs, dim=0)
 
@@ -1442,20 +1555,19 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
     return concat_features, empty_dicts, torch.cat(y_bs, dim=0)
 
 
+def _merge_input_dicts(batch_dicts):
+    if not batch_dicts:
+        return {}
+    merged = {}
+    for key in batch_dicts[0].keys():
+        vals = [d[key] for d in batch_dicts if torch.is_tensor(d[key])]
+        merged[key] = torch.cat(vals, dim=0) if vals else [d[key] for d in batch_dicts]
+    return merged
+
+
 def generate_loaders_from_features(
     features, input_dicts, y_bs, batch_size, shuffle=False
 ):
-    def _merge_input_dicts(batch_dicts):
-        if not batch_dicts:
-            return {}
-        merged = {}
-        for key in batch_dicts[0].keys():
-            vals = [d[key] for d in batch_dicts if torch.is_tensor(d[key])]
-            merged[key] = (
-                torch.cat(vals, dim=0) if vals else [d[key] for d in batch_dicts]
-            )
-        return merged
-
     def _make_loader(feat, inp, y, shuffle):
         if isinstance(inp, list):
             inp = _merge_input_dicts(inp)
