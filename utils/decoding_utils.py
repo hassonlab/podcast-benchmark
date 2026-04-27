@@ -851,6 +851,16 @@ def _maybe_prepare_per_subject_concat_model(
     if not getattr(model_spec, "per_subject_feature_concat", False):
         return model, loaders, None
 
+    if model_spec.constructor_name == "gpt2_brain":
+        model = CachedFeatureModel(model).to(device)
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = torch.optim.AdamW(
+            trainable_params,
+            lr=float(training_params.learning_rate),
+            weight_decay=float(training_params.weight_decay),
+        )
+        return model, loaders, optimizer
+
     output_dim = getattr(model, "output_dim", None)
     if output_dim is None:
         raise NotImplementedError(
@@ -1490,7 +1500,16 @@ def extract_features_for_caching(model, loader, device, subject_channel_counts=N
                     subject_embeddings.append(model.encode_features(chunk, **sub_kwargs))
                 features = torch.cat(subject_embeddings, dim=-1)
             all_features.append(features)
-            input_dicts.append({} if subject_channel_counts is not None else inputs_dict)
+            if subject_channel_counts is None:
+                input_dicts.append(inputs_dict)
+            else:
+                input_dicts.append(
+                    {
+                        k: v
+                        for k, v in inputs_dict.items()
+                        if k not in {"xyz_id", "lip_coords"}
+                    }
+                )
             y_bs.append(y_b)
     return torch.cat(all_features, dim=0), input_dicts, torch.cat(y_bs, dim=0)
 

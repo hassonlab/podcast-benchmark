@@ -11,6 +11,7 @@ from core.registry import register_model_constructor
 from utils.dataset import NeuralDictDataset
 from utils.decoding_utils import (
     CachedFeatureModel,
+    _maybe_prepare_per_subject_concat_model,
     _build_cached_fold_loaders,
     _normalize_fold_targets,
     extract_features_for_caching,
@@ -123,6 +124,15 @@ def build_per_subject_cache_test_model(model_params):
     return PerSubjectCacheModel(**model_params)
 
 
+class FakeGPT2BrainConcatModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj = nn.Linear(4, 3)
+
+    def forward_from_features(self, features, **kwargs):
+        return self.proj(features) + kwargs["all_input_ids"].float().mean()
+
+
 def _tiny_training_params(**overrides):
     params = TrainingParams(
         batch_size=2,
@@ -232,6 +242,57 @@ def test_per_subject_concat_uses_centralized_cache_path(monkeypatch, tmp_path):
     )
 
     assert TOY_PERSUBJECT_STATS["encode_calls"] == 6
+
+
+def test_per_subject_concat_preserves_non_coordinate_inputs_for_cached_forward():
+    model = PerSubjectCacheModel(feature_dim=2, output_dim=1)
+    x = torch.randn(4, 4, 2)
+    target = torch.arange(4)
+    input_dict = {
+        "all_input_ids": torch.arange(8).reshape(4, 2),
+        "target_attention_mask": torch.ones(4, 2),
+        "xyz_id": torch.randn(4, 4, 3),
+    }
+    ds = NeuralDictDataset(x, input_dict, target)
+    loader = DataLoader(ds, batch_size=2)
+
+    features, input_dicts, y = extract_features_for_caching(
+        model, loader, torch.device("cpu"), subject_channel_counts=[2, 2]
+    )
+
+    assert features.shape == (4, 4)
+    assert torch.equal(y, target)
+    assert set(input_dicts[0].keys()) == {"all_input_ids", "target_attention_mask"}
+
+
+def test_per_subject_concat_gpt2_brain_uses_cached_feature_wrapper():
+    model = FakeGPT2BrainConcatModel()
+    loaders = {
+        "train": DataLoader(
+            NeuralDictDataset(
+                torch.randn(2, 4),
+                {"all_input_ids": torch.ones(2, 2)},
+                torch.arange(2),
+            ),
+            batch_size=2,
+        )
+    }
+    model_spec = ModelSpec(constructor_name="gpt2_brain", per_subject_feature_concat=True)
+
+    wrapped, returned_loaders, optimizer = _maybe_prepare_per_subject_concat_model(
+        model,
+        loaders,
+        model_spec,
+        _tiny_training_params(),
+        torch.device("cpu"),
+    )
+
+    assert isinstance(wrapped, CachedFeatureModel)
+    assert returned_loaders is loaders
+    assert optimizer is not None
+    batch = next(iter(returned_loaders["train"]))
+    out = wrapped(batch[0], **batch[1])
+    assert out.shape == (2, 3)
 
 
 def test_lag_level_cache_rejects_fold_specific_checkpoint_template(tmp_path):
