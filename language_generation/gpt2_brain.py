@@ -6,25 +6,34 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 from core import registry
 
 
-def load_gpt2_model_and_tokenizer(
+def load_gpt2_tokenizer(
     cache_dir: str,
     model_name: str = "gpt2",
 ):
-    """Load GPT-2 model and tokenizer."""
+    """Load a GPT-2 tokenizer without instantiating the language model."""
     tokenizer = GPT2TokenizerFast.from_pretrained(
         model_name,
         cache_dir=cache_dir,
         local_files_only=True,  # *on school server set this to True, and False if elsewhere
     )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
+def load_gpt2_model_and_tokenizer(
+    cache_dir: str,
+    model_name: str = "gpt2",
+):
+    """Load GPT-2 model and tokenizer."""
+    tokenizer = load_gpt2_tokenizer(cache_dir=cache_dir, model_name=model_name)
     model = GPT2LMHeadModel.from_pretrained(
         model_name,
         cache_dir=cache_dir,
         local_files_only=True,  # *on school server set this to True, and False if elsewhere
     )
 
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        model.config.pad_token_id = tokenizer.eos_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
     return model, tokenizer
 
 
