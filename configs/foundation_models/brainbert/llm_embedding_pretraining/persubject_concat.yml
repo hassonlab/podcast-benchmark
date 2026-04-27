@@ -1,0 +1,56 @@
+config_setter_name: brainbert_finetune
+task_config:
+  task_name: llm_embedding_pretraining_task
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    use_high_gamma: false
+    target_sr: 2048
+    window_width: 1.0
+  task_specific_config:
+    max_context: 32
+    max_target_tokens: 16
+    transcript_path: data/stimuli/podcast_transcript.csv
+    prepend_space: true
+    model_name: gpt2
+    cache_dir: ./model_cache
+training_params:
+  batch_size: 4
+  epochs: 100
+  learning_rate: 1.0e-05
+  weight_decay: 1.0e-05
+  early_stopping_patience: 10
+  n_folds: 5
+  min_lag: -1000
+  max_lag: 1500
+  lag_step_size: 500
+  losses:
+  - mse
+  loss_weights:
+  - 1.0
+  metrics:
+  - mse
+  - corr
+  - cosine_sim
+  - cosine_dist
+  - nll_embedding
+  - pairwise_accuracy
+  - similarity_entropy
+  early_stopping_metric: mse
+  smaller_is_better: true
+  normalize_targets: false
+  fold_ids:
+  - 1
+  - 5
+trial_name: brainbert_persubject_concat_llm_embedding_pretraining
+model_spec:
+  constructor_name: brainbert_finetune
+  params:
+    model_dir: models/brainbert/pretrained_model
+    output_dim: 768
+    mlp_layer_sizes: []
+    dropout: 0.0
+    freeze_foundation: false
+    num_frozen_layers: 0
+  sub_models: {}
+  per_subject_feature_concat: true

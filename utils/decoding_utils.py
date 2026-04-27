@@ -370,6 +370,7 @@ def train_decoding_model(
     plot_results: bool = False,
     write_to_tensorboard: bool = False,
     tensorboard_dir: str = "event_logs",
+    subject_channel_counts: list[int] = None,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -763,8 +764,51 @@ def train_decoding_model(
 
         loop = tqdm(range(training_params.epochs), desc=f"Lag {lag}, Fold {fold}")
         
-        #if feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
-        if getattr(model_spec, "feature_cache", False): 
+        #if per_subject_feature_concat, extract per-subject embeddings, concat, and train linear probe
+        if getattr(model_spec, "per_subject_feature_concat", False):
+            if subject_channel_counts is None or len(subject_channel_counts) <= 1:
+                raise ValueError(
+                    "per_subject_feature_concat requires multiple subjects. "
+                    "Got subject_channel_counts={subject_channel_counts}"
+                )
+            cache_loader_generation_start_time = time.time()
+            #import warnings
+            #warnings.warn("per_subject_feature_concat ALWAYS to caching. regardless of model_spec.feature_cache)")
+            loaders = {
+                "train": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["train"], subject_channel_counts, device), training_params.batch_size, shuffle=True),
+                "val": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["val"], subject_channel_counts, device), training_params.batch_size, shuffle=False),
+                "test": generate_loaders_from_features(*extract_per_subject_concat_features(model, loaders["test"], subject_channel_counts, device), training_params.batch_size, shuffle=False),
+            }
+            print(f"Time taken for per-subject feature extraction and concat: {time.time() - cache_loader_generation_start_time}")
+
+            # Determine output_dim from model
+            model_name = str(model.__class__.__name__)
+            if model_name == "ReferenceBrainBERTDecoder":
+                output_dim = model.output_dim
+            elif model_name == "ReferencePOPTDecoder":
+                output_dim = model.output_dim
+            elif model_name == "DIVERDecoder":
+                output_dim = model.diver_model.ft_model_output_adapter[-1].out_features
+            else:
+                raise NotImplementedError(f"per_subject_feature_concat not implemented for model: {model_name}")
+
+            # Get concat feature dim from the first batch
+            sample_batch = next(iter(loaders["train"]))
+            concat_dim = sample_batch[0].shape[-1]
+            print(f"Linear probe: {concat_dim} -> {output_dim}")
+
+            probe = nn.Linear(concat_dim, output_dim)
+            model = SqueezeWrapper(feature_head=MakeIgnoreKwargsDuringForward(probe), output_dim=output_dim).to(device)
+
+            # Re-create optimizer for the new model
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=float(training_params.learning_rate),
+                weight_decay=float(training_params.weight_decay),
+            )
+
+        #elif feature cache, overwrite loaders and model => not ideal but we wanna do it quickly for now. Clean up later.
+        elif getattr(model_spec, "feature_cache", False):
             cache_loader_generation_start_time = time.time()
             #redfining loaders (with cached model)
             loaders = {
@@ -1061,7 +1105,7 @@ def run_training_over_lags(
         print("=" * 60)
 
         # TODO: Support lazy-loading for larger datasets on future tasks.
-        neural_data, targets, data_df = data_utils.get_data(
+        neural_data, targets, data_df, subject_channel_counts = data_utils.get_data(
             lag,
             raws,
             task_df,
@@ -1069,15 +1113,14 @@ def run_training_over_lags(
             preprocessing_fns,
             data_params.preprocessor_params,
         )
-
-        neural_tensor = torch.FloatTensor(neural_data)
+        
+        neural_tensor = torch.FloatTensor(neural_data) #(5030, 183, 13, 40) (N_words from task_df, total electordes, STFT time bins, freq channels)
         # Handle case where Y contains arrays (e.g., word embeddings)
         if targets.dtype == object:
             targets = np.stack(targets)
-        targets_tensor = torch.FloatTensor(targets)
+        targets_tensor = torch.FloatTensor(targets) # (5031) ???
 
         print(f"neural_tensor shape: {neural_tensor.shape}")
-
         models, histories, cv_results = train_decoding_model(
             neural_tensor,
             targets_tensor,
@@ -1090,6 +1133,7 @@ def run_training_over_lags(
             checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
             write_to_tensorboard=write_to_tensorboard,
             tensorboard_dir=tensorboard_dir,
+            subject_channel_counts=subject_channel_counts,
         )
 
         # Aggregate metrics
@@ -1144,6 +1188,60 @@ def extract_features_for_caching(model, loader, device):
             input_dicts.append(inputs_dict)
             y_bs.append(y_b)
     return torch.cat(all_features, dim=0), input_dicts, torch.cat(y_bs, dim=0)
+
+
+def extract_per_subject_concat_features(model, loader, subject_channel_counts, device):
+    """Extract features per-subject, then concatenate across subjects.
+
+    For each batch, splits the channel dimension by subject, runs each subject's
+    data through the model independently, and concatenates the resulting embeddings.
+
+    Returns:
+        concat_features: [n_samples, n_subjects * embed_dim]
+        input_dicts: list of input dicts (empty dicts, since features replace raw input)
+        targets: [n_samples]
+    """
+    model.eval()
+    all_features, y_bs = [], []
+    import pdb; pdb.set_trace()
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, y_b = batch_data
+            Xb = Xb.to(device)
+
+            # Split channel dimension by subject
+            # Xb shape: [batch, total_channels, ...] (3D for raw, 4D for STFT)
+            subject_chunks = torch.split(Xb, subject_channel_counts, dim=1)
+
+            # Split coordinate tensors by subject if present
+            # DIVER uses xyz_id, POPT uses lip_coords — both are [batch, total_channels, 3]
+            coord_chunks = {}
+            for coord_key in ('xyz_id', 'lip_coords'):
+                if coord_key in inputs_dict and torch.is_tensor(inputs_dict[coord_key]):
+                    coord_tensor = inputs_dict[coord_key].to(device)
+                    coord_chunks[coord_key] = torch.split(coord_tensor, subject_channel_counts, dim=1)
+
+            subject_embeddings = []
+            for s_idx, chunk in enumerate(subject_chunks):
+                sub_kwargs = {'return_feature_emb_instead_of_projection': True}
+                for coord_key, chunks in coord_chunks.items():
+                    sub_kwargs[coord_key] = chunks[s_idx]
+                emb = model(chunk, **sub_kwargs)
+                subject_embeddings.append(emb)
+
+            # Concatenate per-subject embeddings: [batch, n_subjects * embed_dim]
+            concat_emb = torch.cat(subject_embeddings, dim=-1)
+            all_features.append(concat_emb)
+            y_bs.append(y_b)
+    import pdb; pdb.set_trace()
+    concat_features = torch.cat(all_features, dim=0)
+    n_subjects = len(subject_channel_counts)
+    embed_dim = concat_features.shape[-1] // n_subjects
+    print(f"Per-subject-concat features: {n_subjects} subjects x {embed_dim}d = {concat_features.shape[-1]}d total")
+    # Return empty input_dicts (features replace raw input, no extra kwargs needed)
+    empty_dicts = [{} for _ in range(len(all_features))]
+    return concat_features, empty_dicts, torch.cat(y_bs, dim=0)
+
 
 def generate_loaders_from_features(features, input_dicts, y_bs, batch_size, shuffle = False):
     def _merge_input_dicts(batch_dicts):
