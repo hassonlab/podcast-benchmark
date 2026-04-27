@@ -334,9 +334,9 @@ def create_lr_scheduler(optimizer, training_params: TrainingParams):
 
     # Auto-detect mode based on smaller_is_better unless explicitly provided
     mode = params.get("mode", "min" if training_params.smaller_is_better else "max")
-    factor = params.get("factor", 0.5)
-    patience = params.get("patience", 10)
-    min_lr = params.get("min_lr", 1e-6)
+    factor = float(params.get("factor", 0.5))
+    patience = int(params.get("patience", 10))
+    min_lr = float(params.get("min_lr", 1e-6))
 
     return lr_scheduler.ReduceLROnPlateau(
         optimizer, mode=mode, factor=factor, patience=patience, min_lr=min_lr

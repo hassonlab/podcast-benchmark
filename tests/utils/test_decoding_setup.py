@@ -211,6 +211,22 @@ class TestLearningRateSchedulerSetup:
 
         assert isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
 
+    def test_create_training_scheduler_casts_plateau_params(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        params = TrainingParams(
+            use_lr_scheduler=True,
+            scheduler_params={"factor": "0.5", "patience": "10", "min_lr": "1e-6"},
+        )
+
+        scheduler = decoding_utils._create_training_scheduler(
+            optimizer, {"train": [None]}, params
+        )
+
+        assert scheduler.factor == 0.5
+        assert scheduler.patience == 10
+        assert scheduler.min_lrs == [1e-6]
+
     def test_create_training_scheduler_uses_named_cosine_scheduler(self):
         model = torch.nn.Linear(2, 1)
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
