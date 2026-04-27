@@ -684,8 +684,7 @@ def _move_batch_to_device(batch_data, device):
     Xb, inputs_dict, yb = batch_data
     Xb = Xb.to(device)
     inputs_dict = {
-        k: v.to(device) if torch.is_tensor(v) else v
-        for k, v in inputs_dict.items()
+        k: v.to(device) if torch.is_tensor(v) else v for k, v in inputs_dict.items()
     }
     yb = yb.to(device)
     return Xb, inputs_dict, yb
@@ -927,14 +926,18 @@ def _maybe_prepare_feature_cache_model(
 
 
 def _save_checkpoint(model, model_path):
-    if hasattr(model, "save_checkpoint") and callable(getattr(model, "save_checkpoint")):
+    if hasattr(model, "save_checkpoint") and callable(
+        getattr(model, "save_checkpoint")
+    ):
         model.save_checkpoint(model_path)
     else:
         torch.save(model.state_dict(), model_path)
 
 
 def _load_checkpoint(model, model_path):
-    if hasattr(model, "load_checkpoint") and callable(getattr(model, "load_checkpoint")):
+    if hasattr(model, "load_checkpoint") and callable(
+        getattr(model, "load_checkpoint")
+    ):
         model.load_checkpoint(model_path)
     else:
         model.load_state_dict(torch.load(model_path))
@@ -1220,21 +1223,24 @@ def train_decoding_model(
         model_spec, "per_subject_feature_concat", False
     )
     if use_lag_feature_cache:
+        print("Setting up cache...")
         _validate_lag_level_feature_cache(model_spec)
         full_lag_loader = _build_full_lag_loader(
             neural_data, data_df, Y, task_config, training_params
         )
-        cached_lag_features, cached_lag_extra_inputs = _maybe_prepare_feature_cache_model(
-            model_spec,
-            lag,
-            full_lag_loader,
-            training_params,
-            device,
-            subject_channel_counts=(
-                subject_channel_counts
-                if getattr(model_spec, "per_subject_feature_concat", False)
-                else None
-            ),
+        cached_lag_features, cached_lag_extra_inputs = (
+            _maybe_prepare_feature_cache_model(
+                model_spec,
+                lag,
+                full_lag_loader,
+                training_params,
+                device,
+                subject_channel_counts=(
+                    subject_channel_counts
+                    if getattr(model_spec, "per_subject_feature_concat", False)
+                    else None
+                ),
+            )
         )
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
@@ -1471,7 +1477,7 @@ def extract_features_for_caching(model, loader, device, subject_channel_counts=N
     # feature aggregation
     all_features, input_dicts, y_bs = [], [], []
     with torch.no_grad():
-        for batch_data in loader:
+        for batch_data in tqdm(loader, desc="Extracting features"):
             Xb, inputs_dict, y_b = batch_data
             Xb = Xb.to(device)
             inputs_dict = {
@@ -1497,7 +1503,9 @@ def extract_features_for_caching(model, loader, device, subject_channel_counts=N
                         coord_key: chunks[s_idx]
                         for coord_key, chunks in coord_chunks.items()
                     }
-                    subject_embeddings.append(model.encode_features(chunk, **sub_kwargs))
+                    subject_embeddings.append(
+                        model.encode_features(chunk, **sub_kwargs)
+                    )
                 features = torch.cat(subject_embeddings, dim=-1)
             all_features.append(features)
             if subject_channel_counts is None:
