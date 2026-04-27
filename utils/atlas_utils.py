@@ -9,7 +9,67 @@ from scipy.spatial import KDTree
 
 
 # Placeholder for future atlas region definitions.
-REGION_GROUPS: dict[str, list[str]] = {}
+REGION_GROUPS: dict[str, list[str]] = {
+    "EAC": [
+        "L G_temp_sup-G_T_transv",
+        "L G_temp_sup-Plan_polar",
+        "L G_temp_sup-Lateral",
+        "L S_temporal_sup",
+        "L G_temp_sup-Plan_tempo",
+        "L S_temporal_transverse",
+    ],
+    "MTG": [
+        "L G_temporal_middle",
+    ],
+    "ITG": [
+        "L G_oc-temp_lat-fusifor",
+        "L S_oc-temp_lat",
+        "L G_temporal_inf",
+    ],
+    "TP": ["L Pole_temporal", "R Pole_temporal"],
+    "IFG": [
+        "L G_front_inf-Triangul",
+        "L G_front_inf-Opercular",
+        "L G_front_inf-Orbital",
+        "L S_front_inf",
+        "L Lat_Fis-ant-Vertical",
+    ],
+    "TPJ": [
+        "L G_pariet_inf-Supramar",
+        "L G_pariet_inf-Angular",
+        "L Lat_Fis-post",
+        "L S_intrapariet_and_P_trans",
+    ],
+    "PRC": [
+        "L G_precentral",
+        "L S_precentral-inf-part",
+        "L S_precentral-sup-part",
+    ],
+    "PC": [
+        "L G_postcentral",
+        "L S_postcentral",
+        "L G_and_S_subcentral",
+        "L S_central",
+        "L G_and_S_paracentral",
+    ],
+    "RIGHT": [
+        "R G_postcentral",
+        "R G_and_S_subcentral",
+        "R G_precentral",
+        "R G_pariet_inf-Angular",
+        "R Lat_Fis-post",
+        "R G_pariet_inf-Supramar",
+        "R G_front_inf-Orbital",
+        "R G_front_inf-Opercular",
+        "R G_front_inf-Triangul",
+        "R G_oc-temp_lat-fusifor",
+        "R G_temporal_inf",
+        "R G_temporal_middle",
+        "R S_temporal_sup",
+        "R G_temp_sup-Lateral",
+        "R G_temp_sup-G_T_transv",
+    ],
+}
 
 
 # Full 151-label Destrieux 2009 atlas label list (static, never changes).
@@ -231,7 +291,9 @@ def _build_region_map_from_arrays(
     result: dict[str, dict[int, list[str]]] = {}
 
     for subject_id, (elec_names, coords) in per_subject_data.items():
-        labels = _lookup_atlas_labels(coords, atlas_image, affine, DESTRIEUX_2009_LABELS)
+        labels = _lookup_atlas_labels(
+            coords, atlas_image, affine, DESTRIEUX_2009_LABELS
+        )
         grouped = group_electrodes_by_region(elec_names, labels, region_groups)
         for region_name, electrodes in grouped.items():
             result.setdefault(region_name, {})[subject_id] = electrodes
