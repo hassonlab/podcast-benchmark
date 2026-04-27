@@ -50,7 +50,8 @@ class RawNeuralDataset:
         self.preprocessor_params = preprocessor_params
         self.task_df = task_df
         self.data_durations = [raw.times[-1] for raw in raws]
-        self.subject_channel_counts = [len(raw.ch_names) for raw in raws]
+        self._raw_subject_channel_counts = [len(raw.ch_names) for raw in raws]
+        self.subject_channel_counts = list(self._raw_subject_channel_counts)
         self._sfreqs = [raw.info["sfreq"] for raw in raws]
 
         if len(set(self._sfreqs)) != 1:
@@ -59,7 +60,9 @@ class RawNeuralDataset:
             )
 
         self.sfreq = self._sfreqs[0]
-        self.raw_arrays = [raw.get_data() for raw in raws]
+        self.raw_arrays = [
+            np.asarray(raw.get_data(), dtype=np.float32) for raw in raws
+        ]
 
     def get_data_for_lag(
         self, lag: int
@@ -81,12 +84,13 @@ class RawNeuralDataset:
         tmin = lag / 1000 - self.window_width / 2
         tmax = lag / 1000 + self.window_width / 2 - 2e-3
 
-        windows_per_raw = []
         selected_rows_df = None
         subject_channel_counts = []
+        per_raw_onsets = []
+        total_channel_count = 0
 
         for raw_array, data_duration, channel_count in zip(
-            self.raw_arrays, self.data_durations, self.subject_channel_counts
+            self.raw_arrays, self.data_durations, self._raw_subject_channel_counts
         ):
             valid_mask = (self.task_df.start + tmin >= 0) & (
                 self.task_df.start + tmax <= data_duration
@@ -109,24 +113,32 @@ class RawNeuralDataset:
                     selected_rows_this_raw
                 ), "Selected rows differ across raws"
 
-            windows = np.stack(
-                [
-                    raw_array[
-                        :,
-                        onset + lag_offset : onset + lag_offset + n_window_samples,
-                    ]
-                    for onset in onset_samples[selection]
-                ]
-            )
-            windows_per_raw.append(windows)
+            per_raw_onsets.append(onset_samples[selection])
             subject_channel_counts.append(channel_count)
+            total_channel_count += channel_count
 
-        if not windows_per_raw or selected_rows_df is None:
+        if not per_raw_onsets or selected_rows_df is None:
             raise ValueError("No valid events found within data time bounds")
 
-        neural = np.concatenate(
-            windows_per_raw, axis=1
-        )  # [n_words, n_total_elec, n_window_samples]
+        neural = np.empty(
+            (len(selected_rows_df), total_channel_count, n_window_samples),
+            dtype=np.float32,
+        )
+        channel_start = 0
+        for raw_array, onset_samples, channel_count in zip(
+            self.raw_arrays, per_raw_onsets, subject_channel_counts
+        ):
+            channel_stop = channel_start + channel_count
+            for row_idx, onset in enumerate(onset_samples):
+                neural[
+                    row_idx,
+                    channel_start:channel_stop,
+                    :,
+                ] = raw_array[
+                    :,
+                    onset + lag_offset : onset + lag_offset + n_window_samples,
+                ]
+            channel_start = channel_stop
 
         if self.preprocessing_fns:
             neural = _apply_preprocessing(
