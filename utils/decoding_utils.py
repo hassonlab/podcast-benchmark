@@ -628,7 +628,6 @@ def _create_optimizer(model, training_params: TrainingParams):
 
 
 def _create_training_scheduler(optimizer, loaders, training_params: TrainingParams):
-    scheduler = None
     if training_params.lr_scheduler:
         print(f"Using {training_params.lr_scheduler} LR scheduler")
         if training_params.lr_scheduler == "cosine_annealing":
@@ -640,17 +639,26 @@ def _create_training_scheduler(optimizer, loaders, training_params: TrainingPara
             eta_min = float(training_params.learning_rate) * float(
                 getattr(training_params, "cosine_eta_min_factor", 1e-2)
             )
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=t_max, eta_min=eta_min
             )
-        else:
-            raise ValueError(
-                f"Unknown lr_scheduler: {training_params.lr_scheduler}. "
-                "Supported: None, 'cosine_annealing'"
-            )
+        raise ValueError(
+            f"Unknown lr_scheduler: {training_params.lr_scheduler}. "
+            "Supported: None, 'cosine_annealing'"
+        )
 
-    scheduler = create_lr_scheduler(optimizer, training_params)
-    return scheduler
+    return create_lr_scheduler(optimizer, training_params)
+
+
+def _step_scheduler_after_optimizer_update(scheduler):
+    if scheduler is None or isinstance(scheduler, lr_scheduler.ReduceLROnPlateau):
+        return
+    scheduler.step()
+
+
+def _step_scheduler_after_validation(scheduler, metric_value):
+    if isinstance(scheduler, lr_scheduler.ReduceLROnPlateau):
+        scheduler.step(metric_value)
 
 
 def _build_model_optimizer_scheduler(
@@ -741,8 +749,7 @@ def _run_epoch(
                         max_norm=float(training_params.clip_grad_norm),
                     )
                 optimizer.step()
-                if scheduler is not None:
-                    scheduler.step()
+                _step_scheduler_after_optimizer_update(scheduler)
                 optimizer.zero_grad()
         else:
             with torch.no_grad():
@@ -1009,8 +1016,7 @@ def _train_fold(
             if patience >= training_params.early_stopping_patience:
                 break
 
-        if scheduler is not None:
-            scheduler.step(cur)
+        _step_scheduler_after_validation(scheduler, cur)
 
         if writer is not None:
             current_lr = optimizer.param_groups[0]["lr"]

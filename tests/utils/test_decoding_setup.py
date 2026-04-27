@@ -197,6 +197,66 @@ class TestEarlyStoppingSetup:
         assert params2.early_stopping_metric in all_metrics
 
 
+class TestLearningRateSchedulerSetup:
+    """Test learning rate scheduler setup and step timing."""
+
+    def test_create_training_scheduler_uses_legacy_plateau_scheduler(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        params = TrainingParams(use_lr_scheduler=True, smaller_is_better=False)
+
+        scheduler = decoding_utils._create_training_scheduler(
+            optimizer, {"train": [None]}, params
+        )
+
+        assert isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+
+    def test_create_training_scheduler_uses_named_cosine_scheduler(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        params = TrainingParams(
+            lr_scheduler="cosine_annealing",
+            epochs=2,
+            grad_accumulation_steps=2,
+        )
+
+        scheduler = decoding_utils._create_training_scheduler(
+            optimizer, {"train": [None, None, None]}, params
+        )
+
+        assert isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
+
+    def test_plateau_scheduler_steps_only_after_validation_metric(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        params = TrainingParams(use_lr_scheduler=True, smaller_is_better=False)
+        scheduler = decoding_utils._create_training_scheduler(
+            optimizer, {"train": [None]}, params
+        )
+        scheduler.step = Mock(wraps=scheduler.step)
+
+        decoding_utils._step_scheduler_after_optimizer_update(scheduler)
+        scheduler.step.assert_not_called()
+
+        decoding_utils._step_scheduler_after_validation(scheduler, 0.7)
+        scheduler.step.assert_called_once_with(0.7)
+
+    def test_cosine_scheduler_steps_only_after_optimizer_update(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        params = TrainingParams(lr_scheduler="cosine_annealing")
+        scheduler = decoding_utils._create_training_scheduler(
+            optimizer, {"train": [None]}, params
+        )
+        scheduler.step = Mock(wraps=scheduler.step)
+
+        decoding_utils._step_scheduler_after_optimizer_update(scheduler)
+        scheduler.step.assert_called_once_with()
+
+        decoding_utils._step_scheduler_after_validation(scheduler, 0.7)
+        scheduler.step.assert_called_once_with()
+
+
 class TestGradientAccumulationSetup:
     """Test gradient accumulation configuration."""
 
