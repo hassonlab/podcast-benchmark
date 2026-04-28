@@ -11,6 +11,41 @@ from metrics.utils import (
     compute_cosine_distances,
 )
 from metrics.classification_metrics import perplexity, cross_entropy_metric
+from metrics.regression_metrics import pearson_correlation
+
+
+class TestPearsonCorrelation:
+    """Test regression correlation edge cases."""
+
+    def test_positive_correlation(self):
+        pred = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        true = torch.tensor([2.0, 4.0, 6.0, 8.0])
+
+        assert pearson_correlation(pred, true) == pytest.approx(1.0)
+
+    def test_single_sample_returns_zero(self):
+        pred = torch.tensor([1.0])
+        true = torch.tensor([1.0])
+
+        assert pearson_correlation(pred, true) == 0.0
+
+    def test_constant_prediction_returns_zero(self):
+        pred = torch.tensor([1.0, 1.0, 1.0])
+        true = torch.tensor([1.0, 2.0, 3.0])
+
+        assert pearson_correlation(pred, true) == 0.0
+
+    def test_constant_target_returns_zero(self):
+        pred = torch.tensor([1.0, 2.0, 3.0])
+        true = torch.tensor([1.0, 1.0, 1.0])
+
+        assert pearson_correlation(pred, true) == 0.0
+
+    def test_prediction_and_target_shapes_are_flattened(self):
+        pred = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
+        true = torch.tensor([2.0, 4.0, 6.0, 8.0])
+
+        assert pearson_correlation(pred, true) == pytest.approx(1.0)
 
 
 class TestComputeCosineDistances:
