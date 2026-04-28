@@ -10,6 +10,7 @@ task_config:
       num_average_samples: 8
     subject_ids:
     - 1
+    - 2
     - 3
     - 4
     - 5
