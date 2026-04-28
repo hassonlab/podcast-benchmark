@@ -5,9 +5,22 @@ import pandas as pd
 from scripts.generate_paper_results import (
     MetricConfig,
     best_lag_rows,
+    best_region_lag_rows,
+    get_metric_config,
+    iter_per_region_result_specs,
     load_current_style_run,
+    load_per_region_results,
+    load_per_region_run,
+    curve_for_metric,
+    metric_norm,
+    normalize_region_name,
+    _draw_region_polygons,
     plot_best_lag_summary,
     plot_lag_curves,
+    plot_per_region_brains,
+    plot_per_region_lag_curves,
+    region_gradient_colors,
+    resolve_nilearn_data_dir,
     select_best_lag,
     summary_wide,
 )
@@ -39,6 +52,111 @@ def test_loads_and_averages_current_style_per_subject(tmp_path):
     assert loaded["score"].tolist() == [0.6]
 
 
+def test_discovers_per_region_specs_from_existing_results_dictionary():
+    config = {
+        "results": {
+            "baseline": {
+                "content_noncontent": {
+                    "super_subject": "results/super",
+                    "per_subject": "results/subjects",
+                    "per_region": "results/regions",
+                }
+            }
+        }
+    }
+
+    specs = list(iter_per_region_result_specs(config))
+
+    assert len(specs) == 1
+    assert specs[0].model == "baseline"
+    assert specs[0].task == "content_noncontent"
+    assert specs[0].condition == "per_region"
+    assert specs[0].path == Path("results/regions")
+
+
+def test_loads_per_region_run_and_normalizes_region_names(tmp_path):
+    run_dir = tmp_path / "run"
+    write_lag_csv(run_dir / "region_eac" / "lag_performance.csv", [{"lags": 0, "score": 0.5}])
+    write_lag_csv(run_dir / "region_right" / "lag_performance.csv", [{"lags": 0, "score": 0.6}])
+
+    loaded = load_per_region_run(run_dir)
+
+    assert normalize_region_name("region_eac") == "EAC"
+    assert sorted(loaded) == ["EAC", "RIGHT"]
+    assert loaded["RIGHT"].to_dict("records") == [{"lags": 0, "score": 0.6}]
+
+
+def test_loads_per_region_results_by_task_and_model(tmp_path):
+    run_dir = tmp_path / "regions"
+    write_lag_csv(run_dir / "region_mtg" / "lag_performance.csv", [{"lags": 0, "score": 0.5}])
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_region": run_dir,
+                }
+            }
+        }
+    }
+
+    loaded = load_per_region_results(config)
+
+    assert list(loaded) == ["task"]
+    assert list(loaded["task"]) == ["baseline"]
+    assert list(loaded["task"]["baseline"]) == ["MTG"]
+
+
+def test_resolve_nilearn_data_dir_prefers_explicit_path(tmp_path):
+    explicit = tmp_path / "explicit"
+
+    assert resolve_nilearn_data_dir(tmp_path / "out", explicit) == explicit
+
+
+def test_metric_config_loads_optional_bounds():
+    metric = get_metric_config(
+        {
+            "metrics": {
+                "task": {
+                    "column": "score",
+                    "higher_is_better": True,
+                    "label": "Score",
+                    "min": 0.25,
+                    "max": 0.75,
+                }
+            }
+        },
+        "task",
+    )
+
+    assert metric.min_value == 0.25
+    assert metric.max_value == 0.75
+
+
+def test_metric_config_loads_negate_option():
+    metric = get_metric_config(
+        {
+            "metrics": {
+                "task": {
+                    "column": "loss",
+                    "higher_is_better": True,
+                    "label": "Negative loss",
+                    "negate": True,
+                }
+            }
+        },
+        "task",
+    )
+
+    assert metric.negate is True
+
+
+def test_metric_norm_uses_configured_bounds():
+    norm = metric_norm([0.4, 0.6], MetricConfig("score", True, "Score", 0.0, 1.0))
+
+    assert norm.vmin == 0.0
+    assert norm.vmax == 1.0
+
+
 def test_select_best_lag_maximize_and_minimize():
     df = pd.DataFrame({"lags": [-1, 0, 1], "score": [0.4, 0.8, 0.2], "loss": [3.0, 2.0, 1.0]})
 
@@ -47,6 +165,39 @@ def test_select_best_lag_maximize_and_minimize():
 
     assert max_row["lags"] == 0
     assert min_row["lags"] == 1
+
+
+def test_select_best_lag_uses_negated_metric_values():
+    df = pd.DataFrame({"lags": [0, 1], "loss": [2.0, 1.0]})
+
+    row = select_best_lag(df, MetricConfig("loss", True, "Negative loss", negate=True))
+
+    assert row["lags"] == 1
+    assert row["loss"] == -1.0
+
+
+def test_curve_for_metric_uses_negated_metric_values():
+    df = pd.DataFrame({"lags": [0, 1], "loss": [2.0, 1.0]})
+
+    curve = curve_for_metric(df, MetricConfig("loss", True, "Negative loss", negate=True))
+
+    assert curve["loss"].tolist() == [-2.0, -1.0]
+
+
+def test_best_region_lag_rows_selects_best_lag_per_region():
+    rows = best_region_lag_rows(
+        {
+            "EAC": pd.DataFrame({"lags": [0, 1], "score": [0.5, 0.8]}),
+            "MTG": pd.DataFrame({"lags": [0, 1], "score": [0.7, 0.4]}),
+        },
+        MetricConfig("score", True, "Score"),
+    )
+
+    by_region = rows.set_index("region")
+    assert by_region.loc["EAC", "value"] == 0.8
+    assert by_region.loc["EAC", "lag"] == 1
+    assert by_region.loc["MTG", "value"] == 0.7
+    assert by_region.loc["MTG", "lag"] == 0
 
 
 def test_plot_lag_curves_preserves_unequal_lag_sets(tmp_path):
@@ -69,6 +220,137 @@ def test_plot_lag_curves_preserves_unequal_lag_sets(tmp_path):
     )
 
     assert (tmp_path / "lag_curves_task_super_subject.png").exists()
+
+
+def test_plot_lag_curves_applies_metric_bounds(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_figure(fig, output_base, formats):
+        captured["fig"] = fig
+        captured["output_base"] = output_base
+        captured["formats"] = formats
+
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+    loaded = {
+        "super_subject": {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
+            }
+        }
+    }
+    config = {
+        "metrics": {
+            "task": {
+                "column": "score",
+                "higher_is_better": True,
+                "label": "Score",
+                "min": 0.0,
+                "max": 1.0,
+            }
+        }
+    }
+
+    plot_lag_curves(
+        loaded,
+        config,
+        tmp_path,
+        formats=["png"],
+        colors={"baseline": "#000000"},
+    )
+
+    assert captured["fig"].axes[0].get_ylim() == (0.0, 1.0)
+
+
+def test_region_gradient_colors_use_stable_low_to_high_order():
+    colors = region_gradient_colors(["TP", "EAC", "MTG"])
+
+    assert list(colors) == ["EAC", "MTG", "TP"]
+
+
+def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
+    per_region_results = {
+        "content": {
+            "baseline": {
+                "EAC": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
+                "MTG": pd.DataFrame({"lags": [-1, 0], "score": [0.4, 0.7]}),
+            }
+        },
+        "syntax": {
+            "baseline": {
+                "EAC": pd.DataFrame({"lags": [-1, 0], "score": [0.3, 0.4]}),
+                "TP": pd.DataFrame({"lags": [-1, 0], "score": [0.7, 0.8]}),
+            }
+        }
+    }
+    config = {
+        "metrics": {
+            "content": {"column": "score", "higher_is_better": True, "label": "Score"},
+            "syntax": {"column": "score", "higher_is_better": True, "label": "Score"},
+        }
+    }
+
+    plot_per_region_lag_curves(per_region_results, config, tmp_path, formats=["png"])
+
+    assert (tmp_path / "per_region_lags_baseline.png").exists()
+
+
+def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monkeypatch):
+    electrodes = pd.DataFrame(
+        [
+            {"x": -42.0, "y": -20.0, "z": 18.0, "region_group": "EAC"},
+            {"x": -38.0, "y": -18.0, "z": 22.0, "region_group": "EAC"},
+            {"x": -36.0, "y": -24.0, "z": 20.0, "region_group": "EAC"},
+            {"x": 42.0, "y": -18.0, "z": 24.0, "region_group": "RIGHT"},
+            {"x": 44.0, "y": -14.0, "z": 26.0, "region_group": "RIGHT"},
+            {"x": 39.0, "y": -20.0, "z": 21.0, "region_group": "RIGHT"},
+        ]
+    )
+    monkeypatch.setattr("scripts.generate_paper_results._load_region_electrodes", lambda *args: electrodes)
+    per_region_results = {
+        "task": {
+            "baseline": {
+                "EAC": pd.DataFrame({"lags": [0, 1], "score": [0.5, 0.6]}),
+                "RIGHT": pd.DataFrame({"lags": [0, 1], "score": [0.7, 0.4]}),
+            }
+        }
+    }
+    config = {"metrics": {"task": {"column": "score", "higher_is_better": True, "label": "Score"}}}
+
+    plot_per_region_brains(
+        per_region_results,
+        config,
+        tmp_path,
+        formats=["png"],
+        data_root=tmp_path,
+        nilearn_data_dir=tmp_path / "nilearn",
+        include_bad=False,
+    )
+
+    assert (tmp_path / "per_region_brain_baseline_task.png").exists()
+
+
+def test_region_polygon_labels_include_electrode_counts():
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    electrodes = pd.DataFrame(
+        [
+            {"x": -1.0, "y": 0.0, "z": 0.0, "region_group": "EAC"},
+            {"x": -1.0, "y": 1.0, "z": 0.0, "region_group": "EAC"},
+            {"x": -1.0, "y": 0.0, "z": 1.0, "region_group": "EAC"},
+        ]
+    )
+
+    _draw_region_polygons(
+        ax,
+        electrodes,
+        {"EAC": 0.5},
+        plt.get_cmap("viridis"),
+        metric_norm([0.5], MetricConfig("score", True, "Score")),
+    )
+
+    assert any(text.get_text() == "EAC\nn=3" for text in ax.texts)
+    plt.close(fig)
 
 
 def test_plot_best_lag_summary_uses_independent_task_y_axes(tmp_path, monkeypatch):
