@@ -2,6 +2,7 @@ from collections import Counter
 from typing import Optional
 import os
 import math
+import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset, Dataset, Dataset
+from torchmetrics.regression import PearsonCorrCoef
 from mup import MuAdam, MuAdamW
 
 # Optional TensorBoard support
@@ -498,9 +500,17 @@ def train_decoding_model(
         else:
             model.eval()
 
+        accumulate_corr = "corr" in metric_names
+        corr_metric = PearsonCorrCoef().to(device) if accumulate_corr else None
+        batch_metric_fns = {
+            name: fn
+            for name, fn in all_fns.items()
+            if not (accumulate_corr and name == "corr")
+        }
+
         # Initialize sums with None for confusion matrix, 0.0 for others
         sums = {}
-        for name in metric_names:
+        for name in batch_metric_fns:
             sums[name] = None if name == "confusion_matrix" else 0.0
         sums["loss"] = 0.0
 
@@ -558,8 +568,14 @@ def train_decoding_model(
                     # Loss calculation
                     loss = compute_loss(out, yb, training_params, all_fns)
 
-            # Compute all metrics for this batch using the helper function
-            batch_metrics = compute_all_metrics(out, yb, all_fns, model_spec.params)
+            if accumulate_corr:
+                corr_metric.update(out.detach().reshape(-1), yb.detach().reshape(-1))
+
+            # Compute batch-averaged metrics using the helper function.
+            # Correlation is accumulated across the full epoch above.
+            batch_metrics = compute_all_metrics(
+                out, yb, batch_metric_fns, model_spec.params
+            )
 
             # Accumulate metrics
             for name, val in batch_metrics.items():
@@ -581,6 +597,16 @@ def train_decoding_model(
             )
             for name in sums
         }
+
+        if accumulate_corr:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="The variance of predictions or target is close to zero.*",
+                    category=UserWarning,
+                )
+                corr = corr_metric.compute()
+            result["corr"] = corr.item() if torch.isfinite(corr) else 0.0
 
         # Calculate perplexity as derived metric from averaged cross_entropy
         if "cross_entropy" in result:
