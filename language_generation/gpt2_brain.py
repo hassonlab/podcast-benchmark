@@ -240,7 +240,7 @@ class GPT2Brain(nn.Module):
     def _build_prompt_embeddings(self, neural_embedding, input_ids, attention_mask, **encoder_inputs):
         
         device = input_ids.device
-        batch_size = neural_embedding.shape[0]
+        batch_size = input_ids.shape[0]
 
         all_tokens = []
         num_neural_tokens = 0
