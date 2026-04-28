@@ -26,7 +26,9 @@ REGION_GROUPS: dict[str, list[str]] = {
         "L S_oc-temp_lat",
         "L G_temporal_inf",
     ],
-    "TP": ["L Pole_temporal", "R Pole_temporal"],
+    "TP": [
+        "L Pole_temporal",
+    ],
     "IFG": [
         "L G_front_inf-Triangul",
         "L G_front_inf-Opercular",
@@ -68,6 +70,7 @@ REGION_GROUPS: dict[str, list[str]] = {
         "R S_temporal_sup",
         "R G_temp_sup-Lateral",
         "R G_temp_sup-G_T_transv",
+        "R Pole_temporal",
     ],
 }
 
