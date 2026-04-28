@@ -66,7 +66,6 @@ GPU_COUNT=""
 CPU_COUNT=""
 PYTHON_ENV=""
 JOB_NAME=""
-OUTPUT_SUFFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 HAS_FOLD_OVERRIDE=0
 HAS_LAG_OVERRIDE=0
@@ -140,10 +139,6 @@ while [[ $# -gt 0 ]]; do
                     ;;
             esac
             MAIN_ARGS+=("--${2}")
-            shift 2
-            ;;
-        --output-suffix)
-            OUTPUT_SUFFIX="${2:?missing value for --output-suffix}"
             shift 2
             ;;
         --dry-run)
@@ -224,13 +219,9 @@ fi
 
 # Output dirs (same layout as slurm_worker)
 if [[ -n "$MODEL" && -n "$TASK" ]]; then
-    SUFFIX_PATH="${VARIANT}"
-    if [[ -n "$OUTPUT_SUFFIX" ]]; then
-        SUFFIX_PATH="${VARIANT}/${OUTPUT_SUFFIX}"
-    fi
-    OUTPUT_DIR="${PROJECT_ROOT}/results/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
-    CHECKPOINT_DIR="${PROJECT_ROOT}/checkpoints/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
-    TENSORBOARD_DIR="${PROJECT_ROOT}/event_logs/foundation_models/${MODEL}/${TASK}/${SUFFIX_PATH}"
+    OUTPUT_DIR="${PROJECT_ROOT}/results/foundation_models/${MODEL}/${TASK}/${VARIANT}"
+    CHECKPOINT_DIR="${PROJECT_ROOT}/checkpoints/foundation_models/${MODEL}/${TASK}/${VARIANT}"
+    TENSORBOARD_DIR="${PROJECT_ROOT}/event_logs/foundation_models/${MODEL}/${TASK}/${VARIANT}"
     mkdir -p "$OUTPUT_DIR" "$CHECKPOINT_DIR" "$TENSORBOARD_DIR"
     MAIN_ARGS+=(
         "--output_dir=${OUTPUT_DIR}"
@@ -240,22 +231,22 @@ if [[ -n "$MODEL" && -n "$TASK" ]]; then
 fi
 
 # Activate environment (same pattern as slurm_worker_nersc.sh)
-# activate_env() {
-#     if [[ -f "${PYTHON_ENV}/bin/activate" ]]; then
-#         source "${PYTHON_ENV}/bin/activate"
-#     elif [[ -f "${PYTHON_ENV}/bin/python" ]]; then
-#         export PATH="${PYTHON_ENV}/bin:${PATH}"
-#     else
-#         module load conda 2>/dev/null || true
-#         set +u
-#         export PS1="${PS1-}"
-#         eval "$(conda shell.bash hook)"
-#         conda activate "$PYTHON_ENV"
-#         set -u
-#     fi
-# }
+activate_env() {
+    if [[ -f "${PYTHON_ENV}/bin/activate" ]]; then
+        source "${PYTHON_ENV}/bin/activate"
+    elif [[ -f "${PYTHON_ENV}/bin/python" ]]; then
+        export PATH="${PYTHON_ENV}/bin:${PATH}"
+    else
+        module load conda 2>/dev/null || true
+        set +u
+        export PS1="${PS1-}"
+        eval "$(conda shell.bash hook)"
+        conda activate "$PYTHON_ENV"
+        set -u
+    fi
+}
 
-# activate_env
+activate_env
 
 if [[ -z "$JOB_NAME" && -n "$MODEL" && -n "$TASK" ]]; then
     JOB_NAME="pb-${MODEL}-${TASK}-${VARIANT}"

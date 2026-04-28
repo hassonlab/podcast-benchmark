@@ -12,27 +12,21 @@ set -euo pipefail
 # python processes sharing the same GPU(s).
 #
 # Usage:
-#   cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark/
-#   ./job_script_in_interactive_supersubject.sh [--max-parallel N] [--dry-run] [--models a,b] [--tasks a,b] [--lags x,y]
+#   ./commands/job_script_in_interactive_supersubject.sh [--max-parallel N] [--dry-run]
 #
 # Options:
 #   --max-parallel N   Max concurrent jobs (default: 1)
 #   --dry-run          Print jobs without running
-#   --models a,b       Override model list (comma-separated)
-#   --tasks a,b        Override task list directly (comma-separated)
-#   --lags x,y         Override lag list (comma-separated, e.g. 0 or -250,0,250)
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${SCRIPT_DIR}"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 MAX_PARALLEL=2
 DRY_RUN=0
 CLI_MODELS=()
-CLI_TASKS=()
-CLI_LAGS=()
 
-# cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark/
+# cd /pscratch/sd/a/ahhyun/EcoGFound/PODCAST/podcast-benchmark/commands
 # CUDA_VISIBLE_DEVICES=0 bash job_script_in_interactive_supersubject.sh --models diver
 # CUDA_VISIBLE_DEVICES=1 bash job_script_in_interactive_supersubject.sh --models popt
 # CUDA_VISIBLE_DEVICES=2 bash job_script_in_interactive_supersubject.sh --models brainbert
@@ -42,8 +36,6 @@ while [[ $# -gt 0 ]]; do
         --max-parallel) MAX_PARALLEL="${2:?missing value}"; shift 2 ;;
         --dry-run)      DRY_RUN=1; shift ;;
         --models)       IFS=',' read -ra CLI_MODELS <<< "${2:?missing value}"; shift 2 ;;
-        --tasks)        IFS=',' read -ra CLI_TASKS <<< "${2:?missing value}"; shift 2 ;;
-        --lags)         IFS=',' read -ra CLI_LAGS <<< "${2:?missing value}"; shift 2 ;;
         --help|-h)
             sed -n '/^# =====/,/^# =====/p' "$0" | grep '^#' | sed 's/^# //'
             exit 0
@@ -62,46 +54,32 @@ models=(
 if (( ${#CLI_MODELS[@]} > 0 )); then
     models=("${CLI_MODELS[@]}")
 fi
+    # "brainbert" 0s
+    # "popt" 2
+    # "diver" 1
 
+tasks=("sentence_onset")
 
-tasks=(
-    "content_noncontent"
-    "gpt_surprise_multiclass"
-    "gpt_surprise" 
-    # "iu_boundary"
-          
-    # "llm_embedding_pretraining"    #!don't exsit for baseline? or is it llm_token_finetune_2025-12-26-12-44-36
-    # "pos"
-    # "sentence_onset"
-    # "whisper_embedding"        
-)
-#* Danny will run
-    #"llm_decoding"     
-    #"volume_level"  
-    # "word_embedding"          # bug for DIVER? needs check     
-    
-lags=(0 250)
+# tasks=(
+#     "whisper_embedding"
+#     "gpt_surprise"
+#     "pos"
+#     "content_noncontent"
+#     "gpt_surprise_multiclass"
+#     "iu_boundary"
+#     "llm_embedding_pretraining"
+#     "sentence_onset"
+#     "volume_level"
+# )
 
-if (( ${#CLI_TASKS[@]} > 0 )); then
-    tasks=("${CLI_TASKS[@]}")
-fi
+    # "llm_decoding"
+    # "word_embedding"
 
-if (( ${#CLI_LAGS[@]} > 0 )); then
-    lags=("${CLI_LAGS[@]}")
-fi
+lags=(0)
 
 variants=(
-    #"supersubject"
-    "persubject_concat"
+    "supersubject"
 )
-
-# ---- Sig10 mode ----
-# Set USE_SIG10=1 to loop per-subject with sig10 electrode files.
-# When enabled, supersubject variant maps to subject{N}_full configs,
-# and electrode_file_path is overridden to processed_data/sig10/sub{N}_sig.csv.
-# When disabled (default), runs with the variant config as-is (SigFull).
-USE_SIG10=0
-subjects=(1 3 4 5 6 7 8 9) #* left out sub2 since 1) it's noisy and 2) not included in supersubject csv file.
 
 # ---- Logging ----
 LOG_DIR="${PROJECT_ROOT}/logs/interactive_batch"
@@ -162,79 +140,43 @@ for task in "${tasks[@]}"; do
         for model in "${models[@]}"; do
             for variant in "${variants[@]}"; do
 
-                # Build subject list: if USE_SIG10, loop per-subject; otherwise single iteration
-                if [[ "${USE_SIG10}" == "1" ]]; then
-                    iter_subjects=("${subjects[@]}")
-                else
-                    iter_subjects=("")
+                config="configs/foundation_models/${model}/${task}/${variant}.yml"
+                if [[ ! -f "${PROJECT_ROOT}/${config}" ]]; then
+                    skipped_jobs+=("${model}/${task}/${variant}/lag${lag}")
+                    continue
                 fi
 
-                for subj in "${iter_subjects[@]}"; do
+                job_label="${model}/${task}/${variant}/lag${lag}"
+                job_log="${LOG_DIR}/${model}_${task}_${variant}_lag${lag}_${TIMESTAMP}.log"
+                total_jobs=$((total_jobs + 1))
 
-                    # Resolve variant & overrides for sig10 mode
-                    actual_variant="$variant"
-                    sig10_overrides=()
-                    suffix_args=()
-                    subj_tag=""
+                if [[ "$DRY_RUN" == "1" ]]; then
+                    echo "[DRY]   $job_label"
+                    continue
+                fi
 
-                    if [[ -n "$subj" && "${USE_SIG10}" == "1" ]]; then
-                        # For supersubject variant, map to subject{N}_full config
-                        if [[ "$variant" == "supersubject" ]]; then
-                            actual_variant="subject${subj}_full"
-                        fi
-                        sig_file="processed_data/sig10/sub${subj}_sig.csv"
-                        if [[ ! -f "${PROJECT_ROOT}/${sig_file}" ]]; then
-                            echo "[WARN]  sig10 file not found: ${sig_file}, skipping"
-                            skipped_jobs+=("${model}/${task}/${variant}_sig10/sub${subj}/lag${lag}")
-                            continue
-                        fi
-                        sig10_overrides=(
-                            --override "task_config.data_params.electrode_file_path=${sig_file}"
-                        )
-                        suffix_args=(--output-suffix "sig10")
-                        subj_tag="/sub${subj}"
-                    fi
+                wait_for_slot
 
-                    config="configs/foundation_models/${model}/${task}/${actual_variant}.yml"
-                    if [[ ! -f "${PROJECT_ROOT}/${config}" ]]; then
-                        skipped_jobs+=("${model}/${task}/${actual_variant}${subj_tag}/lag${lag}")
-                        continue
-                    fi
+                echo "[START] $job_label (slot ${#pids[@]}+1/${MAX_PARALLEL})"
 
-                    job_label="${model}/${task}/${actual_variant}${subj_tag}/lag${lag}"
-                    job_log="${LOG_DIR}/${model}_${task}_${actual_variant}${subj:+_sub${subj}}_lag${lag}_${TIMESTAMP}.log"
-                    total_jobs=$((total_jobs + 1))
+                "${PROJECT_ROOT}/commands/run-local.sh" \
+                    --model "$model" \
+                    --task "$task" \
+                    --variant "$variant" \
+                    --fold-ids "[1,5]" \
+                    --lag "$lag" \
+                    --override "model_spec.feature_cache=False" \
+                    > "$job_log" 2>&1 &
 
-                    if [[ "$DRY_RUN" == "1" ]]; then
-                        echo "[DRY]   $job_label"
-                        continue
-                    fi
+                pids+=($!)
+                job_names+=("$job_label")
 
-                    wait_for_slot
-
-                    echo "[START] $job_label (slot ${#pids[@]}+1/${MAX_PARALLEL})"
-
-                    "${PROJECT_ROOT}/commands/run-local.sh" \
-                        --model "$model" \
-                        --task "$task" \
-                        --variant "$actual_variant" \
-                        --fold-ids "[1,2,3,4,5]" \
-                        --lag "$lag" \
-                        --override "model_spec.feature_cache=True" \
-                        "${sig10_overrides[@]+"${sig10_overrides[@]}"}" \
-                        "${suffix_args[@]+"${suffix_args[@]}"}" \
-                        > "$job_log" 2>&1 &
-
-                    pids+=($!)
-                    job_names+=("$job_label")
-
-                done
             done
         done
     done
 done
 
-# Wait until every background job has finished (reap updates pids)
+# Wait for remaining jobs
 while (( ${#pids[@]} > 0 )); do
     reap_finished
     if (( ${#pids[@]} > 0 )); then
