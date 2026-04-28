@@ -345,7 +345,7 @@ class DIVERDecoder(nn.Module):
     Handles data format conversion and output activation.
     """
     
-    def __init__(self, diver_model, output_activation: str = "linear"):
+    def __init__(self, diver_model, output_activation: str = "linear", output_dim=None):
         """
         Args:
             diver_model: DIVER FineTuneModel instance (flatten_linear_finetune or flatten_mlp_finetune)
@@ -353,10 +353,12 @@ class DIVERDecoder(nn.Module):
                 - "sigmoid": For binary classification (output_dim=1)
                 - "softmax": For multiclass classification (output_dim>1)
                 - "linear": No activation (for regression)
+            output_dim: The output dimensionality output by the model
         """
         super().__init__()
         self.diver_model = diver_model
         self.output_activation = output_activation
+        self.output_dim = output_dim
     
     def forward(self, x, **kwargs):
         """
@@ -642,7 +644,7 @@ def create_diver_finetuning_model(model_params):
     output_activation = _resolve_output_activation(model_params)
     
     # Wrap in DIVERDecoder for Podcast benchmark interface
-    decoder = DIVERDecoder(diver_model, output_activation=output_activation)
+    decoder = DIVERDecoder(diver_model, output_activation=output_activation, output_dim=output_dim)
     
     return decoder
 

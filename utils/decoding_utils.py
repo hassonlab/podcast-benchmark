@@ -810,7 +810,7 @@ def train_decoding_model(
             elif model_name == "ReferencePOPTDecoder":
                 output_dim = model.output_dim
             elif model_name == "DIVERDecoder":
-                output_dim = model.diver_model.ft_model_output_adapter[-1].out_features
+                output_dim = model.output_dim
             else:
                 raise NotImplementedError(
                     f"per_subject_feature_concat not implemented for model: {model_name}"
@@ -1260,9 +1260,9 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
     """
     model.eval()
     all_features, y_bs = [], []
-    import pdb
+    # import pdb
 
-    pdb.set_trace()
+    # pdb.set_trace()
     with torch.no_grad():
         for batch_data in loader:
             Xb, inputs_dict, y_b = batch_data
@@ -1294,9 +1294,9 @@ def extract_per_subject_concat_features(model, loader, subject_channel_counts, d
             concat_emb = torch.cat(subject_embeddings, dim=-1)
             all_features.append(concat_emb)
             y_bs.append(y_b)
-    import pdb
+    # import pdb
 
-    pdb.set_trace()
+    # pdb.set_trace()
     concat_features = torch.cat(all_features, dim=0)
     n_subjects = len(subject_channel_counts)
     embed_dim = concat_features.shape[-1] // n_subjects
