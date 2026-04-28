@@ -6,8 +6,11 @@ import numpy as np
 
 from core.config import BaseTaskConfig, TaskConfig, ExperimentConfig
 from core import registry
-from language_generation.gpt2_brain import load_gpt2_model_and_tokenizer
 from models.shared_config_setters import set_model_spec_fields
+from language_generation.gpt2_brain import (
+    load_gpt2_model_and_tokenizer,
+    load_gpt2_tokenizer,
+)
 
 
 @dataclass
@@ -76,7 +79,7 @@ def llm_decoding_task(task_config: TaskConfig, tokenizer=None):
     """Task for LLM decoding."""
     config: LlmDecodingConfig = task_config.task_specific_config
     if tokenizer is None:
-        _, tokenizer = load_gpt2_model_and_tokenizer(
+        tokenizer = load_gpt2_tokenizer(
             cache_dir=task_config.task_specific_config.cache_dir,
         )
     max_context = config.max_context
