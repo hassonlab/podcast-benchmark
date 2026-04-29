@@ -12,6 +12,7 @@ tasks:
         num_average_samples: 32
       subject_ids: &id001
       - 1
+      - 2
       - 3
       - 4
       - 5

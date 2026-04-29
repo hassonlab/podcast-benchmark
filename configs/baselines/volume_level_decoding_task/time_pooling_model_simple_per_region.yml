@@ -11,6 +11,7 @@ task_config:
     preprocessing_fn_name: window_rms
     subject_ids:
     - 1
+    - 2
     - 3
     - 4
     - 5
