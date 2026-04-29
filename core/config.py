@@ -238,6 +238,9 @@ class ExperimentConfig:
     training_params: TrainingParams = field(default_factory=lambda: TrainingParams())
     # Determines how runs are split within one timestamped parent run.
     run_mode: RunMode = RunMode.COMBINED
+    # For per-region runs, optionally restrict execution to these region names.
+    # If None, all configured regions are run.
+    regions: Optional[list[str]] = None
     # Name for trial. Will be used for separating results in storage. Can use format strings such as
     # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""

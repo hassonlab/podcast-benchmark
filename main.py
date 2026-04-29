@@ -273,6 +273,21 @@ def _build_run_units(experiment_config: ExperimentConfig, base_raws):
             raws=base_raws,
             region_groups=REGION_GROUPS,
         )
+        if experiment_config.regions is not None:
+            requested_regions = set(experiment_config.regions)
+            available_regions = set(region_map.keys())
+            unknown_regions = requested_regions - available_regions
+            if unknown_regions:
+                raise ValueError(
+                    "Unknown regions requested: "
+                    f"{sorted(unknown_regions)}. Available regions: "
+                    f"{sorted(available_regions)}"
+                )
+            region_map = {
+                region_name: region_subjects
+                for region_name, region_subjects in region_map.items()
+                if region_name in requested_regions
+            }
 
         run_units = []
         for region_name, region_subjects in region_map.items():

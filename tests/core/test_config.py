@@ -178,6 +178,14 @@ class TestYAMLIntegration:
 
         assert config.run_mode == RunMode.PER_REGION
 
+    def test_regions_deserializes_to_list(self):
+        config = dict_to_config(
+            {"run_mode": "per_region", "regions": ["EAC", "MTG"]},
+            ExperimentConfig,
+        )
+
+        assert config.regions == ["EAC", "MTG"]
+
     def test_roundtrip_conversion(self, sample_experiment_config):
         """Test that config can be converted to dict and back without loss."""
         # Convert to dict (as would be done for YAML serialization)

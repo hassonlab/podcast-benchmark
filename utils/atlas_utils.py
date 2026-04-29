@@ -25,6 +25,7 @@ REGION_GROUPS: dict[str, list[str]] = {
         "L G_oc-temp_lat-fusifor",
         "L S_oc-temp_lat",
         "L G_temporal_inf",
+        "L S_temporal_inf",
     ],
     "TP": [
         "L Pole_temporal",
@@ -35,12 +36,14 @@ REGION_GROUPS: dict[str, list[str]] = {
         "L G_front_inf-Orbital",
         "L S_front_inf",
         "L Lat_Fis-ant-Vertical",
+        "L Lat_Fis-ant-Horizont",
     ],
     "TPJ": [
         "L G_pariet_inf-Supramar",
         "L G_pariet_inf-Angular",
         "L Lat_Fis-post",
         "L S_intrapariet_and_P_trans",
+        "L S_interm_prim-Jensen",
     ],
     "PRC": [
         "L G_precentral",
@@ -57,6 +60,8 @@ REGION_GROUPS: dict[str, list[str]] = {
     "RIGHT": [
         "R G_postcentral",
         "R S_postcentral",
+        "R S_interm_prim-Jensen",
+        "R Lat_Fis-ant-Horizont",
         "R S_central",
         "R G_and_S_paracentral",
         "R G_and_S_subcentral",
@@ -83,6 +88,7 @@ REGION_GROUPS: dict[str, list[str]] = {
         "R G_temp_sup-Plan_tempo",
         "R Pole_temporal",
         "R S_temporal_transverse",
+        "R S_temporal_inf",
     ],
 }
 

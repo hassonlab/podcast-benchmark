@@ -263,6 +263,81 @@ def test_run_single_task_per_region_mode_splits_runs_by_region(
     assert second_args[1] == [raws[0]]
 
 
+def test_run_single_task_per_region_mode_filters_regions(
+    monkeypatch, base_experiment_config, task_df
+):
+    base_experiment_config.run_mode = RunMode.PER_REGION
+    base_experiment_config.regions = ["Frontal/Opercular"]
+    raws = [
+        SimpleNamespace(name="raw-2", ch_names=["A1", "A2", "X9"]),
+        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+    ]
+    _configure_common_mocks(monkeypatch, raws, task_df)
+
+    training_calls = []
+
+    monkeypatch.setattr(
+        main,
+        "build_electrode_region_map",
+        lambda **_kwargs: {
+            "Temporal Pole": {2: ["A1"], 5: ["B1"]},
+            "Frontal/Opercular": {2: ["A2"]},
+        },
+    )
+
+    monkeypatch.setattr(main.registry, "config_setter_registry", {"test_setter": lambda config, *_args: config})
+    monkeypatch.setattr(main.registry, "model_constructor_registry", {"test_model": {}})
+    monkeypatch.setattr(
+        main.registry,
+        "model_data_getter_registry",
+        {"test_getter": lambda df, _raws, _params: (df.assign(extra=1), ["extra"])},
+    )
+    monkeypatch.setattr(
+        main.decoding_utils,
+        "run_training_over_lags",
+        lambda *args, **kwargs: training_calls.append((args, kwargs)),
+    )
+
+    main.run_single_task(base_experiment_config)
+
+    assert len(training_calls) == 1
+    args, kwargs = training_calls[0]
+    assert kwargs["output_dir"].endswith(
+        "results/trial_2026-04-23-12-34-56/region_frontal_opercular"
+    )
+    assert list(kwargs["task_config"].data_params.subject_ids) == [2]
+    assert kwargs["task_config"].data_params.per_subject_electrodes == {2: ["A2"]}
+    assert args[1] == [raws[0]]
+
+
+def test_run_single_task_per_region_mode_rejects_unknown_region(
+    monkeypatch, base_experiment_config, task_df
+):
+    base_experiment_config.run_mode = RunMode.PER_REGION
+    base_experiment_config.regions = ["Missing"]
+    raws = [
+        SimpleNamespace(name="raw-2", ch_names=["A1"]),
+        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+    ]
+    _configure_common_mocks(monkeypatch, raws, task_df)
+
+    monkeypatch.setattr(
+        main,
+        "build_electrode_region_map",
+        lambda **_kwargs: {
+            "Temporal Pole": {2: ["A1"]},
+        },
+    )
+    monkeypatch.setattr(
+        main.decoding_utils,
+        "run_training_over_lags",
+        lambda *args, **kwargs: pytest.fail("training should not run"),
+    )
+
+    with pytest.raises(ValueError, match="Unknown regions requested"):
+        main.run_single_task(base_experiment_config)
+
+
 def test_run_single_task_rejects_split_concat_mode(
     monkeypatch, base_experiment_config, task_df
 ):
