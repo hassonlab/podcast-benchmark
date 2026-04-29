@@ -11,15 +11,18 @@ from scripts.generate_paper_results import (
     _draw_surface_region_boundaries,
     _draw_surface_region_labels,
     _surface_contour_map,
+    best_lag_significance_tests,
     best_lag_rows,
     best_region_lag_rows,
     get_metric_config,
+    holm_adjust_p_values,
     iter_per_region_result_specs,
     load_current_style_run,
     load_per_region_results,
     load_per_region_run,
     curve_for_metric,
     metric_norm,
+    significance_label,
     normalize_region_name,
     plot_best_lag_summary,
     plot_lag_curves,
@@ -188,6 +191,123 @@ def test_curve_for_metric_uses_negated_metric_values():
     curve = curve_for_metric(df, MetricConfig("loss", True, "Negative loss", negate=True))
 
     assert curve["loss"].tolist() == [-2.0, -1.0]
+
+
+def test_best_lag_significance_tests_compare_winner_to_others_at_best_lags():
+    task_results = {
+        "baseline": pd.DataFrame(
+            {
+                "lags": [0, 1],
+                "score_mean": [0.60, 0.80],
+                "score_fold_1": [0.58, 0.79],
+                "score_fold_2": [0.59, 0.82],
+                "score_fold_3": [0.60, 0.81],
+                "score_fold_4": [0.61, 0.84],
+                "score_fold_5": [0.62, 0.83],
+            }
+        ),
+        "diver": pd.DataFrame(
+            {
+                "lags": [0, 1],
+                "score_mean": [0.55, 0.62],
+                "score_fold_1": [0.53, 0.61],
+                "score_fold_2": [0.55, 0.64],
+                "score_fold_3": [0.57, 0.60],
+                "score_fold_4": [0.56, 0.65],
+                "score_fold_5": [0.54, 0.59],
+            }
+        ),
+    }
+    summary = best_lag_rows(
+        {"task": task_results},
+        {"task": MetricConfig("score_mean", True, "Score")},
+    )
+
+    comparisons = best_lag_significance_tests(
+        summary,
+        task_results,
+        MetricConfig("score_mean", True, "Score"),
+    )
+
+    assert len(comparisons) == 1
+    assert comparisons[0]["winner"] == "baseline"
+    assert comparisons[0]["other"] == "diver"
+    assert comparisons[0]["label"] in {"*", "**", "***"}
+    assert comparisons[0]["n"] == 5
+
+
+def test_best_lag_significance_tests_can_skip_holm_correction():
+    task_results = {
+        "winner": pd.DataFrame(
+            {
+                "lags": [0],
+                "score_mean": [0.80],
+                "score_fold_1": [0.80],
+                "score_fold_2": [0.82],
+                "score_fold_3": [0.81],
+                "score_fold_4": [0.83],
+                "score_fold_5": [0.84],
+            }
+        ),
+        "close": pd.DataFrame(
+            {
+                "lags": [0],
+                "score_mean": [0.79],
+                "score_fold_1": [0.79],
+                "score_fold_2": [0.81],
+                "score_fold_3": [0.80],
+                "score_fold_4": [0.82],
+                "score_fold_5": [0.83],
+            }
+        ),
+        "low": pd.DataFrame(
+            {
+                "lags": [0],
+                "score_mean": [0.60],
+                "score_fold_1": [0.60],
+                "score_fold_2": [0.61],
+                "score_fold_3": [0.62],
+                "score_fold_4": [0.63],
+                "score_fold_5": [0.64],
+            }
+        ),
+    }
+    summary = best_lag_rows(
+        {"task": task_results},
+        {"task": MetricConfig("score_mean", True, "Score")},
+    )
+
+    uncorrected = best_lag_significance_tests(
+        summary,
+        task_results,
+        MetricConfig("score_mean", True, "Score"),
+        correct_multiple_comparisons=False,
+    )
+    corrected = best_lag_significance_tests(
+        summary,
+        task_results,
+        MetricConfig("score_mean", True, "Score"),
+        correct_multiple_comparisons=True,
+    )
+
+    uncorrected_by_model = {item["other"]: item for item in uncorrected}
+    corrected_by_model = {item["other"]: item for item in corrected}
+    assert uncorrected_by_model["low"]["label"] == "*"
+    assert corrected_by_model["low"]["label"] == "n.s."
+    assert corrected_by_model["low"]["p_value"] > uncorrected_by_model["low"]["p_value"]
+
+
+def test_significance_label_formats_standard_thresholds():
+    assert significance_label(0.0005) == "***"
+    assert significance_label(0.005) == "**"
+    assert significance_label(0.04) == "*"
+    assert significance_label(0.20) == "n.s."
+
+
+def test_holm_adjust_p_values_controls_familywise_error_in_order():
+    adjusted = holm_adjust_p_values([0.03, 0.01, 0.04])
+
+    assert adjusted == [0.06, 0.03, 0.06]
 
 
 def test_best_region_lag_rows_selects_best_lag_per_region():
@@ -562,6 +682,58 @@ def test_plot_best_lag_summary_uses_independent_task_y_axes(tmp_path, monkeypatc
     axes = captured["fig"].axes[:2]
     assert len(axes) == 2
     assert axes[0].get_ylim() != axes[1].get_ylim()
+
+
+def test_plot_best_lag_summary_draws_significance_annotations(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_figure(fig, output_base, formats):
+        captured["fig"] = fig
+
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+    condition_results = {
+        "task": {
+            "baseline": pd.DataFrame(
+                {
+                    "lags": [0],
+                    "score_mean": [0.80],
+                    "score_fold_1": [0.79],
+                    "score_fold_2": [0.82],
+                    "score_fold_3": [0.81],
+                    "score_fold_4": [0.84],
+                    "score_fold_5": [0.83],
+                }
+            ),
+            "diver": pd.DataFrame(
+                {
+                    "lags": [0],
+                    "score_mean": [0.62],
+                    "score_fold_1": [0.61],
+                    "score_fold_2": [0.64],
+                    "score_fold_3": [0.60],
+                    "score_fold_4": [0.65],
+                    "score_fold_5": [0.59],
+                }
+            ),
+        }
+    }
+    summary = best_lag_rows(
+        condition_results,
+        {"task": MetricConfig("score_mean", True, "Score")},
+    )
+
+    plot_best_lag_summary(
+        summary,
+        "super_subject",
+        tmp_path,
+        formats=["png"],
+        colors={"baseline": "#000000", "diver": "#ff0000"},
+        config={"plotting": {"check_best_lag_significance": True}},
+        condition_results=condition_results,
+    )
+
+    labels = {text.get_text() for text in captured["fig"].axes[0].texts}
+    assert labels & {"*", "**", "***", "n.s."}
 
 
 def test_summary_tables_bold_best_model_for_markdown_and_latex():
