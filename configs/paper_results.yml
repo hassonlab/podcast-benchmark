@@ -1,0 +1,27 @@
+results:
+  baseline:
+    content_noncontent:
+      super_subject: results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_supersubject_2026-04-23-23-26-11
+      per_subject: results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_subject_2026-04-23-23-27-52
+  diver:
+    content_noncontent:
+      super_subject: results-fm-normalized/diver_content_noncontent_super_subject_2026-04-22-21-56-26
+      per_subject: results-fm-normalized/diver_content_noncontent_per_subject_2026-04-23-07-41-18
+
+metrics:
+  content_noncontent:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+plotting:
+  include_error_bars: true
+  check_best_lag_significance: false
+  correct_best_lag_significance: true
+  task_groups:
+    Syntactic:
+      - content_noncontent
+  task_display_names:
+    content_noncontent: Content vs. Non-Content
+  model_display_names:
+    baseline: Baseline
+    diver: DIVER
