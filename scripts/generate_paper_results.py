@@ -53,6 +53,14 @@ class ResultSpec:
     path: Path
 
 
+@dataclass(frozen=True)
+class DestrieuxSurfaceAtlas:
+    labels: Sequence[str]
+    maps: Mapping[str, np.ndarray]
+    mesh: object
+    sulcal: object
+
+
 def read_config(path: Path) -> Mapping:
     with path.open("r") as f:
         config = yaml.safe_load(f)
@@ -650,92 +658,156 @@ def _load_region_electrodes(
     )
 
 
-def _projection_coords(coords: np.ndarray) -> np.ndarray:
-    return coords[:, [1, 2]]
+def _load_destrieux_surface_atlas(
+    nilearn_data_dir: Path | None,
+) -> DestrieuxSurfaceAtlas:
+    from nilearn import datasets
 
+    fetch_kwargs = {}
+    if nilearn_data_dir is not None:
+        nilearn_data_dir.mkdir(parents=True, exist_ok=True)
+        fetch_kwargs["data_dir"] = str(nilearn_data_dir)
 
-def _draw_region_polygons(
-    ax: plt.Axes,
-    electrodes: pd.DataFrame,
-    metric_by_region: Mapping[str, float],
-    cmap,
-    norm: Normalize,
-) -> None:
-    region_points = {}
-    region_counts = {}
-    for region, group in electrodes.groupby("region_group", sort=True):
-        if region == "unassigned" or region not in metric_by_region:
-            continue
-        coords = group[["x", "y", "z"]].to_numpy(float)
-        region_points[region] = _projection_coords(coords)
-        region_counts[region] = len(group)
-
-    if not region_points:
-        return
-
-    all_points = np.vstack(list(region_points.values()))
-    ax.scatter(
-        all_points[:, 0],
-        all_points[:, 1],
-        s=9,
-        c="#1f1f1f",
-        alpha=0.08,
-        linewidths=0,
-        zorder=4,
+    atlas = datasets.fetch_atlas_surf_destrieux(**fetch_kwargs)
+    fsaverage = datasets.load_fsaverage("fsaverage5", **fetch_kwargs)
+    sulcal = datasets.load_fsaverage_data(
+        mesh="fsaverage5",
+        mesh_type="inflated",
+        data_type="sulcal",
+        **fetch_kwargs,
+    )
+    return DestrieuxSurfaceAtlas(
+        labels=list(atlas["labels"]),
+        maps={"left": atlas["map_left"], "right": atlas["map_right"]},
+        mesh=fsaverage["inflated"],
+        sulcal=sulcal,
     )
 
-    envelope_radius = 5.5
-    grid_step = 1.0
-    mins = all_points.min(axis=0) - envelope_radius
-    maxs = all_points.max(axis=0) + envelope_radius
-    x_grid = np.arange(mins[0], maxs[0] + grid_step, grid_step)
-    y_grid = np.arange(mins[1], maxs[1] + grid_step, grid_step)
-    if len(x_grid) < 2 or len(y_grid) < 2:
+
+def _hemisphere_label_name(label: str) -> tuple[str | None, str]:
+    if label.startswith("L "):
+        return "left", label[2:]
+    if label.startswith("R "):
+        return "right", label[2:]
+    return None, label
+
+
+def _surface_region_label_sets(
+    region_groups: Mapping[str, Sequence[str]],
+) -> dict[str, dict[str, set[str]]]:
+    label_sets: dict[str, dict[str, set[str]]] = {"left": {}, "right": {}}
+    for region, labels in region_groups.items():
+        for label in labels:
+            hemi, surface_label = _hemisphere_label_name(label)
+            if hemi is None:
+                label_sets["left"].setdefault(region, set()).add(surface_label)
+                label_sets["right"].setdefault(region, set()).add(surface_label)
+            else:
+                label_sets[hemi].setdefault(region, set()).add(surface_label)
+    return label_sets
+
+
+def _build_surface_metric_maps(
+    atlas_labels: Sequence[str],
+    atlas_maps: Mapping[str, np.ndarray],
+    region_groups: Mapping[str, Sequence[str]],
+    metric_by_region: Mapping[str, float],
+) -> tuple[dict[str, np.ndarray], dict[str, dict[str, np.ndarray]]]:
+    label_sets = _surface_region_label_sets(region_groups)
+    label_names = np.asarray(list(atlas_labels), dtype=object)
+    metric_maps: dict[str, np.ndarray] = {}
+    region_masks: dict[str, dict[str, np.ndarray]] = {"left": {}, "right": {}}
+
+    for hemi in ("left", "right"):
+        atlas_map = np.asarray(atlas_maps[hemi], dtype=int)
+        valid = (atlas_map >= 0) & (atlas_map < len(label_names))
+        surface_labels = np.full(atlas_map.shape, None, dtype=object)
+        surface_labels[valid] = label_names[atlas_map[valid]]
+        metric_map = np.full(atlas_map.shape, np.nan, dtype=float)
+
+        for region, labels in label_sets[hemi].items():
+            if region not in metric_by_region:
+                continue
+            mask = np.isin(surface_labels, list(labels))
+            if not mask.any():
+                continue
+            metric_map[mask] = float(metric_by_region[region])
+            region_masks[hemi][region] = mask
+
+        metric_maps[hemi] = metric_map
+
+    return metric_maps, region_masks
+
+
+def _surface_part(surface_object: object, hemi: str):
+    if isinstance(surface_object, Mapping):
+        return surface_object[hemi]
+    if hasattr(surface_object, "parts"):
+        return surface_object.parts[hemi]
+    if hasattr(surface_object, "data") and hasattr(surface_object.data, "parts"):
+        return surface_object.data.parts[hemi]
+    raise TypeError(f"Unsupported surface object: {type(surface_object)!r}")
+
+
+def _mesh_coordinates(mesh_part: object) -> np.ndarray:
+    if hasattr(mesh_part, "coordinates"):
+        return np.asarray(mesh_part.coordinates, dtype=float)
+    return np.asarray(mesh_part[0], dtype=float)
+
+
+def _surface_contour_map(
+    region_masks: Mapping[str, np.ndarray],
+) -> tuple[np.ndarray | None, list[int]]:
+    if not region_masks:
+        return None, []
+
+    first_mask = next(iter(region_masks.values()))
+    contour_map = np.zeros(first_mask.shape, dtype=int)
+    levels = []
+    for idx, region in enumerate(sorted(region_masks, key=region_sort_key), start=1):
+        contour_map[region_masks[region]] = idx
+        levels.append(idx)
+    return contour_map, levels
+
+
+def _draw_surface_region_boundaries(
+    ax: plt.Axes,
+    mesh_part: object,
+    region_masks: Mapping[str, np.ndarray],
+) -> None:
+    from nilearn import plotting
+
+    contour_map, levels = _surface_contour_map(region_masks)
+    if contour_map is None or not levels:
         return
 
-    xx, yy = np.meshgrid(x_grid, y_grid)
-    best_distance = np.full(xx.shape, np.inf)
-    assignment = np.full(xx.shape, -1, dtype=int)
-    regions = sorted(region_points)
+    plotting.plot_surf_contours(
+        surf_mesh=mesh_part,
+        roi_map=contour_map,
+        levels=levels,
+        colors=[(0.06, 0.06, 0.06, 0.95)] * len(levels),
+        axes=ax,
+        figure=ax.figure,
+        legend=False,
+    )
 
-    for idx, region in enumerate(regions):
-        points = region_points[region]
-        dx = xx[:, :, None] - points[:, 0]
-        dy = yy[:, :, None] - points[:, 1]
-        nearest = np.sqrt(dx * dx + dy * dy).min(axis=2)
-        update = nearest < best_distance
-        best_distance[update] = nearest[update]
-        assignment[update] = idx
 
-    for idx, region in enumerate(regions):
-        mask = (assignment == idx) & (best_distance <= envelope_radius)
+def _draw_surface_region_labels(
+    ax: plt.Axes,
+    mesh_part: object,
+    region_masks: Mapping[str, np.ndarray],
+    region_counts: Mapping[str, int],
+) -> None:
+    coords = _mesh_coordinates(mesh_part)
+    for region, mask in sorted(region_masks.items(), key=lambda item: region_sort_key(item[0])):
         if not mask.any():
             continue
-        color = cmap(norm(metric_by_region[region]))
-        ax.contourf(
-            xx,
-            yy,
-            mask.astype(float),
-            levels=[0.5, 1.5],
-            colors=[color],
-            alpha=0.76,
-            zorder=10,
-        )
-        ax.contour(
-            xx,
-            yy,
-            mask.astype(float),
-            levels=[0.5],
-            colors=["#1f1f1f"],
-            linewidths=0.9,
-            alpha=0.8,
-            zorder=11,
-        )
-        center = region_points[region].mean(axis=0)
+        center = coords[mask].mean(axis=0)
         text = ax.text(
             center[0],
             center[1],
-            f"{region}\nn={region_counts[region]}",
+            center[2],
+            f"{region}\nn={region_counts.get(region, 0)}",
             ha="center",
             va="center",
             fontsize=8,
@@ -761,9 +833,12 @@ def plot_per_region_brains(
         return
 
     from nilearn import plotting
+    from utils.atlas_utils import REGION_GROUPS
 
     electrodes = _load_region_electrodes(data_root, nilearn_data_dir, include_bad)
     electrodes = electrodes[electrodes["region_group"] != "unassigned"].copy()
+    region_counts = electrodes["region_group"].value_counts().to_dict()
+    surface_atlas = _load_destrieux_surface_atlas(nilearn_data_dir)
 
     for task, model_results in sorted(per_region_results.items()):
         metric = get_metric_config(config, task)
@@ -774,32 +849,54 @@ def plot_per_region_brains(
                 continue
             metric_by_region = dict(zip(best_rows["region"], best_rows["value"]))
             norm = metric_norm(list(metric_by_region.values()), metric)
+            metric_maps, region_masks = _build_surface_metric_maps(
+                surface_atlas.labels,
+                surface_atlas.maps,
+                REGION_GROUPS,
+                metric_by_region,
+            )
 
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-            fig.subplots_adjust(left=0.03, right=0.84, top=0.88, bottom=0.06, wspace=0.08)
-            panels = [
-                ("Left hemisphere", "l", electrodes[electrodes["x"] < 0]),
-                ("Right hemisphere", "r", electrodes[electrodes["x"] >= 0]),
+            fig = plt.figure(figsize=(12, 5.5))
+            fig.subplots_adjust(left=0.01, right=0.84, top=0.88, bottom=0.04, wspace=0.0)
+            axes = [
+                fig.add_subplot(1, 2, 1, projection="3d"),
+                fig.add_subplot(1, 2, 2, projection="3d"),
             ]
-            for ax, (title, display_mode, hemi_electrodes) in zip(axes, panels):
-                display = plotting.plot_glass_brain(
-                    None,
-                    display_mode=display_mode,
+            panels = [
+                ("Left hemisphere", "left"),
+                ("Right hemisphere", "right"),
+            ]
+            for ax, (title, hemi) in zip(axes, panels):
+                mesh_part = _surface_part(surface_atlas.mesh, hemi)
+                sulcal_part = _surface_part(surface_atlas.sulcal, hemi)
+                plotting.plot_surf_stat_map(
+                    surf_mesh=mesh_part,
+                    stat_map=metric_maps[hemi],
+                    bg_map=sulcal_part,
+                    hemi=hemi,
+                    view="lateral",
+                    cmap=cmap,
                     colorbar=False,
+                    bg_on_data=True,
+                    alpha=0.9,
+                    vmin=norm.vmin,
+                    vmax=norm.vmax,
+                    symmetric_cbar=False,
                     figure=fig,
                     axes=ax,
                     title=title,
-                    black_bg=False,
-                    annotate=True,
                 )
-                plotted = hemi_electrodes[
-                    hemi_electrodes["region_group"].isin(metric_by_region)
-                ]
-                if not plotted.empty:
-                    glass_ax = list(display.axes.values())[0].ax
-                    _draw_region_polygons(
-                        glass_ax, plotted, metric_by_region, cmap, norm
-                    )
+                _draw_surface_region_boundaries(
+                    ax,
+                    mesh_part,
+                    region_masks[hemi],
+                )
+                _draw_surface_region_labels(
+                    ax,
+                    mesh_part,
+                    region_masks[hemi],
+                    region_counts,
+                )
 
             sm = ScalarMappable(norm=norm, cmap=cmap)
             sm.set_array([])

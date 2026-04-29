@@ -1,9 +1,16 @@
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 
 from scripts.generate_paper_results import (
     MetricConfig,
+    DestrieuxSurfaceAtlas,
+    _build_surface_metric_maps,
+    _draw_surface_region_boundaries,
+    _draw_surface_region_labels,
+    _surface_contour_map,
     best_lag_rows,
     best_region_lag_rows,
     get_metric_config,
@@ -14,7 +21,6 @@ from scripts.generate_paper_results import (
     curve_for_metric,
     metric_norm,
     normalize_region_name,
-    _draw_region_polygons,
     plot_best_lag_summary,
     plot_lag_curves,
     plot_per_region_brains,
@@ -295,6 +301,8 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
 
 
 def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monkeypatch):
+    from nilearn import plotting
+
     electrodes = pd.DataFrame(
         [
             {"x": -42.0, "y": -20.0, "z": 18.0, "region_group": "EAC"},
@@ -306,6 +314,49 @@ def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monke
         ]
     )
     monkeypatch.setattr("scripts.generate_paper_results._load_region_electrodes", lambda *args: electrodes)
+    monkeypatch.setattr(
+        "scripts.generate_paper_results._load_destrieux_surface_atlas",
+        lambda *args: DestrieuxSurfaceAtlas(
+            labels=["Unknown", "G_temp_sup-Lateral", "G_postcentral"],
+            maps={
+                "left": np.array([1, 1, 0, 0]),
+                "right": np.array([2, 2, 0, 0]),
+            },
+            mesh={
+                "left": SimpleNamespace(
+                    coordinates=np.array(
+                        [
+                            [-2.0, 0.0, 0.0],
+                            [-2.0, 1.0, 0.0],
+                            [-1.0, 0.0, 0.0],
+                            [-1.0, 1.0, 0.0],
+                        ]
+                    )
+                ),
+                "right": SimpleNamespace(
+                    coordinates=np.array(
+                        [
+                            [2.0, 0.0, 0.0],
+                            [2.0, 1.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [1.0, 1.0, 0.0],
+                        ]
+                    )
+                ),
+            },
+            sulcal={
+                "left": np.zeros(4),
+                "right": np.zeros(4),
+            },
+        ),
+    )
+    plotted_maps = []
+
+    def fake_plot_surf_stat_map(**kwargs):
+        plotted_maps.append((kwargs["hemi"], kwargs["stat_map"].copy()))
+
+    monkeypatch.setattr(plotting, "plot_surf_stat_map", fake_plot_surf_stat_map)
+    monkeypatch.setattr(plotting, "plot_surf_contours", lambda **kwargs: None)
     per_region_results = {
         "task": {
             "baseline": {
@@ -327,29 +378,122 @@ def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monke
     )
 
     assert (tmp_path / "per_region_brain_baseline_task.png").exists()
+    by_hemi = dict(plotted_maps)
+    assert by_hemi["left"][:2].tolist() == [0.6, 0.6]
+    assert np.isnan(by_hemi["left"][2:]).all()
+    assert by_hemi["right"][:2].tolist() == [0.7, 0.7]
+    assert np.isnan(by_hemi["right"][2:]).all()
 
 
-def test_region_polygon_labels_include_electrode_counts():
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots()
-    electrodes = pd.DataFrame(
-        [
-            {"x": -1.0, "y": 0.0, "z": 0.0, "region_group": "EAC"},
-            {"x": -1.0, "y": 1.0, "z": 0.0, "region_group": "EAC"},
-            {"x": -1.0, "y": 0.0, "z": 1.0, "region_group": "EAC"},
-        ]
+def test_build_surface_metric_maps_respects_lateralized_region_labels():
+    metric_maps, region_masks = _build_surface_metric_maps(
+        atlas_labels=["Unknown", "G_temporal_middle", "G_temp_sup-Lateral"],
+        atlas_maps={
+            "left": np.array([1, 2, 0, 1]),
+            "right": np.array([1, 2, 1, 0]),
+        },
+        region_groups={
+            "MTG": ["L G_temporal_middle"],
+            "RIGHT": ["R G_temporal_middle"],
+        },
+        metric_by_region={"MTG": 0.4, "RIGHT": 0.9},
     )
 
-    _draw_region_polygons(
+    assert metric_maps["left"][0] == 0.4
+    assert metric_maps["left"][3] == 0.4
+    assert np.isnan(metric_maps["left"][1])
+    assert metric_maps["right"][0] == 0.9
+    assert metric_maps["right"][2] == 0.9
+    assert np.isnan(metric_maps["right"][1])
+    assert set(region_masks["left"]) == {"MTG"}
+    assert set(region_masks["right"]) == {"RIGHT"}
+
+
+def test_surface_region_labels_include_electrode_counts():
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    _draw_surface_region_labels(
         ax,
-        electrodes,
-        {"EAC": 0.5},
-        plt.get_cmap("viridis"),
-        metric_norm([0.5], MetricConfig("score", True, "Score")),
+        SimpleNamespace(
+            coordinates=np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [1.0, 1.0, 1.0],
+                    [2.0, 2.0, 2.0],
+                ]
+            )
+        ),
+        {"EAC": np.array([True, True, False])},
+        {"EAC": 3},
     )
 
     assert any(text.get_text() == "EAC\nn=3" for text in ax.texts)
+    plt.close(fig)
+
+
+def test_surface_region_boundaries_draw_between_regions(monkeypatch):
+    from nilearn import plotting
+    import matplotlib.pyplot as plt
+
+    captured = {}
+
+    def fake_plot_surf_contours(**kwargs):
+        captured.update(kwargs)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    mesh = SimpleNamespace(coordinates=np.zeros((4, 3)))
+
+    monkeypatch.setattr(plotting, "plot_surf_contours", fake_plot_surf_contours)
+    _draw_surface_region_boundaries(
+        ax,
+        mesh,
+        {
+            "EAC": np.array([True, True, False, False]),
+            "MTG": np.array([False, False, True, True]),
+        },
+    )
+
+    assert captured["surf_mesh"] is mesh
+    assert captured["levels"] == [1, 2]
+    assert captured["roi_map"].tolist() == [1, 1, 2, 2]
+    plt.close(fig)
+
+
+def test_surface_contour_map_uses_stable_region_order():
+    contour_map, levels = _surface_contour_map(
+        {
+            "MTG": np.array([True, False, False]),
+            "EAC": np.array([False, True, False]),
+        }
+    )
+
+    assert levels == [1, 2]
+    assert contour_map.tolist() == [2, 1, 0]
+
+
+def test_surface_region_boundaries_noop_without_regions(monkeypatch):
+    from nilearn import plotting
+    import matplotlib.pyplot as plt
+
+    called = False
+
+    def fake_plot_surf_contours(**kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(plotting, "plot_surf_contours", fake_plot_surf_contours)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    _draw_surface_region_boundaries(
+        ax,
+        SimpleNamespace(coordinates=np.zeros((0, 3))),
+        {},
+    )
+
+    assert called is False
     plt.close(fig)
 
 
