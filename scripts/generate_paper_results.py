@@ -28,6 +28,20 @@ DEFAULT_NILEARN_DATA_DIR = (
 )
 REGION_LEVEL_ORDER = ("EAC", "PC", "PRC", "IFG", "MTG", "ITG", "TPJ", "TP", "RIGHT")
 DEFAULT_TASK_GROUP_ORDER = ("Semantic", "Syntactic", "Auditory", "Mixed")
+BAR_SUMMARY_GRID_ROWS = 2
+BAR_SUMMARY_GRID_COLS = 5
+BAR_SUMMARY_GROUP_LAYOUT = {
+    "Mixed": ((0, 0), (0, 1), (1, 0), (1, 1)),
+    "Semantic": ((0, 2), (1, 2)),
+    "Syntactic": ((0, 3), (1, 3)),
+    "Acoustic": ((0, 4), (1, 4)),
+}
+BAR_SUMMARY_GROUP_ALIASES = {
+    "Mixed": ("Mixed",),
+    "Semantic": ("Semantic",),
+    "Syntactic": ("Syntactic",),
+    "Acoustic": ("Acoustic", "Auditory"),
+}
 DEFAULT_COLORS = {
     "baseline": "#4C78A8",
     "diver": "#F58518",
@@ -819,6 +833,79 @@ def draw_significance_annotations(
         ax.set_ylim(y_min, start + drawn_count * step + bracket_height + text_pad * 2)
 
 
+def group_matches_bar_layout(group: str, canonical_group: str) -> bool:
+    aliases = BAR_SUMMARY_GROUP_ALIASES.get(canonical_group, (canonical_group,))
+    normalized = group.casefold()
+    return any(normalized == alias.casefold() for alias in aliases)
+
+
+def best_lag_bar_group_slots(
+    task_groups: Sequence[tuple[str, list[str]]],
+) -> list[tuple[str, str, list[str], tuple[tuple[int, int], ...]]]:
+    remaining_groups = [(group, list(tasks)) for group, tasks in task_groups]
+    planned = []
+    for canonical_group, slots in BAR_SUMMARY_GROUP_LAYOUT.items():
+        match_idx = next(
+            (
+                idx
+                for idx, (group, _tasks) in enumerate(remaining_groups)
+                if group_matches_bar_layout(group, canonical_group)
+            ),
+            None,
+        )
+        if match_idx is None:
+            group = canonical_group
+            tasks = []
+        else:
+            group, tasks = remaining_groups.pop(match_idx)
+        planned.append((canonical_group, group, tasks, slots))
+
+    overflow_slots = tuple(
+        (row, col)
+        for row in range(BAR_SUMMARY_GRID_ROWS)
+        for col in range(BAR_SUMMARY_GRID_COLS)
+    )
+    for group, tasks in remaining_groups:
+        planned.append((group, group, tasks, overflow_slots))
+    return planned
+
+
+def draw_bar_group_box(
+    fig: plt.Figure,
+    group: str,
+    axes: Sequence[plt.Axes],
+) -> None:
+    if not axes:
+        return
+    left = min(ax.get_position().x0 for ax in axes)
+    right = max(ax.get_position().x1 for ax in axes)
+    bottom = min(ax.get_position().y0 for ax in axes)
+    top = max(ax.get_position().y1 for ax in axes)
+    pad_x = 0.009
+    pad_y = 0.018
+    rect = plt.Rectangle(
+        (left - pad_x, bottom - pad_y),
+        (right - left) + pad_x * 2,
+        (top - bottom) + pad_y * 2.7,
+        transform=fig.transFigure,
+        fill=False,
+        linewidth=1.1,
+        edgecolor="#666666",
+        clip_on=False,
+        zorder=2,
+    )
+    fig.add_artist(rect)
+    fig.text(
+        (left + right) / 2,
+        top + pad_y * 1.2,
+        group,
+        ha="center",
+        va="bottom",
+        fontsize=plt.rcParams["axes.titlesize"],
+        weight="bold",
+    )
+
+
 def plot_best_lag_summary(
     summary: pd.DataFrame,
     condition: str,
@@ -832,32 +919,33 @@ def plot_best_lag_summary(
     models = sorted(summary["model"].unique())
     tasks = sorted(summary["task"].unique())
     task_groups = grouped_tasks_for_summary(config, tasks)
-    n_groups = max(len(task_groups), 1)
-    ncols = 2 if n_groups > 1 else 1
-    nrows = int(np.ceil(n_groups / ncols))
-    fig = plt.figure(figsize=(max(9, 7.0 * ncols), max(4.8, 5.0 * nrows)))
-    outer_grid = fig.add_gridspec(nrows, ncols, hspace=0.34, wspace=0.2)
+    fig = plt.figure(figsize=(18, 8))
+    outer_grid = fig.add_gridspec(
+        BAR_SUMMARY_GRID_ROWS,
+        BAR_SUMMARY_GRID_COLS,
+        hspace=0.75 if check_best_lag_significance(config) else 0.5,
+        wspace=0.36,
+    )
     x_positions = list(range(len(models)))
     show_error_bars = include_bar_error_bars(config)
     show_significance = check_best_lag_significance(config)
     correct_significance = correct_best_lag_significance(config)
     group_title_axes = []
+    used_slots: set[tuple[int, int]] = set()
 
-    for group_idx, (group, group_tasks) in enumerate(task_groups):
-        row, col = divmod(group_idx, ncols)
-        group_ncols = min(2, max(len(group_tasks), 1))
-        group_nrows = int(np.ceil(max(len(group_tasks), 1) / group_ncols))
-        inner_grid = outer_grid[row, col].subgridspec(
-            group_nrows,
-            group_ncols,
-            hspace=0.82 if show_significance else 0.58,
-            wspace=0.34,
-        )
+    for canonical_group, _group, group_tasks, slots in best_lag_bar_group_slots(
+        task_groups
+    ):
         group_axes = []
-        for task_idx, task in enumerate(group_tasks):
-            inner_row, inner_col = divmod(task_idx, group_ncols)
-            ax = fig.add_subplot(inner_grid[inner_row, inner_col])
+        plotted_tasks = 0
+        for task_idx, task in enumerate(group_tasks[: len(slots)]):
+            row, col = slots[task_idx]
+            if (row, col) in used_slots:
+                continue
+            used_slots.add((row, col))
+            ax = fig.add_subplot(outer_grid[row, col])
             group_axes.append(ax)
+            plotted_tasks += 1
             task_summary = summary[summary["task"] == task]
             metric = metric_config_from_summary(task_summary)
             values = []
@@ -914,12 +1002,21 @@ def plot_best_lag_summary(
                     errors,
                 )
 
-        for empty_idx in range(len(group_tasks), group_nrows * group_ncols):
-            inner_row, inner_col = divmod(empty_idx, group_ncols)
-            fig.add_subplot(inner_grid[inner_row, inner_col]).set_axis_off()
+        if group_tasks and len(group_tasks) <= len(slots):
+            empty_range = range(plotted_tasks, len(slots))
+        else:
+            empty_range = range(0)
+        for empty_idx in empty_range:
+            row, col = slots[empty_idx]
+            if (row, col) in used_slots:
+                continue
+            used_slots.add((row, col))
+            empty_ax = fig.add_subplot(outer_grid[row, col])
+            empty_ax.set_axis_off()
+            group_axes.append(empty_ax)
 
         if group_axes:
-            group_title_axes.append((group, group_axes))
+            group_title_axes.append((canonical_group, group_axes))
 
     handles = [
         plt.Rectangle(
@@ -946,20 +1043,9 @@ def plot_best_lag_summary(
         ncol=len(models),
         frameon=False,
     )
-    fig.subplots_adjust(left=0.06, right=0.98, bottom=0.08, top=0.88)
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
     for group, group_axes in group_title_axes:
-        left = min(ax.get_position().x0 for ax in group_axes)
-        right = max(ax.get_position().x1 for ax in group_axes)
-        top = max(ax.get_position().y1 for ax in group_axes)
-        fig.text(
-            (left + right) / 2,
-            top + 0.03,
-            group,
-            ha="center",
-            va="bottom",
-            fontsize=plt.rcParams["axes.titlesize"],
-            weight="bold",
-        )
+        draw_bar_group_box(fig, group, group_axes)
     save_figure(fig, output_dir / f"best_lag_summary_{condition}", formats)
 
 
