@@ -1,0 +1,218 @@
+colors:
+  baseline: '#4C78A8'
+  baseline_arbitrary: '#9C755F'
+  baseline_glove: '#59A14F'
+  baseline_gpt2: '#76B7B2'
+  baseline_ridge: '#B07AA1'
+  baseline_simple: '#EDC948'
+  brainbert: '#54A24B'
+  diver: '#F58518'
+  popt: '#E45756'
+plotting:
+  include_error_bars: true
+  check_best_lag_significance: true
+  correct_best_lag_significance: false
+  task_groups:
+    Semantic:
+      - gpt_surprise
+      - gpt_surprise_multiclass
+    Syntactic:
+      - content_noncontent
+      - pos
+    Auditory:
+      - volume_level
+      - sentence_onset
+    Mixed:
+      - whisper_embedding
+      - iu_boundary
+      - word_embedding
+      - llm_decoding
+      - llm_embedding_pretraining
+  task_display_names:
+    content_noncontent: Content vs. Non-Content
+    gpt_surprise: LLM Surprise
+    gpt_surprise_multiclass: LLM Surprise Multiclass
+    iu_boundary: IU Boundary
+    llm_decoding: Brain LLM
+    llm_embedding_pretraining: LLM Embedding Pretraining
+    pos: Part of Speech
+    sentence_onset: Sentence Onset
+    volume_level: Audio Envelope
+    whisper_embedding: Whisper Embedding
+    word_embedding: Word Embedding
+  model_display_names:
+    baseline: Baseline
+    baseline_arbitrary: Arbitrary Embedding Baseline
+    baseline_glove: GloVe Baseline
+    baseline_gpt2: GPT-2 Baseline
+    baseline_ridge: Ridge Baseline
+    baseline_simple: Simple Baseline
+    brainbert: BrainBERT
+    diver: DIVER
+    popt: POPT
+metrics:
+  content_noncontent:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    min: 0.5
+  gpt_surprise:
+    column: test_corr_mean
+    higher_is_better: true
+    label: Correlation
+    min: 0
+  gpt_surprise_multiclass:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    min: 0.5
+  iu_boundary:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    min: 0.5
+  llm_decoding:
+    column: test_cross_entropy_mean
+    higher_is_better: true
+    label: Log-Likelihood
+    negate: true
+  pos:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    min: 0.5
+  sentence_onset:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    min: 0.5
+  volume_level:
+    column: test_corr_mean
+    higher_is_better: true
+    label: Correlation
+    min: 0
+  whisper_embedding:
+    column: test_pairwise_accuracy_mean
+    higher_is_better: true
+    label: Pairwise Accuracy
+    min: 0.5
+  word_embedding:
+    column: test_word_avg_auc_roc_mean
+    higher_is_better: true
+    label: Word-Averaged ROC-AUC
+    min: 0.5
+results:
+  baseline:
+    content_noncontent:
+      per_subject: results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_subject_2026-04-23-23-27-52
+      per_region: results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_region_2026-04-27-16-27-25
+      super_subject: results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_supersubject_2026-04-23-23-26-11
+    gpt_surprise:
+      per_subject: results/gpt_surprise_per_subject_2026-04-23-23-06-13
+      super_subject: results/gpt_surprise_supersubject_2026-04-23-23-05-45
+    gpt_surprise_multiclass:
+      per_subject: results/gpt_surprise_per_subject_2026-04-23-23-21-01
+      per_region: results/gpt_surprise_per_region_2026-04-27-16-58-37
+      super_subject: results/gpt_surprise_supersubject_2026-04-23-23-15-42
+    iu_boundary:
+      per_subject: results/iu_boundary_lr_per_subject_2026-04-24-00-07-11
+      per_region: results/iu_boundary_lr_per_region_2026-04-27-16-58-37
+      super_subject: results/iu_boundary_lr_supersubject_2026-04-24-00-00-38
+    llm_decoding:
+      per_subject: results/llm_decoding_per_subject_2026-04-27-16-19-50
+      per_region: results/llm_decoding_per_region_2026-04-27-17-49-14
+      super_subject: results/llm_decoding_2026-04-23-22-33-44
+    sentence_onset:
+      per_subject: results/sentence_onset_lr_per_subject_2026-04-23-23-05-26
+      per_region: results/sentence_onset_lr_per_region_2026-04-27-17-49-40
+      super_subject: results/sentence_onset_lr_supersubject_2026-04-23-22-53-56
+    whisper_embedding:
+      per_subject: results/neural_conv_whisper_embedding_per_subject_2026-04-24-00-00-21
+      per_region: results/neural_conv_whisper_embedding_per_region_2026-04-27-18-00-11
+      super_subject: results/neural_conv_whisper_embedding_supersubject_2026-04-23-23-47-18
+    word_embedding:
+      per_subject: results/ensemble_model_10_gpt2_per_subject_2026-04-23-22-36-32
+      per_region: results/ensemble_model_10_gpt2_per_region_2026-04-27-18-17-12
+      super_subject: results/ensemble_model_10_gpt2_supersubject_2026-04-23-22-35-38
+    volume_level:
+      per_subject: results/volume_level_simple_per_subject_2026-04-24-00-08-26
+      super_subject: results/volume_level_simple_supersubject_2026-04-24-00-08-26
+    pos:
+      per_subject: results/pos_task_sig_elecs_without_other_classes_per_subject_2026-04-27-15-10-18
+      per_region: results/pos_task_sig_elecs_without_other_classes_per_region_2026-04-27-17-49-40
+      super_subject: results/pos_task_sig_elecs_without_other_classes_supersubject_2026-04-27-16-11-40
+  popt:
+    content_noncontent:
+      per_subject: results-fm-normalized/popt_content_noncontent_per_subject_2026-04-23-07-42-43
+      super_subject: results-fm-normalized/popt_content_noncontent_super_subject_2026-04-23-08-51-07
+    gpt_surprise:
+      per_subject: results-fm-normalized/popt_gpt_surprise_per_subject_2026-04-23-10-00-38
+      super_subject: results-fm-normalized/popt_gpt_surprise_super_subject_2026-04-23-02-29-34
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/popt_gpt_surprise_multiclass_per_subject_2026-04-23-08-51-54
+      super_subject: results-fm-normalized/popt_gpt_surprise_multiclass_super_subject_2026-04-22-23-35-35
+    iu_boundary:
+      per_subject: results-fm-normalized/popt_iu_boundary_per_subject_2026-04-23-23-38-33
+      super_subject: results-fm-normalized/popt_iu_boundary_super_subject_2026-04-23-22-00-42
+    pos:
+      per_subject: results-fm-normalized/popt_pos_per_subject_2026-04-23-23-12-54
+      super_subject: results-fm-normalized/popt_pos_super_subject_2026-04-23-22-00-25
+    sentence_onset:
+      per_subject: results-fm-normalized/popt_sentence_onset_per_subject_2026-04-22-23-25-46
+      super_subject: results-fm-normalized/popt_sentence_onset_super_subject_2026-04-23-22-01-43
+    whisper_embedding:
+      per_subject: results-fm-normalized/popt_whisper_embedding_per_subject_2026-04-22-23-41-43
+      super_subject: results-fm-normalized/popt_whisper_embedding_super_subject_2026-04-23-22-28-37
+    word_embedding:
+      per_subject: results-fm-normalized/popt_word_embedding_per_subject_2026-04-23-23-43-37
+      super_subject: results-fm-normalized/popt_word_embedding_super_subject_2026-04-24-06-50-50
+  brainbert:
+    content_noncontent:
+      per_subject: results-fm-normalized/brainbert_content_noncontent_per_subject_2026-04-23-00-19-05
+      super_subject: results-fm-normalized/brainbert_content_noncontent_super_subject_2026-04-22-21-09-17
+    gpt_surprise:
+      per_subject: results-fm-normalized/brainbert_gpt_surprise_per_subject_2026-04-23-22-26-50
+      super_subject: results-fm-normalized/brainbert_gpt_surprise_super_subject_2026-04-23-10-19-19
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/brainbert_gpt_surprise_multiclass_per_subject_2026-04-23-07-43-44
+      super_subject: results-fm-normalized/brainbert_gpt_surprise_multiclass_super_subject_2026-04-22-23-11-18
+    iu_boundary:
+      per_subject: results-fm-normalized/brainbert_iu_boundary_per_subject_2026-04-23-22-28-32
+      super_subject: results-fm-normalized/brainbert_iu_boundary_super_subject_2026-04-23-10-35-57
+    pos:
+      per_subject: results-fm-normalized/brainbert_pos_per_subject_2026-04-23-09-59-25
+      super_subject: results-fm-normalized/brainbert_pos_super_subject_2026-04-23-22-01-27
+    sentence_onset:
+      per_subject: results-fm-normalized/brainbert_sentence_onset_per_subject_2026-04-22-23-48-51
+      super_subject: results-fm-normalized/brainbert_sentence_onset_super_subject_2026-04-23-10-35-56
+    whisper_embedding:
+      per_subject: results-fm-normalized/brainbert_whisper_embedding_per_subject_2026-04-23-00-12-06
+      super_subject: results-fm-normalized/brainbert_whisper_embedding_super_subject_2026-04-23-22-15-12
+    word_embedding:
+      per_subject: results-fm-normalized/brainbert_word_embedding_per_subject_2026-04-26-16-34-24
+      super_subject: results-fm-normalized/brainbert_word_embedding_super_subject_2026-04-24-07-04-56
+  diver:
+    content_noncontent:
+      per_subject: results-fm-normalized/diver_content_noncontent_per_subject_2026-04-23-07-41-18
+      super_subject: results-fm-normalized/diver_content_noncontent_super_subject_2026-04-22-21-56-26
+    gpt_surprise:
+      per_subject: results-fm-normalized/diver_gpt_surprise_per_subject_2026-04-23-10-38-58
+      super_subject: results-fm-normalized/diver_gpt_surprise_super_subject_2026-04-23-09-05-48
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/diver_gpt_surprise_multiclass_per_subject_2026-04-23-10-03-26
+      super_subject: results-fm-normalized/diver_gpt_surprise_multiclass_super_subject_2026-04-23-10-18-08
+    iu_boundary:
+      per_subject: results-fm-normalized/diver_iu_boundary_per_subject_2026-04-23-22-28-22
+      super_subject: results-fm-normalized/diver_iu_boundary_super_subject_2026-04-23-22-00-02
+    pos:
+      per_subject: results-fm-normalized/diver_pos_per_subject_2026-04-24-01-19-42
+      super_subject: results-fm-normalized/diver_pos_super_subject_2026-04-23-22-00-08
+    sentence_onset:
+      per_subject: results-fm-normalized/diver_sentence_onset_per_subject_2026-04-23-07-43-02
+      super_subject: results-fm-normalized/diver_sentence_onset_super_subject_2026-04-23-21-59-17
+    whisper_embedding:
+      per_subject: results-fm-normalized/diver_whisper_embedding_per_subject_2026-04-23-08-33-44
+      super_subject: results-fm-normalized/diver_whisper_embedding_super_subject_2026-04-23-22-52-31
+    word_embedding:
+      per_subject: results-fm-normalized/diver_word_embedding_per_subject_2026-04-23-22-48-02
+      super_subject: results-fm-normalized/diver_word_embedding_super_subject_2026-04-24-07-26-38
