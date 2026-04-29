@@ -20,6 +20,47 @@ train-config:
 	$(CMD) main.py \
 		--config "configs/$(MODEL_NAME)/$(CONFIG)"
 
+
+VOLUME_CONFIG_PATHS := configs/foundation_models/brainbert/volume_level/persubject_concat.yml \
+                configs/foundation_models/brainbert/volume_level/subject1_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject2_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject3_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject4_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject5_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject6_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject7_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject8_full.yml \
+                configs/foundation_models/brainbert/volume_level/subject9_full.yml \
+				configs/foundation_models/diver/volume_level/persubject_concat.yml \
+				configs/foundation_models/diver/volume_level/subject1_full.yml \
+				configs/foundation_models/diver/volume_level/subject2_full.yml \
+				configs/foundation_models/diver/volume_level/subject3_full.yml \
+				configs/foundation_models/diver/volume_level/subject4_full.yml \
+				configs/foundation_models/diver/volume_level/subject5_full.yml \
+				configs/foundation_models/diver/volume_level/subject6_full.yml \
+				configs/foundation_models/diver/volume_level/subject7_full.yml \
+				configs/foundation_models/diver/volume_level/subject8_full.yml \
+				configs/foundation_models/diver/volume_level/subject9_full.yml \
+				configs/foundation_models/popt/volume_level/persubject_concat.yml \
+				configs/foundation_models/popt/volume_level/subject1_full.yml \
+				configs/foundation_models/popt/volume_level/subject2_full.yml \
+				configs/foundation_models/popt/volume_level/subject3_full.yml \
+				configs/foundation_models/popt/volume_level/subject4_full.yml \
+				configs/foundation_models/popt/volume_level/subject5_full.yml \
+				configs/foundation_models/popt/volume_level/subject6_full.yml \
+				configs/foundation_models/popt/volume_level/subject7_full.yml \
+				configs/foundation_models/popt/volume_level/subject8_full.yml \
+				configs/foundation_models/popt/volume_level/subject9_full.yml
+
+# 2. "all" rule to trigger everything
+train-foundation-volume-level: $(VOLUME_CONFIG_PATHS)
+
+# 3. The rule for the paths
+# This tells Make: "To 'build' a config path, run this command"
+$(VOLUME_CONFIG_PATHS):
+	mkdir -p logs
+	$(CMD) main.py --config $@
+
 # Train all configs from training_matrix.yaml, optionally filtered by MODELS and/or TASKS
 # Usage:
 #   make train-all                                                    # Run all configs

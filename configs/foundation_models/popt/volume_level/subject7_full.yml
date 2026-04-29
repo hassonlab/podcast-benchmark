@@ -2,17 +2,18 @@ config_setter_name: popt_finetune
 model_spec:
   constructor_name: popt_finetune
   params:
-    brainbert_model_dir: models/brainbert/pretrained_model
+    model_dir: models/popt/pretrained_model/
+    brainbert_model_dir: models/brainbert/pretrained_model/
     dropout: 0.0
     freeze_foundation: true
     max_coord_value: 5000
     mlp_layer_sizes: []
-    model_dir: models/popt/pretrained_model
     num_frozen_layers: 0
     output_dim: 1
     use_brainbert: true
     use_lip_coords: true
   sub_models: {}
+  feature_cache: true
 task_config:
   data_params:
     data_root: data
@@ -32,31 +33,28 @@ task_config:
     audio_sr: 44100
     butter_order: 4
     cutoff_hz: 8.0
-    hop_size: 25.0
+    hop_size: 100.0
     target_sr: 512
     window_size: 200.0
     zero_phase: true
 training_params:
   batch_size: 4
-  early_stopping_metric: r2
+  early_stopping_metric: corr
   early_stopping_patience: 10
   epochs: 100
-  lag_step_size: 500
+  min_lag: 0
+  max_lag: 300
+  lag_step_size: 150
   learning_rate: 1.0e-05
   loss_weights:
   - 1.0
   losses:
   - mse
-  max_lag: 1500
   metrics:
   - mse
   - corr
   - r2
-  min_lag: -1000
   n_folds: 5
   smaller_is_better: false
   weight_decay: 1.0e-05
-  fold_ids:
-  - 1
-  - 5
 trial_name: popt_subject7_full_volume_level

@@ -1257,7 +1257,7 @@ def extract_features_for_caching(model, loader, device):
     # feature aggregation
     all_features, input_dicts, y_bs = [], [], []
     with torch.no_grad():
-        for batch_data in loader:
+        for batch_data in tqdm(loader, desc="Extracting features"):
             Xb, inputs_dict, y_b = batch_data
             Xb = Xb.to(device)
             inputs_dict = {
