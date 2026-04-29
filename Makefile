@@ -14,6 +14,10 @@ CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
 SUBJECTS ?= 1 3 4 5 6 7 8 9
 REGIONS ?= EAC MTG ITG TP IFG TPJ PRC PC RIGHT
+SUBJECT_GROUPS ?=
+REGION_GROUPS ?=
+SUBJECT_BATCH_SIZE ?=
+REGION_BATCH_SIZE ?=
 TASKS ?= word_embedding_decoding_task,sentence_onset_task,gpt_surprise_task,gpt_surprise_multiclass_task,content_noncontent_task,pos_task,llm_decoding_task,whisper_embedding_decoding_task,iu_boundary_task,volume_level_decoding_task
 CONFIG_OVERRIDES ?=
 
@@ -110,6 +114,44 @@ train-all-per-subjects:
 		done; \
 	done
 
+# Train each per-subject config with subjects batched into one job per group.
+# Groups may be a Python/JSON-like nested list or semicolon-separated groups.
+# If SUBJECT_GROUPS is empty and SUBJECT_BATCH_SIZE is set, SUBJECTS is chunked.
+# Usage:
+#   make train-all-subject-groups SUBJECT_GROUPS='[[1, 3, 4], [5, 6], [7, 8, 9]]'
+#   make train-all-subject-groups SUBJECT_GROUPS='1 3 4;5 6;7 8 9'
+#   make train-all-subject-groups SUBJECT_BATCH_SIZE=3
+#   make train-all-subject-groups MODELS=baselines/neural_conv_decoder TASKS=sentence_onset_task
+train-all-subject-groups:
+	@mkdir -p logs
+	@echo "Generating grouped per-subject training targets..."
+	@models_arg=""; \
+	if [ -n "$(MODELS)" ]; then models_arg="--models $(MODELS)"; fi; \
+	tasks_arg=""; \
+	if [ -n "$(TASKS)" ]; then tasks_arg="--tasks $(TASKS)"; fi; \
+	subject_specs=$$(python scripts/format_make_groups.py --groups '$(SUBJECT_GROUPS)' --items '$(SUBJECTS)' --batch-size '$(SUBJECT_BATCH_SIZE)' --kind int --tag-prefix sub); \
+	for target in $$(python scripts/generate_training_targets.py $$models_arg $$tasks_arg | grep '_per_subject\.yml'); do \
+		model=$$(echo $$target | cut -d'|' -f1); \
+		task=$$(echo $$target | cut -d'|' -f2); \
+		config=$$(echo $$target | cut -d'|' -f3); \
+		config_tag=$$(basename $$config .yml); \
+		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
+		for subject_spec in $$subject_specs; do \
+			subject_group=$${subject_spec%%|*}; \
+			subject_tag=$${subject_spec#*|}; \
+			if [ "$$is_multi" = "1" ]; then \
+				overrides="--shared_params.task_config.data_params.subject_ids=$$subject_group"; \
+			else \
+				overrides="--task_config.data_params.subject_ids=$$subject_group"; \
+			fi; \
+			job_name="$(PREFIX)-$$config_tag-$$subject_tag-$(USR)-$(DT)"; \
+			echo "Submitting: $$model / $$task / $$config / subjects $$subject_group"; \
+			JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config" OVERRIDES="$$overrides"; \
+		done; \
+	done
+
+train-all-per-subject-groups: train-all-subject-groups
+
 # Train each per-region config one atlas region per job.
 # Usage:
 #   make train-all-per-regions                          # Uses REGIONS and TASKS defaults
@@ -140,6 +182,44 @@ train-all-per-regions:
 			JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config" OVERRIDES="$$overrides"; \
 		done; \
 	done
+
+# Train each per-region config with atlas regions batched into one job per group.
+# Groups may be a Python/JSON-like nested list or semicolon-separated groups.
+# If REGION_GROUPS is empty and REGION_BATCH_SIZE is set, REGIONS is chunked.
+# Usage:
+#   make train-all-region-groups REGION_GROUPS='[[EAC, ITG, MTG], [IFG, TP, TPJ], [PRC, PC, RIGHT]]'
+#   make train-all-region-groups REGION_GROUPS='EAC ITG MTG;IFG TP TPJ;PRC PC RIGHT'
+#   make train-all-region-groups REGION_BATCH_SIZE=3
+#   make train-all-region-groups MODELS=baselines/neural_conv_decoder TASKS=sentence_onset_task
+train-all-region-groups:
+	@mkdir -p logs
+	@echo "Generating grouped per-region training targets..."
+	@models_arg=""; \
+	if [ -n "$(MODELS)" ]; then models_arg="--models $(MODELS)"; fi; \
+	tasks_arg=""; \
+	if [ -n "$(TASKS)" ]; then tasks_arg="--tasks $(TASKS)"; fi; \
+	region_specs=$$(python scripts/format_make_groups.py --groups '$(REGION_GROUPS)' --items '$(REGIONS)' --batch-size '$(REGION_BATCH_SIZE)' --kind str); \
+	for target in $$(python scripts/generate_training_targets.py $$models_arg $$tasks_arg | grep '_per_region\.yml'); do \
+		model=$$(echo $$target | cut -d'|' -f1); \
+		task=$$(echo $$target | cut -d'|' -f2); \
+		config=$$(echo $$target | cut -d'|' -f3); \
+		config_tag=$$(basename $$config .yml); \
+		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
+		for region_spec in $$region_specs; do \
+			region_group=$${region_spec%%|*}; \
+			region_tag=$${region_spec#*|}; \
+			if [ "$$is_multi" = "1" ]; then \
+				overrides="--shared_params.regions=$$region_group"; \
+			else \
+				overrides="--regions=$$region_group"; \
+			fi; \
+			job_name="$(PREFIX)-$$config_tag-region$$region_tag-$(USR)-$(DT)"; \
+			echo "Submitting: $$model / $$task / $$config / regions $$region_group"; \
+			JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config" OVERRIDES="$$overrides"; \
+		done; \
+	done
+
+train-all-per-region-groups: train-all-region-groups
 
 # Development and testing targets
 setup:
@@ -188,4 +268,4 @@ test:
 clean-env:
 	rm -rf decoding_env test_env
 
-.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-per-regions
+.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups
