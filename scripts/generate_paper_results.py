@@ -30,6 +30,7 @@ REGION_LEVEL_ORDER = ("EAC", "PC", "PRC", "IFG", "MTG", "ITG", "TPJ", "TP", "RIG
 DEFAULT_TASK_GROUP_ORDER = ("Semantic", "Syntactic", "Auditory", "Mixed")
 BAR_SUMMARY_GRID_ROWS = 2
 BAR_SUMMARY_GRID_COLS = 5
+BAR_SUMMARY_GRID_TASK_COLS = (0, 1, 2, 3, 4)
 BAR_SUMMARY_GROUP_LAYOUT = {
     "Mixed": ((0, 0), (0, 1), (1, 0), (1, 1)),
     "Semantic": ((0, 2), (1, 2)),
@@ -74,6 +75,13 @@ class DestrieuxSurfaceAtlas:
     maps: Mapping[str, np.ndarray]
     mesh: object
     sulcal: object
+
+
+@dataclass(frozen=True)
+class GroupedTaskFigure:
+    fig: plt.Figure
+    task_axes: Mapping[str, plt.Axes]
+    group_axes: Sequence[tuple[str, Sequence[plt.Axes]]]
 
 
 def read_config(path: Path) -> Mapping:
@@ -329,6 +337,42 @@ def best_region_lag_rows(
     return pd.DataFrame(rows)
 
 
+def baseline_region_peak_lag_rows(
+    per_region_results: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    metrics: Mapping[str, MetricConfig],
+    baseline_model: str = "baseline",
+) -> pd.DataFrame:
+    rows = []
+    for task, model_results in sorted(per_region_results.items()):
+        if baseline_model not in model_results:
+            continue
+        metric = metrics[task]
+        task_rows = best_region_lag_rows(model_results[baseline_model], metric)
+        if task_rows.empty:
+            continue
+        task_rows.insert(0, "task", task)
+        task_rows.insert(1, "model", baseline_model)
+        rows.append(task_rows)
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "task",
+                "model",
+                "region",
+                "metric",
+                "metric_label",
+                "metric_min",
+                "metric_max",
+                "metric_negate",
+                "value",
+                "std",
+                "lag",
+                "higher_is_better",
+            ]
+        )
+    return pd.concat(rows, ignore_index=True)
+
+
 def best_model_by_task(summary: pd.DataFrame) -> Dict[tuple, str]:
     winners = {}
     group_columns = (
@@ -378,7 +422,10 @@ def summary_wide(
         rows.append(row)
     return pd.DataFrame(
         rows,
-        columns=[*group_columns, *[display_model_name(config, model) for model in models]],
+        columns=[
+            *group_columns,
+            *[display_model_name(config, model) for model in models],
+        ],
     )
 
 
@@ -399,6 +446,45 @@ def write_summary_tables(
     if "latex" in formats or "tex" in formats:
         (output_dir / "best_lag_summary.tex").write_text(
             latex_table.to_latex(index=False, escape=False)
+        )
+
+
+def baseline_region_peak_wide(summary: pd.DataFrame) -> pd.DataFrame:
+    if summary.empty:
+        return pd.DataFrame()
+
+    regions = sorted(summary["region"].unique(), key=region_sort_key)
+    rows = []
+    for task, group in summary.groupby("task", sort=True):
+        row = {"task": task}
+        by_region = {item["region"]: item for item in group.to_dict("records")}
+        for region in regions:
+            if region not in by_region:
+                row[region] = ""
+                continue
+            item = by_region[region]
+            row[region] = format_value(item["value"], item["lag"])
+        rows.append(row)
+    return pd.DataFrame(rows, columns=["task", *regions])
+
+
+def write_baseline_region_peak_tables(
+    summary: pd.DataFrame, output_dir: Path, formats: Sequence[str]
+) -> None:
+    if summary.empty:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    table = baseline_region_peak_wide(summary)
+    if "csv" in formats:
+        table.to_csv(output_dir / "baseline_region_peak_lags.csv", index=False)
+    if "markdown" in formats or "md" in formats:
+        (output_dir / "baseline_region_peak_lags.md").write_text(
+            to_markdown_table(table)
+        )
+    if "latex" in formats or "tex" in formats:
+        (output_dir / "baseline_region_peak_lags.tex").write_text(
+            table.to_latex(index=False, escape=False)
         )
 
 
@@ -629,7 +715,9 @@ def best_lag_permutation_p_value(
     winner_matrix: np.ndarray,
     other_matrix: np.ndarray,
 ) -> tuple[float, float]:
-    valid_rows = np.isfinite(winner_matrix).all(axis=1) & np.isfinite(other_matrix).all(axis=1)
+    valid_rows = np.isfinite(winner_matrix).all(axis=1) & np.isfinite(other_matrix).all(
+        axis=1
+    )
     winner_matrix = winner_matrix[valid_rows]
     other_matrix = other_matrix[valid_rows]
     if len(winner_matrix) < 2:
@@ -649,8 +737,7 @@ def best_lag_permutation_p_value(
         permuted_winner = np.where(swap, other_matrix, winner_matrix)
         permuted_other = np.where(swap, winner_matrix, other_matrix)
         statistic = float(
-            np.max(permuted_winner.mean(axis=0))
-            - np.max(permuted_other.mean(axis=0))
+            np.max(permuted_winner.mean(axis=0)) - np.max(permuted_other.mean(axis=0))
         )
         if statistic >= observed - 1e-12:
             count += 1
@@ -659,7 +746,11 @@ def best_lag_permutation_p_value(
 
 def holm_adjust_p_values(p_values: Sequence[float]) -> list[float]:
     adjusted = [float("nan")] * len(p_values)
-    finite = [(idx, float(p_value)) for idx, p_value in enumerate(p_values) if np.isfinite(p_value)]
+    finite = [
+        (idx, float(p_value))
+        for idx, p_value in enumerate(p_values)
+        if np.isfinite(p_value)
+    ]
     if not finite:
         return adjusted
 
@@ -716,8 +807,12 @@ def best_lag_significance_tests(
         if len(folds) < 2:
             continue
 
-        winner_lags = set(pd.to_numeric(task_results[winner]["lags"], errors="coerce").dropna())
-        other_lags = set(pd.to_numeric(task_results[model]["lags"], errors="coerce").dropna())
+        winner_lags = set(
+            pd.to_numeric(task_results[winner]["lags"], errors="coerce").dropna()
+        )
+        other_lags = set(
+            pd.to_numeric(task_results[model]["lags"], errors="coerce").dropna()
+        )
         lags = sorted(winner_lags & other_lags)
         if not lags:
             continue
@@ -749,7 +844,9 @@ def best_lag_significance_tests(
             }
         )
     display_p_values = (
-        holm_adjust_p_values([float(comparison["raw_p_value"]) for comparison in comparisons])
+        holm_adjust_p_values(
+            [float(comparison["raw_p_value"]) for comparison in comparisons]
+        )
         if correct_multiple_comparisons
         else [float(comparison["raw_p_value"]) for comparison in comparisons]
     )
@@ -863,7 +960,7 @@ def best_lag_bar_group_slots(
     overflow_slots = tuple(
         (row, col)
         for row in range(BAR_SUMMARY_GRID_ROWS)
-        for col in range(BAR_SUMMARY_GRID_COLS)
+        for col in BAR_SUMMARY_GRID_TASK_COLS
     )
     for group, tasks in remaining_groups:
         planned.append((group, group, tasks, overflow_slots))
@@ -874,19 +971,24 @@ def draw_bar_group_box(
     fig: plt.Figure,
     group: str,
     axes: Sequence[plt.Axes],
+    *,
+    rect_left: float | None = None,
+    rect_right: float | None = None,
 ) -> None:
     if not axes:
         return
-    left = min(ax.get_position().x0 for ax in axes)
-    right = max(ax.get_position().x1 for ax in axes)
-    bottom = min(ax.get_position().y0 for ax in axes)
-    top = max(ax.get_position().y1 for ax in axes)
-    pad_x = 0.009
-    pad_y = 0.018
+    left, right, bottom, top = grouped_axes_bounds(fig, axes)
+    pad_x = 0.006
+    pad_y = 0.01
+    title_gap = 0.024
+    rect_left = max(0.0, left - pad_x) if rect_left is None else rect_left
+    rect_bottom = max(0.0, bottom - pad_y)
+    rect_right = min(1.0, right + pad_x) if rect_right is None else rect_right
+    rect_top = min(1.0, top + title_gap + pad_y)
     rect = plt.Rectangle(
-        (left - pad_x, bottom - pad_y),
-        (right - left) + pad_x * 2,
-        (top - bottom) + pad_y * 2.7,
+        (rect_left, rect_bottom),
+        rect_right - rect_left,
+        rect_top - rect_bottom,
         transform=fig.transFigure,
         fill=False,
         linewidth=1.1,
@@ -897,7 +999,7 @@ def draw_bar_group_box(
     fig.add_artist(rect)
     fig.text(
         (left + right) / 2,
-        top + pad_y * 1.2,
+        top + title_gap * 0.35,
         group,
         ha="center",
         va="bottom",
@@ -906,30 +1008,45 @@ def draw_bar_group_box(
     )
 
 
-def plot_best_lag_summary(
-    summary: pd.DataFrame,
-    condition: str,
-    output_dir: Path,
-    formats: Sequence[str],
-    colors: Mapping[str, str],
-    config: Mapping | None = None,
-    condition_results: Mapping[str, Mapping[str, pd.DataFrame]] | None = None,
-) -> None:
-    config = config or {}
-    models = sorted(summary["model"].unique())
-    tasks = sorted(summary["task"].unique())
-    task_groups = grouped_tasks_for_summary(config, tasks)
-    fig = plt.figure(figsize=(18, 8))
+def grouped_axes_bounds(
+    fig: plt.Figure,
+    axes: Sequence[plt.Axes],
+) -> tuple[float, float, float, float]:
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    figure_bboxes = []
+    for ax in axes:
+        if ax.axison:
+            bbox = ax.get_tightbbox(renderer)
+            if bbox is not None:
+                figure_bboxes.append(bbox.transformed(fig.transFigure.inverted()))
+                continue
+        figure_bboxes.append(ax.get_position())
+
+    left = min(bbox.x0 for bbox in figure_bboxes)
+    right = max(bbox.x1 for bbox in figure_bboxes)
+    bottom = min(bbox.y0 for bbox in figure_bboxes)
+    top = max(bbox.y1 for bbox in figure_bboxes)
+    return left, right, bottom, top
+
+
+def create_grouped_task_figure(
+    config: Mapping,
+    tasks: Sequence[str],
+    *,
+    figsize: tuple[float, float] = (18, 8),
+    hspace: float = 0.5,
+    wspace: float = 0.55,
+) -> GroupedTaskFigure:
+    task_groups = grouped_tasks_for_summary(config, sorted(tasks))
+    fig = plt.figure(figsize=figsize)
     outer_grid = fig.add_gridspec(
         BAR_SUMMARY_GRID_ROWS,
         BAR_SUMMARY_GRID_COLS,
-        hspace=0.75 if check_best_lag_significance(config) else 0.5,
-        wspace=0.36,
+        hspace=hspace,
+        wspace=wspace,
     )
-    x_positions = list(range(len(models)))
-    show_error_bars = include_bar_error_bars(config)
-    show_significance = check_best_lag_significance(config)
-    correct_significance = correct_best_lag_significance(config)
+    task_axes: dict[str, plt.Axes] = {}
     group_title_axes = []
     used_slots: set[tuple[int, int]] = set()
 
@@ -944,63 +1061,9 @@ def plot_best_lag_summary(
                 continue
             used_slots.add((row, col))
             ax = fig.add_subplot(outer_grid[row, col])
+            task_axes[task] = ax
             group_axes.append(ax)
             plotted_tasks += 1
-            task_summary = summary[summary["task"] == task]
-            metric = metric_config_from_summary(task_summary)
-            values = []
-            errors = []
-            for model in models:
-                match = task_summary[task_summary["model"] == model]
-                values.append(
-                    float(match["value"].iloc[0]) if not match.empty else float("nan")
-                )
-                errors.append(
-                    float(match["std"].iloc[0])
-                    if show_error_bars
-                    and "std" in match
-                    and not match.empty
-                    and pd.notna(match["std"].iloc[0])
-                    else 0.0
-                )
-
-            ax.bar(
-                x_positions,
-                values,
-                yerr=errors if show_error_bars else None,
-                error_kw={"elinewidth": 1.0, "capsize": 3, "capthick": 1.0},
-                color=[colors[model] for model in models],
-                width=0.7,
-            )
-            label = (
-                str(task_summary["metric_label"].iloc[0])
-                if task_summary["metric_label"].nunique() == 1
-                else "Metric"
-            )
-            ax.set_title(display_task_name(config, task))
-            ax.set_ylabel(label)
-            ax.set_xticks(x_positions)
-            ax.set_xticklabels(
-                [display_model_name(config, model) for model in models],
-                rotation=35,
-                ha="right",
-            )
-            ax.grid(axis="y", alpha=0.25)
-            apply_metric_ylim(ax, metric)
-            if show_significance and condition_results is not None:
-                comparisons = best_lag_significance_tests(
-                    task_summary,
-                    condition_results.get(task, {}),
-                    metric,
-                    correct_multiple_comparisons=correct_significance,
-                )
-                draw_significance_annotations(
-                    ax,
-                    comparisons,
-                    models,
-                    values,
-                    errors,
-                )
 
         if group_tasks and len(group_tasks) <= len(slots):
             empty_range = range(plotted_tasks, len(slots))
@@ -1017,6 +1080,126 @@ def plot_best_lag_summary(
 
         if group_axes:
             group_title_axes.append((canonical_group, group_axes))
+
+    return GroupedTaskFigure(fig, task_axes, group_title_axes)
+
+
+def draw_grouped_task_boxes(layout: GroupedTaskFigure) -> None:
+    group_bounds = [
+        (group, group_axes, grouped_axes_bounds(layout.fig, group_axes))
+        for group, group_axes in layout.group_axes
+    ]
+    group_bounds.sort(key=lambda item: (item[2][0] + item[2][1]) / 2)
+    if not group_bounds:
+        return
+
+    rect_edges = []
+    for idx, (_group, _axes, bounds) in enumerate(group_bounds):
+        left, right, _bottom, _top = bounds
+        if idx == 0:
+            rect_left = max(0.0, left - 0.006)
+        else:
+            prev_right = group_bounds[idx - 1][2][1]
+            rect_left = (prev_right + left) / 2
+
+        if idx == len(group_bounds) - 1:
+            rect_right = min(1.0, right + 0.006)
+        else:
+            next_left = group_bounds[idx + 1][2][0]
+            rect_right = (right + next_left) / 2
+        rect_edges.append((rect_left, rect_right))
+
+    for (group, group_axes, _bounds), (rect_left, rect_right) in zip(
+        group_bounds, rect_edges
+    ):
+        draw_bar_group_box(
+            layout.fig,
+            group,
+            group_axes,
+            rect_left=rect_left,
+            rect_right=rect_right,
+        )
+
+
+def plot_best_lag_summary(
+    summary: pd.DataFrame,
+    condition: str,
+    output_dir: Path,
+    formats: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping | None = None,
+    condition_results: Mapping[str, Mapping[str, pd.DataFrame]] | None = None,
+) -> None:
+    config = config or {}
+    models = sorted(summary["model"].unique())
+    tasks = sorted(summary["task"].unique())
+    layout = create_grouped_task_figure(
+        config,
+        tasks,
+        hspace=0.75 if check_best_lag_significance(config) else 0.5,
+    )
+    fig = layout.fig
+    x_positions = list(range(len(models)))
+    show_error_bars = include_bar_error_bars(config)
+    show_significance = check_best_lag_significance(config)
+    correct_significance = correct_best_lag_significance(config)
+
+    for task, ax in layout.task_axes.items():
+        task_summary = summary[summary["task"] == task]
+        metric = metric_config_from_summary(task_summary)
+        values = []
+        errors = []
+        for model in models:
+            match = task_summary[task_summary["model"] == model]
+            values.append(
+                float(match["value"].iloc[0]) if not match.empty else float("nan")
+            )
+            errors.append(
+                float(match["std"].iloc[0])
+                if show_error_bars
+                and "std" in match
+                and not match.empty
+                and pd.notna(match["std"].iloc[0])
+                else 0.0
+            )
+
+        ax.bar(
+            x_positions,
+            values,
+            yerr=errors if show_error_bars else None,
+            error_kw={"elinewidth": 1.0, "capsize": 3, "capthick": 1.0},
+            color=[colors[model] for model in models],
+            width=0.7,
+        )
+        label = (
+            str(task_summary["metric_label"].iloc[0])
+            if task_summary["metric_label"].nunique() == 1
+            else "Metric"
+        )
+        ax.set_title(display_task_name(config, task))
+        ax.set_ylabel(label)
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(
+            [display_model_name(config, model) for model in models],
+            rotation=35,
+            ha="right",
+        )
+        ax.grid(axis="y", alpha=0.25)
+        apply_metric_ylim(ax, metric)
+        if show_significance and condition_results is not None:
+            comparisons = best_lag_significance_tests(
+                task_summary,
+                condition_results.get(task, {}),
+                metric,
+                correct_multiple_comparisons=correct_significance,
+            )
+            draw_significance_annotations(
+                ax,
+                comparisons,
+                models,
+                values,
+                errors,
+            )
 
     handles = [
         plt.Rectangle(
@@ -1044,8 +1227,7 @@ def plot_best_lag_summary(
         frameon=False,
     )
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
-    for group, group_axes in group_title_axes:
-        draw_bar_group_box(fig, group, group_axes)
+    draw_grouped_task_boxes(layout)
     save_figure(fig, output_dir / f"best_lag_summary_{condition}", formats)
 
 
@@ -1056,33 +1238,99 @@ def plot_lag_curves(
     formats: Sequence[str],
     colors: Mapping[str, str],
 ) -> None:
-    for condition, tasks in loaded.items():
-        for task, model_results in tasks.items():
-            metric = get_metric_config(config, task)
-            fig, ax = plt.subplots(figsize=(6, 4))
-            for model, df in sorted(model_results.items()):
-                if metric.column not in df.columns:
-                    continue
-                curve = curve_for_metric(df, metric)
-                ax.plot(
-                    curve["lags"],
-                    curve[metric.column],
-                    marker="o",
-                    linewidth=1.8,
-                    label=display_model_name(config, model),
-                    color=colors[model],
-                )
+    baseline_model = "baseline"
+    baseline_tasks = sorted(
+        {
+            task
+            for condition_results in loaded.values()
+            for task, model_results in condition_results.items()
+            if baseline_model in model_results
+        }
+    )
+    if not baseline_tasks:
+        return
 
-            ax.set_title(
-                f"{display_task_name(config, task)} - {condition.replace('_', ' ')}"
+    layout = create_grouped_task_figure(config, baseline_tasks)
+    fig = layout.fig
+    condition_styles = {
+        "super_subject": "-",
+        "per_subject": "--",
+    }
+    baseline_color = colors.get(baseline_model, DEFAULT_COLORS[baseline_model])
+
+    for task, ax in layout.task_axes.items():
+        metric = get_metric_config(config, task)
+        for condition in CONDITIONS:
+            df = loaded.get(condition, {}).get(task, {}).get(baseline_model)
+            if df is None or metric.column not in df.columns:
+                continue
+            curve = curve_for_metric(df, metric)
+            ax.plot(
+                curve["lags"],
+                curve[metric.column],
+                linestyle=condition_styles.get(condition, "-"),
+                linewidth=1.8,
+                label=condition.replace("_", " ").title(),
+                color=baseline_color,
             )
-            ax.set_xlabel("Lag relative to word onset (ms)")
-            ax.set_ylabel(metric.label)
-            ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
-            ax.grid(alpha=0.25)
-            apply_metric_ylim(ax, metric)
-            ax.legend(frameon=False)
-            save_figure(fig, output_dir / f"lag_curves_{task}_{condition}", formats)
+
+        ax.set_title(display_task_name(config, task))
+        ax.set_xlabel("Lag relative to word onset (ms)")
+        ax.set_ylabel(metric.label)
+        ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
+        ax.grid(alpha=0.25)
+        apply_metric_ylim(ax, metric)
+
+    handles = [
+        plt.Line2D(
+            [0],
+            [0],
+            color=baseline_color,
+            linestyle=condition_styles.get(condition, "-"),
+            linewidth=1.8,
+            label=condition.replace("_", " ").title(),
+        )
+        for condition in CONDITIONS
+        if any(
+            baseline_model in loaded.get(condition, {}).get(task, {})
+            for task in baseline_tasks
+        )
+    ]
+    fig.text(
+        0.01,
+        0.985,
+        f"{display_model_name(config, baseline_model)} Lag Curves",
+        ha="left",
+        va="top",
+        fontsize=plt.rcParams["axes.titlesize"],
+    )
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=len(handles),
+        frameon=False,
+    )
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
+    draw_grouped_task_boxes(layout)
+    remove_legacy_lag_curve_outputs(output_dir, loaded, formats)
+    save_figure(fig, output_dir / "lag_curves", formats)
+
+
+def remove_legacy_lag_curve_outputs(
+    output_dir: Path,
+    loaded: Mapping[str, Mapping[str, object]],
+    formats: Sequence[str],
+) -> None:
+    output_bases = []
+    for condition, tasks in loaded.items():
+        output_bases.append(output_dir / f"lag_curves_{condition}")
+        output_bases.extend(
+            output_dir / f"lag_curves_{task}_{condition}" for task in tasks
+        )
+    for output_base in output_bases:
+        for fmt in formats:
+            output_base.with_suffix(f".{fmt}").unlink(missing_ok=True)
 
 
 def curve_for_metric(df: pd.DataFrame, metric: MetricConfig) -> pd.DataFrame:
@@ -1104,7 +1352,9 @@ def region_gradient_colors(regions: Sequence[str]) -> Dict[str, object]:
     cmap = plt.get_cmap("viridis", max(len(ordered), 1))
     if len(ordered) == 1:
         return {ordered[0]: cmap(0.65)}
-    return {region: cmap(idx / (len(ordered) - 1)) for idx, region in enumerate(ordered)}
+    return {
+        region: cmap(idx / (len(ordered) - 1)) for idx, region in enumerate(ordered)
+    }
 
 
 def plot_per_region_lag_curves(
@@ -1130,37 +1380,24 @@ def plot_per_region_lag_curves(
             continue
 
         all_regions = sorted(
-            {
-                region
-                for _, region_results in task_items
-                for region in region_results
-            },
+            {region for _, region_results in task_items for region in region_results},
             key=region_sort_key,
         )
         colors = region_gradient_colors(all_regions)
-        n_tasks = len(task_items)
-        ncols = min(3, n_tasks)
-        nrows = int(np.ceil(n_tasks / ncols))
-        fig, axes = plt.subplots(
-            nrows,
-            ncols,
-            figsize=(4.6 * ncols, 3.5 * nrows),
-            squeeze=False,
-            sharex=False,
-            sharey=False,
-        )
-        axes_flat = axes.ravel()
+        layout = create_grouped_task_figure(config, [task for task, _ in task_items])
+        fig = layout.fig
 
-        for ax, (task, region_results) in zip(axes_flat, task_items):
+        for task, region_results in task_items:
+            ax = layout.task_axes[task]
             metric = get_metric_config(config, task)
             for region in sorted(region_results, key=region_sort_key):
                 curve = curve_for_metric(region_results[region], metric)
                 ax.plot(
                     curve["lags"],
                     curve[metric.column],
-                    marker="o",
+                    # marker="o",
                     linewidth=1.6,
-                    markersize=3.5,
+                    # markersize=3.5,
                     label=region,
                     color=colors[region],
                 )
@@ -1171,21 +1408,26 @@ def plot_per_region_lag_curves(
             ax.grid(alpha=0.25)
             apply_metric_ylim(ax, metric)
 
-        for ax in axes_flat[n_tasks:]:
-            ax.set_axis_off()
-
         handles = [
             plt.Line2D(
                 [0],
                 [0],
                 color=colors[region],
-                marker="o",
+                # marker="o",
                 linewidth=1.6,
-                markersize=4,
+                # markersize=4,
                 label=region,
             )
             for region in all_regions
         ]
+        fig.text(
+            0.01,
+            0.985,
+            f"{display_model_name(config, model)} Per-Region Lag Curves",
+            ha="left",
+            va="top",
+            fontsize=plt.rcParams["axes.titlesize"],
+        )
         fig.legend(
             handles=handles,
             loc="upper center",
@@ -1193,8 +1435,8 @@ def plot_per_region_lag_curves(
             ncol=min(len(handles), 6),
             frameon=False,
         )
-        fig.suptitle(f"{display_model_name(config, model)} per-region lag curves", y=1.06)
-        fig.tight_layout(rect=(0, 0, 1, 0.92))
+        fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
+        draw_grouped_task_boxes(layout)
         save_figure(fig, output_dir / f"per_region_lags_{model}", formats)
 
 
@@ -1365,7 +1607,9 @@ def _draw_surface_region_labels(
     region_counts: Mapping[str, int],
 ) -> None:
     coords = _mesh_coordinates(mesh_part)
-    for region, mask in sorted(region_masks.items(), key=lambda item: region_sort_key(item[0])):
+    for region, mask in sorted(
+        region_masks.items(), key=lambda item: region_sort_key(item[0])
+    ):
         if not mask.any():
             continue
         center = coords[mask].mean(axis=0)
@@ -1384,6 +1628,35 @@ def _draw_surface_region_labels(
         text.set_path_effects(
             [patheffects.withStroke(linewidth=2.0, foreground="#1f1f1f")]
         )
+
+
+def add_brain_map_task_axes(fig: plt.Figure, container_ax: plt.Axes) -> list[plt.Axes]:
+    container_ax.set_axis_off()
+    bbox = container_ax.get_position()
+    gap = bbox.width * 0.04
+    panel_width = (bbox.width - gap) / 2
+    return [
+        fig.add_axes(
+            [bbox.x0, bbox.y0, panel_width, bbox.height],
+            projection="3d",
+        ),
+        fig.add_axes(
+            [bbox.x0 + panel_width + gap, bbox.y0, panel_width, bbox.height],
+            projection="3d",
+        ),
+    ]
+
+
+def remove_legacy_per_region_brain_outputs(
+    output_dir: Path,
+    per_region_results: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    formats: Sequence[str],
+) -> None:
+    for task, model_results in per_region_results.items():
+        for model in model_results:
+            output_base = output_dir / f"per_region_brain_{model}_{task}"
+            for fmt in formats:
+                output_base.with_suffix(f".{fmt}").unlink(missing_ok=True)
 
 
 def plot_per_region_brains(
@@ -1406,10 +1679,36 @@ def plot_per_region_brains(
     region_counts = electrodes["region_group"].value_counts().to_dict()
     surface_atlas = _load_destrieux_surface_atlas(nilearn_data_dir)
 
-    for task, model_results in sorted(per_region_results.items()):
-        metric = get_metric_config(config, task)
-        cmap = plt.get_cmap("viridis" if metric.higher_is_better else "viridis_r")
-        for model, region_results in sorted(model_results.items()):
+    models = sorted(
+        {
+            model
+            for task_results in per_region_results.values()
+            for model in task_results
+        }
+    )
+    for model in models:
+        task_items = [
+            (task, model_results[model])
+            for task, model_results in sorted(per_region_results.items())
+            if model in model_results
+        ]
+        if not task_items:
+            continue
+
+        layout = create_grouped_task_figure(
+            config,
+            [task for task, _region_results in task_items],
+            figsize=(18, 8),
+            hspace=0.65,
+            wspace=0.45,
+        )
+        fig = layout.fig
+        fig.subplots_adjust(left=0.035, right=0.91, bottom=0.08, top=0.86)
+        colorbar_specs = []
+
+        for task, region_results in task_items:
+            metric = get_metric_config(config, task)
+            cmap = plt.get_cmap("viridis" if metric.higher_is_better else "viridis_r")
             best_rows = best_region_lag_rows(region_results, metric)
             if best_rows.empty:
                 continue
@@ -1422,15 +1721,10 @@ def plot_per_region_brains(
                 metric_by_region,
             )
 
-            fig = plt.figure(figsize=(12, 5.5))
-            fig.subplots_adjust(left=0.01, right=0.84, top=0.88, bottom=0.04, wspace=0.0)
-            axes = [
-                fig.add_subplot(1, 2, 1, projection="3d"),
-                fig.add_subplot(1, 2, 2, projection="3d"),
-            ]
+            axes = add_brain_map_task_axes(fig, layout.task_axes[task])
             panels = [
-                ("Left hemisphere", "left"),
-                ("Right hemisphere", "right"),
+                ("Left", "left"),
+                ("Right", "right"),
             ]
             for ax, (title, hemi) in zip(axes, panels):
                 mesh_part = _surface_part(surface_atlas.mesh, hemi)
@@ -1466,15 +1760,35 @@ def plot_per_region_brains(
 
             sm = ScalarMappable(norm=norm, cmap=cmap)
             sm.set_array([])
-            cbar_ax = fig.add_axes([0.88, 0.19, 0.018, 0.6])
-            cbar = fig.colorbar(sm, cax=cbar_ax)
-            cbar.set_label(metric.label)
-            fig.suptitle(
-                f"{display_model_name(config, model)} "
-                f"{display_task_name(config, task)} per-region best lag",
-                y=0.99,
+            colorbar_specs.append((task, metric, sm))
+
+        fig.text(
+            0.01,
+            0.985,
+            f"{display_model_name(config, model)} Per-Region Brain Maps",
+            ha="left",
+            va="top",
+            fontsize=plt.rcParams["axes.titlesize"],
+        )
+        for idx, (task, metric, sm) in enumerate(colorbar_specs):
+            container_ax = layout.task_axes[task]
+            bbox = container_ax.get_position()
+            cbar_ax = fig.add_axes(
+                [
+                    min(0.94, bbox.x1 + 0.006),
+                    bbox.y0 + bbox.height * 0.15,
+                    0.008,
+                    bbox.height * 0.7,
+                ]
             )
-            save_figure(fig, output_dir / f"per_region_brain_{model}_{task}", formats)
+            cbar = fig.colorbar(sm, cax=cbar_ax)
+            cbar.set_label(metric.label if idx == 0 else "", fontsize=8)
+            cbar.ax.tick_params(labelsize=7)
+
+        draw_grouped_task_boxes(layout)
+        save_figure(fig, output_dir / f"per_region_brains_{model}", formats)
+
+    remove_legacy_per_region_brain_outputs(output_dir, per_region_results, formats)
 
 
 def generate_paper_results(
@@ -1500,8 +1814,14 @@ def generate_paper_results(
     all_summaries = []
     metrics = {
         task: get_metric_config(config, task)
-        for condition_results in loaded.values()
-        for task in condition_results
+        for task in {
+            *[
+                task
+                for condition_results in loaded.values()
+                for task in condition_results
+            ],
+            *per_region_results.keys(),
+        }
     }
     for condition, condition_results in loaded.items():
         summary = best_lag_rows(condition_results, metrics)
@@ -1526,6 +1846,11 @@ def generate_paper_results(
             table_formats,
             config,
         )
+    write_baseline_region_peak_tables(
+        baseline_region_peak_lag_rows(per_region_results, metrics),
+        output_dir,
+        table_formats,
+    )
     plot_lag_curves(loaded, config, output_dir, formats, colors)
     plot_per_region_lag_curves(per_region_results, config, output_dir, formats)
     plot_per_region_brains(

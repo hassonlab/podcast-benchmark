@@ -11,6 +11,8 @@ from scripts.generate_paper_results import (
     _draw_surface_region_boundaries,
     _draw_surface_region_labels,
     _surface_contour_map,
+    baseline_region_peak_lag_rows,
+    baseline_region_peak_wide,
     best_lag_significance_tests,
     best_lag_rows,
     best_region_lag_rows,
@@ -32,6 +34,7 @@ from scripts.generate_paper_results import (
     resolve_nilearn_data_dir,
     select_best_lag,
     summary_wide,
+    write_baseline_region_peak_tables,
 )
 from scripts.migrate_fm_results import migrate
 
@@ -326,16 +329,92 @@ def test_best_region_lag_rows_selects_best_lag_per_region():
     assert by_region.loc["MTG", "lag"] == 0
 
 
+def test_baseline_region_peak_lag_rows_filters_to_baseline_model():
+    per_region_results = {
+        "task": {
+            "baseline": {
+                "EAC": pd.DataFrame({"lags": [0, 1], "score": [0.5, 0.8]}),
+                "MTG": pd.DataFrame({"lags": [0, 1], "score": [0.7, 0.4]}),
+            },
+            "diver": {
+                "EAC": pd.DataFrame({"lags": [0, 1], "score": [0.9, 0.1]}),
+            },
+        }
+    }
+
+    rows = baseline_region_peak_lag_rows(
+        per_region_results,
+        {"task": MetricConfig("score", True, "Score")},
+    )
+
+    assert set(rows["model"]) == {"baseline"}
+    by_region = rows.set_index("region")
+    assert by_region.loc["EAC", "value"] == 0.8
+    assert by_region.loc["EAC", "lag"] == 1
+    assert by_region.loc["MTG", "value"] == 0.7
+    assert by_region.loc["MTG", "lag"] == 0
+
+
+def test_baseline_region_peak_wide_orders_regions_and_formats_peak_cells():
+    summary = pd.DataFrame(
+        [
+            {"task": "task", "region": "MTG", "value": 0.7, "lag": 0},
+            {"task": "task", "region": "EAC", "value": 0.8, "lag": 1},
+        ]
+    )
+
+    table = baseline_region_peak_wide(summary)
+
+    assert table.columns.tolist() == ["task", "EAC", "MTG"]
+    assert table.to_dict("records") == [
+        {"task": "task", "EAC": "0.800 (1 ms)", "MTG": "0.700 (0 ms)"}
+    ]
+
+
+def test_write_baseline_region_peak_tables_writes_requested_formats(tmp_path):
+    summary = pd.DataFrame(
+        [{"task": "task", "region": "EAC", "value": 0.8, "lag": 1}]
+    )
+
+    write_baseline_region_peak_tables(
+        summary,
+        tmp_path,
+        formats=["csv", "markdown", "latex"],
+    )
+
+    assert (tmp_path / "baseline_region_peak_lags.csv").exists()
+    assert (tmp_path / "baseline_region_peak_lags.md").exists()
+    assert (tmp_path / "baseline_region_peak_lags.tex").exists()
+
+
 def test_plot_lag_curves_preserves_unequal_lag_sets(tmp_path):
+    legacy_output = tmp_path / "lag_curves_task_super_subject.png"
+    legacy_condition_output = tmp_path / "lag_curves_super_subject.png"
+    legacy_output.write_text("stale")
+    legacy_condition_output.write_text("stale")
     loaded = {
         "super_subject": {
             "task": {
                 "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
-                "diver": pd.DataFrame({"lags": [-2, 1, 2], "score": [0.4, 0.7, 0.65]}),
+                "diver": pd.DataFrame(
+                    {"lags": [-2, 1, 2], "score": [0.4, 0.7, 0.65]}
+                ),
             }
+        },
+        "per_subject": {
+            "task": {
+                "baseline": pd.DataFrame(
+                    {"lags": [-2, 1, 2], "score": [0.4, 0.7, 0.65]}
+                ),
+                "diver": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
+            }
+        },
+    }
+    config = {
+        "metrics": {
+            "task": {"column": "score", "higher_is_better": True, "label": "Score"}
         }
     }
-    config = {"metrics": {"task": {"column": "score", "higher_is_better": True, "label": "Score"}}}
 
     plot_lag_curves(
         loaded,
@@ -345,7 +424,9 @@ def test_plot_lag_curves_preserves_unequal_lag_sets(tmp_path):
         colors={"baseline": "#000000", "diver": "#ff0000"},
     )
 
-    assert (tmp_path / "lag_curves_task_super_subject.png").exists()
+    assert (tmp_path / "lag_curves.png").exists()
+    assert not legacy_output.exists()
+    assert not legacy_condition_output.exists()
 
 
 def test_plot_lag_curves_applies_metric_bounds(tmp_path, monkeypatch):
@@ -385,6 +466,52 @@ def test_plot_lag_curves_applies_metric_bounds(tmp_path, monkeypatch):
     )
 
     assert captured["fig"].axes[0].get_ylim() == (0.0, 1.0)
+    assert captured["output_base"] == tmp_path / "lag_curves"
+
+
+def test_plot_lag_curves_only_plots_baseline_conditions(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_figure(fig, output_base, formats):
+        captured["fig"] = fig
+
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+    loaded = {
+        "super_subject": {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
+                "diver": pd.DataFrame({"lags": [-1, 0], "score": [0.1, 0.2]}),
+            }
+        },
+        "per_subject": {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.4, 0.7]}),
+                "brainbert": pd.DataFrame({"lags": [-1, 0], "score": [0.3, 0.4]}),
+            }
+        },
+    }
+    config = {
+        "metrics": {
+            "task": {"column": "score", "higher_is_better": True, "label": "Score"}
+        }
+    }
+
+    plot_lag_curves(
+        loaded,
+        config,
+        tmp_path,
+        formats=["png"],
+        colors={"baseline": "#000000", "diver": "#ff0000", "brainbert": "#00ff00"},
+    )
+
+    plotted_lines = [
+        line for line in captured["fig"].axes[0].lines if line.get_label()[0] != "_"
+    ]
+    assert [line.get_label() for line in plotted_lines] == [
+        "Super Subject",
+        "Per Subject",
+    ]
+    assert [line.get_color() for line in plotted_lines] == ["#000000", "#000000"]
 
 
 def test_region_gradient_colors_use_stable_low_to_high_order():
@@ -406,7 +533,7 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
                 "EAC": pd.DataFrame({"lags": [-1, 0], "score": [0.3, 0.4]}),
                 "TP": pd.DataFrame({"lags": [-1, 0], "score": [0.7, 0.8]}),
             }
-        }
+        },
     }
     config = {
         "metrics": {
@@ -420,7 +547,7 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
     assert (tmp_path / "per_region_lags_baseline.png").exists()
 
 
-def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monkeypatch):
+def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeypatch):
     from nilearn import plotting
 
     electrodes = pd.DataFrame(
@@ -497,7 +624,7 @@ def test_plot_per_region_brains_writes_one_figure_per_model_task(tmp_path, monke
         include_bad=False,
     )
 
-    assert (tmp_path / "per_region_brain_baseline_task.png").exists()
+    assert (tmp_path / "per_region_brains_baseline.png").exists()
     by_hemi = dict(plotted_maps)
     assert by_hemi["left"][:2].tolist() == [0.6, 0.6]
     assert np.isnan(by_hemi["left"][2:]).all()
