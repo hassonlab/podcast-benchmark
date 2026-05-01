@@ -16,12 +16,12 @@ plotting:
     Semantic:
       - gpt_surprise
       - gpt_surprise_multiclass
+      - sentence_onset
     Syntactic:
       - content_noncontent
       - pos
     Auditory:
       - volume_level
-      - sentence_onset
     Mixed:
       - whisper_embedding
       - iu_boundary

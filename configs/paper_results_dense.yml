@@ -1,0 +1,381 @@
+colors:
+  baseline: '#4C78A8'
+  baseline_arbitrary: '#9C755F'
+  baseline_glove: '#59A14F'
+  baseline_gpt2: '#76B7B2'
+  baseline_ridge: '#B07AA1'
+  baseline_simple: '#EDC948'
+  brainbert: '#54A24B'
+  diver: '#F58518'
+  popt: '#E45756'
+plotting:
+  per_region_brains:
+    ignore_right_hemisphere: true
+    colormaps:
+      default: hot
+    bounds:
+      content_noncontent:
+        min: 0.55
+        # max: 0.65
+      gpt_surprise:
+        min: 0.0
+      gpt_surprise_multiclass:
+        min: 0.5
+      iu_boundary:
+        min: 0.7
+      llm_decoding:
+        min: -4.3
+      pos:
+        min: 0.5
+      sentence_onset:
+        min: 0.75
+      volume_level:
+        min: 0.2
+        # max: 0.6
+      whisper_embedding:
+        min: 0.5
+      word_embedding:
+        min: 0.6
+  include_error_bars: true
+  check_best_lag_significance: false
+  correct_best_lag_significance: false
+  best_lag_summary_plot_style: bar
+  task_groups:
+    Semantic:
+      - gpt_surprise
+      - gpt_surprise_multiclass
+      - sentence_onset
+    Syntactic:
+      - content_noncontent
+      - pos
+    Auditory:
+      - volume_level
+      - iu_boundary
+    Mixed:
+      - whisper_embedding
+      - word_embedding
+      - llm_decoding
+      - llm_embedding_pretraining
+  task_display_names:
+    content_noncontent: Content vs. Non-Content
+    gpt_surprise: LLM Surprise
+    gpt_surprise_multiclass: LLM Surprise Multiclass
+    iu_boundary: IU Boundary
+    llm_decoding: Brain LLM
+    llm_embedding_pretraining: LLM Embedding Pretraining
+    pos: Part of Speech
+    sentence_onset: Sentence Onset
+    volume_level: Audio Envelope
+    whisper_embedding: Whisper Embedding
+    word_embedding: Word Embedding
+  model_display_names:
+    baseline: Baseline
+    baseline_arbitrary: Arbitrary Embedding Baseline
+    baseline_glove: GloVe Baseline
+    baseline_gpt2: GPT-2 Baseline
+    baseline_ridge: Ridge Baseline
+    baseline_simple: Simple Baseline
+    brainbert: BrainBERT
+    diver: DIVER
+    popt: PopT
+metrics:
+  content_noncontent:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+  gpt_surprise:
+    column: test_corr_mean
+    higher_is_better: true
+    label: Correlation
+    min: 0.0
+    # max: 0.15
+  gpt_surprise_multiclass:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    # max: 0.7
+  iu_boundary:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+  llm_decoding:
+    column: test_cross_entropy_mean
+    higher_is_better: true
+    label: Log-Likelihood
+    bar_start: -4.3
+    min: -4.3
+    chance_level: -4.216
+    negate: true
+  pos:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+  sentence_onset:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+  volume_level:
+    column: test_corr_mean
+    higher_is_better: true
+    label: Correlation
+    min: 0.0
+    max: 0.7
+  whisper_embedding:
+    column: test_pairwise_accuracy_mean
+    higher_is_better: true
+    label: Pairwise Accuracy
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+  word_embedding:
+    column: test_word_avg_auc_roc_mean
+    higher_is_better: true
+    label: Word-Averaged ROC-AUC
+    chance_level: 0.5
+    min: 0.49
+    max: 0.9
+results:
+  baseline:
+    content_noncontent:
+      per_subject: 
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_subject_2026-04-30-03-55-14
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_subject_2026-04-29-03-58-26
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_subject_2026-04-30-02-57-33
+      per_region:
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_region_2026-04-30-03-56-19
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_region_2026-04-29-04-00-10
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_per_region_2026-04-30-02-57-33
+      super_subject: 
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_supersubject_2026-04-30-03-55-26
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_supersubject_2026-04-29-03-54-58
+        - results/results/content_noncontent_task_sig_elecs_mlp_early_stop_roc_supersubject_2026-04-30-02-54-25
+    gpt_surprise:
+      per_subject: 
+        - results/results/gpt_surprise_per_subject_2026-04-30-02-45-33
+        - results/results/gpt_surprise_per_subject_2026-04-29-03-43-41
+        - results/results/gpt_surprise_per_subject_2026-04-30-03-38-04
+      per_region: 
+        - results/results/gpt_surprise_per_region_2026-04-30-03-38-37
+        - results/results/gpt_surprise_per_region_2026-04-29-03-46-36
+        - results/results/gpt_surprise_per_region_2026-04-30-02-47-05
+      super_subject: 
+        - results/results/gpt_surprise_supersubject_2026-04-30-03-37-57
+        - results/results/gpt_surprise_supersubject_2026-04-29-03-43-54
+        - results/results/gpt_surprise_supersubject_2026-04-30-02-41-40
+    gpt_surprise_multiclass:
+      per_subject: 
+        - results/results/gpt_surprise_per_subject_2026-04-30-03-41-44
+        - results/results/gpt_surprise_per_subject_2026-04-29-03-52-51/
+        - results/results/gpt_surprise_per_subject_2026-04-30-02-47-34
+      per_region: 
+        - results/results/gpt_surprise_per_region_2026-04-30-03-51-51
+        - results/results/gpt_surprise_per_region_2026-04-29-03-53-21
+        - results/results/gpt_surprise_per_region_2026-04-30-02-48-57
+      super_subject: 
+        - results/results/gpt_surprise_supersubject_2026-04-30-03-39-41
+        - results/results/gpt_surprise_supersubject_2026-04-29-03-48-03/
+        - results/results/gpt_surprise_supersubject_2026-04-30-02-47-11
+    iu_boundary:
+      per_subject: 
+        - results/results/iu_boundary_lr_per_subject_2026-04-30-04-10-22
+        - results/results/iu_boundary_lr_per_subject_2026-04-29-04-43-31
+        - results/results/iu_boundary_lr_per_subject_2026-04-30-03-12-13
+      per_region: 
+        - results/results/iu_boundary_lr_per_region_2026-04-30-04-11-19
+        - results/results/iu_boundary_lr_per_region_2026-04-29-04-55-02
+        - results/results/iu_boundary_lr_per_region_2026-04-30-03-12-29
+      super_subject: 
+        - results/results/iu_boundary_lr_supersubject_2026-04-30-04-09-56
+        - results/results/iu_boundary_lr_supersubject_2026-04-29-04-30-35
+        - results/results/iu_boundary_lr_supersubject_2026-04-30-03-08-49
+    llm_decoding:
+      per_subject: 
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-26-09
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-26-42
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-27-21
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-30-45
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-39-31
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-46-53
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-48-58
+        # - results/results/llm_decoding_per_subject_2026-04-30-04-52-10
+        - results/results/llm_decoding_per_subject_2026-04-30-14-42-16
+        - results/results/llm_decoding_per_subject_2026-04-29-06-52-16
+        - results/results/llm_decoding_per_subject_2026-04-30-14-42-15
+        # - results/results/llm_decoding_per_subject_2026-04-30-10-19-19
+        # - results/results/llm_decoding_per_subject_2026-04-30-14-15-57
+        # - results/results/llm_decoding_per_subject_2026-04-30-14-42-15
+        # - results/results/llm_decoding_per_subject_2026-04-30-14-42-16
+      per_region: 
+        - results/results/llm_decoding_per_region_2026-04-30-06-32-36
+        - results/results/llm_decoding_per_region_2026-04-29-06-22-05
+        - results/results/llm_decoding_per_region_2026-04-30-09-35-21
+      super_subject: 
+        - results/results/llm_decoding_supersubject_2026-04-30-06-33-01
+        - results/results/llm_decoding_supersubject_2026-04-29-05-13-12
+    sentence_onset:
+      per_subject: 
+        - results/results/sentence_onset_lr_per_subject_2026-04-30-03-32-52
+        - results/results/sentence_onset_lr_per_subject_2026-04-29-03-40-56
+        - results/results/sentence_onset_lr_per_subject_2026-04-30-02-28-03
+      per_region: 
+        - results/results/sentence_onset_lr_per_region_2026-04-30-03-36-41
+        - results/results/sentence_onset_lr_per_region_2026-04-29-03-42-27
+        - results/results/sentence_onset_lr_per_region_2026-04-30-02-30-44
+      super_subject: 
+        - results/results/sentence_onset_lr_supersubject_2026-04-30-03-28-07
+        - results/results/sentence_onset_lr_supersubject_2026-04-29-03-39-33
+        - results/results/sentence_onset_lr_supersubject_2026-04-30-02-24-25
+    whisper_embedding:
+      per_subject: 
+        - results/results/neural_conv_whisper_embedding_per_subject_2026-04-30-04-08-54
+        - results/results/neural_conv_whisper_embedding_per_subject_2026-04-29-04-29-04
+        - results/results/neural_conv_whisper_embedding_per_subject_2026-04-30-03-08-33
+      per_region: 
+        - results/results/neural_conv_whisper_embedding_per_region_2026-04-30-03-08-33
+        - results/results/neural_conv_whisper_embedding_per_region_2026-04-29-04-29-23
+        - results/results/neural_conv_whisper_embedding_per_region_2026-04-30-04-09-56
+      super_subject: 
+        - results/results/neural_conv_whisper_embedding_supersubject_2026-04-30-04-01-30
+        - results/results/neural_conv_whisper_embedding_supersubject_2026-04-29-04-26-59
+    word_embedding:
+      per_subject: 
+        - results/results/ensemble_model_10_gpt2_per_subject_2026-04-30-03-27-51
+        - results/results/ensemble_model_10_gpt2_per_subject_2026-04-29-03-29-52
+      per_region: 
+        - results/results/ensemble_model_10_gpt2_per_region_2026-04-30-03-28-04
+        - results/results/ensemble_model_10_gpt2_per_region_2026-04-29-03-31-30
+      super_subject: 
+        - results/results/ensemble_model_10_gpt2_supersubject_2026-04-30-03-27-51
+        - results/results/ensemble_model_10_gpt2_supersubject_2026-04-29-03-29-51
+    volume_level:
+      per_subject: 
+        - results/results/volume_level_simple_per_subject_2026-04-29-05-04-59
+        - results/results/volume_level_simple_per_subject_2026-04-30-03-15-53
+      per_region: 
+        - results/results/volume_level_simple_per_region_2026-04-30-04-24-47
+        - results/results/volume_level_simple_per_region_2026-04-29-05-06-34
+        - results/results/volume_level_simple_per_region_2026-04-30-03-23-59
+      super_subject: 
+        - results/results/volume_level_simple_supersubject_2026-04-30-04-19-40
+        - results/results/volume_level_simple_supersubject_2026-04-29-05-00-50
+        - results/results/volume_level_simple_supersubject_2026-04-30-03-13-24
+    pos:
+      per_subject: 
+        - results/results/pos_task_sig_elecs_without_other_classes_per_subject_2026-04-30-03-57-51
+        - results/results/pos_task_sig_elecs_without_other_classes_per_subject_2026-04-29-04-21-57
+        - results/results/pos_task_sig_elecs_without_other_classes_per_subject_2026-04-30-03-00-44
+      per_region: 
+        - results/results/pos_task_sig_elecs_without_other_classes_per_region_2026-04-30-04-00-52
+        - results/results/pos_task_sig_elecs_without_other_classes_per_region_2026-04-29-04-25-38
+        - results/results/pos_task_sig_elecs_without_other_classes_per_region_2026-04-30-03-02-51
+      super_subject: 
+        - results/results/pos_task_sig_elecs_without_other_classes_supersubject_2026-04-30-03-57-51
+        - results/results/pos_task_sig_elecs_without_other_classes_supersubject_2026-04-29-04-19-26
+        - results/results/pos_task_sig_elecs_without_other_classes_supersubject_2026-04-30-02-57-38
+  popt:
+    content_noncontent:
+      per_subject: results-fm-normalized/popt_content_noncontent_per_subject_2026-04-23-07-42-43
+      super_subject: results-fm-normalized/popt_content_noncontent_super_subject_2026-04-23-08-51-07
+    gpt_surprise:
+      per_subject: results-fm-normalized/popt_gpt_surprise_per_subject_2026-04-23-10-00-38
+      super_subject: results-fm-normalized/popt_gpt_surprise_super_subject_2026-04-23-02-29-34
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/popt_gpt_surprise_multiclass_per_subject_2026-04-23-08-51-54
+      super_subject: results-fm-normalized/popt_gpt_surprise_multiclass_super_subject_2026-04-22-23-35-35
+    iu_boundary:
+      per_subject: results-fm-normalized/popt_iu_boundary_per_subject_2026-04-23-23-38-33
+      super_subject: results-fm-normalized/popt_iu_boundary_super_subject_2026-04-23-22-00-42
+    pos:
+      per_subject: results-fm-normalized/popt_pos_per_subject_2026-04-23-23-12-54
+      super_subject: results-fm-normalized/popt_pos_super_subject_2026-04-23-22-00-25
+    sentence_onset:
+      per_subject: results-fm-normalized/popt_sentence_onset_per_subject_2026-04-22-23-25-46
+      super_subject: results-fm-normalized/popt_sentence_onset_super_subject_2026-04-23-22-01-43
+    whisper_embedding:
+      per_subject: results-fm-normalized/popt_whisper_embedding_per_subject_2026-04-22-23-41-43
+      super_subject: results-fm-normalized/popt_whisper_embedding_super_subject_2026-04-23-22-28-37
+    volume_level:
+      per_subject: results-fm-normalized/popt_full_volume_level_per_subject_2026-04-29-04-17-04
+      super_subject: results-fm-normalized/popt_supersubject_volume_level_2026-04-28-23-05-51
+    word_embedding:
+      per_subject: results-fm-normalized/popt_word_embedding_per_subject_2026-04-23-23-43-37
+      super_subject: results-fm-normalized/popt_word_embedding_super_subject_2026-04-24-06-50-50
+    llm_decoding:
+      per_subject: results-fm-normalized/popt_full_llm_decoding_per_subject_2026-04-26-01-10-31
+      super_subject: results-fm-normalized/popt_supersubject_llm_decoding_2026-04-27-08-06-35
+  brainbert:
+    content_noncontent:
+      per_subject: results-fm-normalized/brainbert_content_noncontent_per_subject_2026-04-23-00-19-05
+      super_subject: results-fm-normalized/brainbert_content_noncontent_super_subject_2026-04-22-21-09-17
+    gpt_surprise:
+      per_subject: results-fm-normalized/brainbert_gpt_surprise_per_subject_2026-04-23-22-26-50
+      super_subject: results-fm-normalized/brainbert_gpt_surprise_super_subject_2026-04-23-10-19-19
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/brainbert_gpt_surprise_multiclass_per_subject_2026-04-23-07-43-44
+      super_subject: results-fm-normalized/brainbert_gpt_surprise_multiclass_super_subject_2026-04-22-23-11-18
+    iu_boundary:
+      per_subject: results-fm-normalized/brainbert_iu_boundary_per_subject_2026-04-23-22-28-32
+      super_subject: results-fm-normalized/brainbert_iu_boundary_super_subject_2026-04-23-10-35-57
+    pos:
+      per_subject: results-fm-normalized/brainbert_pos_per_subject_2026-04-23-09-59-25
+      super_subject: results-fm-normalized/brainbert_pos_super_subject_2026-04-23-22-01-27
+    sentence_onset:
+      per_subject: results-fm-normalized/brainbert_sentence_onset_per_subject_2026-04-22-23-48-51
+      super_subject: results-fm-normalized/brainbert_sentence_onset_super_subject_2026-04-23-10-35-56
+    whisper_embedding:
+      per_subject: results-fm-normalized/brainbert_whisper_embedding_per_subject_2026-04-23-00-12-06
+      super_subject: results-fm-normalized/brainbert_whisper_embedding_super_subject_2026-04-23-22-15-12
+    word_embedding:
+      per_subject: results-fm-normalized/brainbert_word_embedding_per_subject_2026-04-26-16-34-24
+      super_subject: results-fm-normalized/brainbert_word_embedding_super_subject_2026-04-24-07-04-56
+    llm_decoding:
+      per_subject: /Users/zachparis/Documents/projects/podcast-benchmark/results-fm-normalized/brainbert_full_llm_decoding_per_subject_2026-04-26-00-16-42
+      super_subject: results-fm-normalized/brainbert_supersubject_llm_decoding_2026-04-27-08-06-10
+    volume_level:
+      per_subject: results-fm-normalized/brainbert_volume_level_per_subject_2026-04-29-00-26-09
+      super_subject: results-fm-normalized/brainbert_supersubject_volume_level_2026-04-28-23-05-25
+  diver:
+    content_noncontent:
+      per_subject: results-fm-normalized/diver_content_noncontent_per_subject_2026-04-23-07-41-18
+      super_subject: results-fm-normalized/diver_content_noncontent_super_subject_2026-04-22-21-56-26
+    gpt_surprise:
+      per_subject: results-fm-normalized/diver_gpt_surprise_per_subject_2026-04-23-10-38-58
+      super_subject: results-fm-normalized/diver_gpt_surprise_super_subject_2026-04-23-09-05-48
+    gpt_surprise_multiclass:
+      per_subject: results-fm-normalized/diver_gpt_surprise_multiclass_per_subject_2026-04-23-10-03-26
+      super_subject: results-fm-normalized/diver_gpt_surprise_multiclass_super_subject_2026-04-23-10-18-08
+    iu_boundary:
+      per_subject: results-fm-normalized/diver_iu_boundary_per_subject_2026-04-23-22-28-22
+      super_subject: results-fm-normalized/diver_iu_boundary_super_subject_2026-04-23-22-00-02
+    pos:
+      per_subject: results-fm-normalized/diver_pos_per_subject_2026-04-24-01-19-42
+      super_subject: results-fm-normalized/diver_pos_super_subject_2026-04-23-22-00-08
+    sentence_onset:
+      per_subject: results-fm-normalized/diver_sentence_onset_per_subject_2026-04-23-07-43-02
+      super_subject: results-fm-normalized/diver_sentence_onset_super_subject_2026-04-23-21-59-17
+    whisper_embedding:
+      per_subject: results-fm-normalized/diver_whisper_embedding_per_subject_2026-04-23-08-33-44
+      super_subject: results-fm-normalized/diver_whisper_embedding_super_subject_2026-04-23-22-52-31
+    word_embedding:
+      per_subject: results-fm-normalized/diver_word_embedding_per_subject_2026-04-23-22-48-02
+      super_subject: results-fm-normalized/diver_word_embedding_super_subject_2026-04-24-07-26-38
+    llm_decoding:
+      per_subject: results-fm-normalized/diver_full_llm_decoding_per_subject_2026-04-27-00-30-11
+      super_subject: results-fm-normalized/diver_supersubject_llm_decoding_2026-04-28-04-50-46
+    volume_level:
+      per_subject: results-fm-normalized/diver_full_volume_level_per_subject_2026-04-29-07-04-58
+      super_subject: results-fm-normalized/diver_supersubject_volume_level_2026-04-29-01-47-50

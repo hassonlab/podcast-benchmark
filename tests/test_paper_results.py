@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.generate_paper_results import (
     MetricConfig,
@@ -11,15 +12,23 @@ from scripts.generate_paper_results import (
     _draw_surface_region_boundaries,
     _draw_surface_region_labels,
     _surface_contour_map,
+    bar_start_for_task,
     baseline_region_peak_lag_rows,
     baseline_region_peak_wide,
+    best_lag_summary_plot_style,
     best_lag_significance_tests,
     best_lag_rows,
     best_region_lag_rows,
+    brain_map_colormap,
+    brain_map_metric_config,
+    configured_model_order,
+    create_grouped_task_figure,
+    draw_grouped_task_backgrounds,
     get_metric_config,
     holm_adjust_p_values,
     iter_per_region_result_specs,
     load_current_style_run,
+    load_results,
     load_per_region_results,
     load_per_region_run,
     curve_for_metric,
@@ -30,6 +39,9 @@ from scripts.generate_paper_results import (
     plot_lag_curves,
     plot_per_region_brains,
     plot_per_region_lag_curves,
+    composite_rgba_over_background,
+    rasterize_brain_map_surface_artists,
+    region_count_legend_handles,
     region_gradient_colors,
     resolve_nilearn_data_dir,
     select_best_lag,
@@ -64,6 +76,95 @@ def test_loads_and_averages_current_style_per_subject(tmp_path):
     assert loaded["score"].tolist() == [0.6]
 
 
+def test_load_results_combines_configured_path_lists_by_lag(tmp_path):
+    early_run = tmp_path / "early"
+    late_run = tmp_path / "late"
+    write_lag_csv(early_run / "lag_performance.csv", [{"lags": -500, "score": 0.4}])
+    write_lag_csv(late_run / "lag_performance.csv", [{"lags": 0, "score": 0.6}])
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "super_subject": [late_run, early_run],
+                }
+            }
+        }
+    }
+
+    loaded = load_results(config)
+
+    df = loaded["super_subject"]["task"]["baseline"]
+    assert df.to_dict("records") == [
+        {"lags": -500, "score": 0.4},
+        {"lags": 0, "score": 0.6},
+    ]
+
+
+def test_load_results_combines_per_subject_path_lists_by_subject_and_lag(tmp_path):
+    early_run = tmp_path / "subjects_early"
+    late_run = tmp_path / "subjects_late"
+    write_lag_csv(early_run / "subject_1" / "lag_performance.csv", [{"lags": -500, "score": 0.4}])
+    write_lag_csv(early_run / "subject_2" / "lag_performance.csv", [{"lags": -500, "score": 0.8}])
+    write_lag_csv(late_run / "subject_1" / "lag_performance.csv", [{"lags": 0, "score": 0.6}])
+    write_lag_csv(late_run / "subject_2" / "lag_performance.csv", [{"lags": 0, "score": 1.0}])
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_subject": [late_run, early_run],
+                }
+            }
+        }
+    }
+
+    loaded = load_results(config)
+
+    df = loaded["per_subject"]["task"]["baseline"]
+    assert df["lags"].tolist() == [-500, 0]
+    assert np.allclose(df["score"].tolist(), [0.6, 0.8])
+
+
+def test_load_results_combines_per_subject_path_lists_by_disjoint_subjects(tmp_path):
+    first_run = tmp_path / "subjects_first"
+    second_run = tmp_path / "subjects_second"
+    write_lag_csv(first_run / "subject_1" / "lag_performance.csv", [{"lags": 0, "score": 0.4}])
+    write_lag_csv(second_run / "subject_2" / "lag_performance.csv", [{"lags": 0, "score": 0.8}])
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_subject": [first_run, second_run],
+                }
+            }
+        }
+    }
+
+    loaded = load_results(config)
+
+    df = loaded["per_subject"]["task"]["baseline"]
+    assert df["lags"].tolist() == [0]
+    assert np.allclose(df["score"].tolist(), [0.6])
+
+
+def test_load_results_rejects_duplicate_per_subject_lags(tmp_path):
+    first_run = tmp_path / "subjects_first"
+    second_run = tmp_path / "subjects_second"
+    write_lag_csv(first_run / "subject_1" / "lag_performance.csv", [{"lags": 0, "score": 0.4}])
+    write_lag_csv(second_run / "subject_1" / "lag_performance.csv", [{"lags": 0, "score": 0.8}])
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_subject": [first_run, second_run],
+                }
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="baseline/task/per_subject/subject_1"):
+        load_results(config)
+
+
 def test_discovers_per_region_specs_from_existing_results_dictionary():
     config = {
         "results": {
@@ -84,6 +185,22 @@ def test_discovers_per_region_specs_from_existing_results_dictionary():
     assert specs[0].task == "content_noncontent"
     assert specs[0].condition == "per_region"
     assert specs[0].path == Path("results/regions")
+
+
+def test_discovers_path_list_specs_from_existing_results_dictionary():
+    config = {
+        "results": {
+            "baseline": {
+                "content_noncontent": {
+                    "per_region": ["results/early", "results/late"],
+                }
+            }
+        }
+    }
+
+    specs = list(iter_per_region_result_specs(config))
+
+    assert specs[0].paths == (Path("results/early"), Path("results/late"))
 
 
 def test_loads_per_region_run_and_normalizes_region_names(tmp_path):
@@ -116,6 +233,81 @@ def test_loads_per_region_results_by_task_and_model(tmp_path):
     assert list(loaded) == ["task"]
     assert list(loaded["task"]) == ["baseline"]
     assert list(loaded["task"]["baseline"]) == ["MTG"]
+
+
+def test_loads_per_region_results_combines_configured_path_lists_by_region_and_lag(tmp_path):
+    early_run = tmp_path / "regions_early"
+    late_run = tmp_path / "regions_late"
+    write_lag_csv(
+        early_run / "region_mtg" / "lag_performance.csv",
+        [{"lags": -500, "score": 0.4}],
+    )
+    write_lag_csv(
+        late_run / "region_mtg" / "lag_performance.csv",
+        [{"lags": 0, "score": 0.6}],
+    )
+    write_lag_csv(
+        late_run / "region_eac" / "lag_performance.csv",
+        [{"lags": 0, "score": 0.7}],
+    )
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_region": [late_run, early_run],
+                }
+            }
+        }
+    }
+
+    loaded = load_per_region_results(config)
+
+    model_results = loaded["task"]["baseline"]
+    assert model_results["MTG"].to_dict("records") == [
+        {"lags": -500, "score": 0.4},
+        {"lags": 0, "score": 0.6},
+    ]
+    assert model_results["EAC"].to_dict("records") == [{"lags": 0, "score": 0.7}]
+
+
+def test_loads_per_region_results_rejects_duplicate_region_lags(tmp_path):
+    first_run = tmp_path / "regions_first"
+    second_run = tmp_path / "regions_second"
+    write_lag_csv(
+        first_run / "region_mtg" / "lag_performance.csv",
+        [{"lags": 0, "score": 0.4}],
+    )
+    write_lag_csv(
+        second_run / "region_mtg" / "lag_performance.csv",
+        [{"lags": 0, "score": 0.6}],
+    )
+    config = {
+        "results": {
+            "baseline": {
+                "task": {
+                    "per_region": [first_run, second_run],
+                }
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="baseline/task/per_region/MTG"):
+        load_per_region_results(config)
+
+
+def test_configured_model_order_follows_results_order_and_appends_unknown():
+    config = {
+        "results": {
+            "diver": {},
+            "baseline": {},
+        }
+    }
+
+    assert configured_model_order(["baseline", "popt", "diver"], config) == [
+        "diver",
+        "baseline",
+        "popt",
+    ]
 
 
 def test_resolve_nilearn_data_dir_prefers_explicit_path(tmp_path):
@@ -167,6 +359,211 @@ def test_metric_norm_uses_configured_bounds():
 
     assert norm.vmin == 0.0
     assert norm.vmax == 1.0
+
+
+def test_brain_map_metric_config_ignores_standard_metric_bounds_by_default():
+    metric = MetricConfig("score", True, "Score", 0.0, 1.0)
+
+    brain_metric = brain_map_metric_config({}, "task", metric)
+
+    assert brain_metric.min_value is None
+    assert brain_metric.max_value is None
+    assert brain_metric.column == metric.column
+    assert brain_metric.label == metric.label
+
+
+def test_brain_map_metric_config_uses_brain_specific_colorbar_bounds():
+    metric = MetricConfig("score", True, "Score", 0.0, 1.0)
+
+    brain_metric = brain_map_metric_config(
+        {
+            "plotting": {
+                "per_region_brains": {
+                    "colorbar_bounds": {
+                        "task": {"min": 0.25, "max": 0.75},
+                    }
+                }
+            }
+        },
+        "task",
+        metric,
+    )
+
+    assert brain_metric.min_value == 0.25
+    assert brain_metric.max_value == 0.75
+
+
+def test_brain_map_colormap_defaults_to_metric_direction():
+    assert brain_map_colormap(
+        {},
+        "task",
+        MetricConfig("score", True, "Score"),
+    ).name == "viridis"
+    assert brain_map_colormap(
+        {},
+        "task",
+        MetricConfig("score", False, "Score"),
+    ).name == "viridis_r"
+
+
+def test_brain_map_colormap_uses_task_specific_config():
+    cmap = brain_map_colormap(
+        {
+            "plotting": {
+                "per_region_brains": {
+                    "colormaps": {
+                        "default": "magma",
+                        "task": {"name": "plasma", "reverse": False},
+                    }
+                }
+            }
+        },
+        "task",
+        MetricConfig("score", False, "Score"),
+    )
+
+    assert cmap.name == "plasma"
+
+
+def test_best_lag_summary_plot_style_supports_bar_aliases():
+    assert best_lag_summary_plot_style({}) == "point"
+    assert best_lag_summary_plot_style(
+        {"plotting": {"best_lag_summary_plot_style": "bars"}}
+    ) == "bar"
+    assert best_lag_summary_plot_style({"plotting": {"use_bar_charts": True}}) == "bar"
+
+
+def test_bar_start_for_task_prefers_task_specific_plotting_config():
+    config = {
+        "plotting": {
+            "bar_start": 0.0,
+            "best_lag_bar_starts": {
+                "task_a": 0.5,
+            },
+        },
+        "metrics": {
+            "task_b": {
+                "column": "score",
+                "label": "Score",
+                "bar_start": 0.25,
+            }
+        },
+    }
+
+    assert bar_start_for_task(config, "task_a") == 0.5
+    assert bar_start_for_task(config, "task_b") == 0.25
+    assert bar_start_for_task(config, "task_c") == 0.0
+
+
+def test_grouped_task_figure_interleaves_mixed_and_semantic_l_shapes():
+    config = {
+        "plotting": {
+            "task_groups": {
+                "Mixed": ["mixed_a", "mixed_b", "mixed_c"],
+                "Semantic": ["semantic_a", "semantic_b", "semantic_c"],
+            }
+        }
+    }
+
+    layout = create_grouped_task_figure(
+        config,
+        ["semantic_c", "mixed_b", "semantic_a", "mixed_a", "semantic_b", "mixed_c"],
+    )
+
+    slots = {
+        task: (
+            ax.get_subplotspec().rowspan.start,
+            ax.get_subplotspec().colspan.start,
+        )
+        for task, ax in layout.task_axes.items()
+    }
+    assert slots == {
+        "mixed_a": (0, 0),
+        "mixed_b": (1, 0),
+        "mixed_c": (0, 1),
+        "semantic_a": (1, 1),
+        "semantic_b": (0, 2),
+        "semantic_c": (1, 2),
+    }
+
+
+def test_grouped_task_backgrounds_color_whitespace_behind_axes():
+    from matplotlib.colors import to_rgba
+
+    config = {
+        "plotting": {
+            "task_group_background_alpha": 0.5,
+            "task_group_backgrounds": {
+                "Mixed": "#ddeeff",
+                "Semantic": "#ffeecc",
+            },
+            "task_groups": {
+                "Mixed": ["mixed"],
+                "Semantic": ["semantic"],
+            },
+        }
+    }
+    layout = create_grouped_task_figure(config, ["mixed", "semantic"])
+
+    draw_grouped_task_backgrounds(layout, config)
+
+    assert np.allclose(
+        layout.task_axes["mixed"].get_facecolor(),
+        to_rgba("white"),
+    )
+    assert np.allclose(
+        layout.task_axes["semantic"].get_facecolor(),
+        to_rgba("white"),
+    )
+    background_artists = layout.fig.artists
+    assert len(background_artists) == 6
+    assert any(
+        np.allclose(artist.get_facecolor(), to_rgba("#ddeeff", 0.5))
+        for artist in background_artists
+    )
+    assert any(
+        np.allclose(artist.get_facecolor(), to_rgba("#ffeecc", 0.5))
+        for artist in background_artists
+    )
+    assert all(artist.get_edgecolor()[3] == 0 for artist in background_artists)
+    assert {text.get_text() for text in layout.fig.texts} == {"Mixed", "Semantic"}
+    assert all(text.get_fontweight() == "bold" for text in layout.fig.texts)
+
+
+def test_l_shape_group_labels_stay_inside_top_group_segment():
+    config = {
+        "plotting": {
+            "task_groups": {
+                "Mixed": ["mixed_a", "mixed_b", "mixed_c"],
+                "Semantic": ["semantic_a", "semantic_b", "semantic_c"],
+            }
+        }
+    }
+    layout = create_grouped_task_figure(
+        config,
+        ["mixed_a", "mixed_b", "mixed_c", "semantic_a", "semantic_b", "semantic_c"],
+    )
+
+    draw_grouped_task_backgrounds(layout, config)
+
+    semantic_label = next(
+        text for text in layout.fig.texts if text.get_text() == "Semantic"
+    )
+    semantic_top_axis = layout.task_axes["semantic_b"]
+    left, _bottom, width, _height = semantic_top_axis.get_position().bounds
+    assert left <= semantic_label.get_position()[0] <= left + width
+
+
+def test_rasterize_brain_map_surface_artists_marks_axis_collections():
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    collection = ax.scatter([0], [0])
+
+    rasterize_brain_map_surface_artists(ax)
+
+    assert collection.get_rasterized() is True
+    plt.close(fig)
 
 
 def test_select_best_lag_maximize_and_minimize():
@@ -511,7 +908,8 @@ def test_plot_lag_curves_only_plots_baseline_conditions(tmp_path, monkeypatch):
         "Super Subject",
         "Per Subject",
     ]
-    assert [line.get_color() for line in plotted_lines] == ["#000000", "#000000"]
+    assert [line.get_color() for line in plotted_lines] == ["#1F4E79", "#2CA7A0"]
+    assert [line.get_linestyle() for line in plotted_lines] == ["-", "-"]
 
 
 def test_region_gradient_colors_use_stable_low_to_high_order():
@@ -549,6 +947,7 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
 
 def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeypatch):
     from nilearn import plotting
+    from matplotlib.colors import to_rgba
 
     electrodes = pd.DataFrame(
         [
@@ -560,7 +959,10 @@ def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeyp
             {"x": 39.0, "y": -20.0, "z": 21.0, "region_group": "RIGHT"},
         ]
     )
-    monkeypatch.setattr("scripts.generate_paper_results._load_region_electrodes", lambda *args: electrodes)
+    monkeypatch.setattr(
+        "scripts.generate_paper_results._load_region_electrodes",
+        lambda *args: electrodes,
+    )
     monkeypatch.setattr(
         "scripts.generate_paper_results._load_destrieux_surface_atlas",
         lambda *args: DestrieuxSurfaceAtlas(
@@ -598,9 +1000,19 @@ def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeyp
         ),
     )
     plotted_maps = []
+    plotted_axes = []
 
     def fake_plot_surf_stat_map(**kwargs):
-        plotted_maps.append((kwargs["hemi"], kwargs["stat_map"].copy()))
+        plotted_maps.append(
+            (
+                kwargs["hemi"],
+                kwargs["stat_map"].copy(),
+                kwargs["vmin"],
+                kwargs["vmax"],
+                kwargs["cmap"],
+            )
+        )
+        plotted_axes.append(kwargs["axes"])
 
     monkeypatch.setattr(plotting, "plot_surf_stat_map", fake_plot_surf_stat_map)
     monkeypatch.setattr(plotting, "plot_surf_contours", lambda **kwargs: None)
@@ -612,7 +1024,26 @@ def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeyp
             }
         }
     }
-    config = {"metrics": {"task": {"column": "score", "higher_is_better": True, "label": "Score"}}}
+    config = {
+        "metrics": {
+            "task": {
+                "column": "score",
+                "higher_is_better": True,
+                "label": "Score",
+                "min": 0.0,
+                "max": 1.0,
+            }
+        },
+        "plotting": {
+            "task_group_background_alpha": 0.5,
+            "task_group_backgrounds": {"Semantic": "#ffeecc"},
+            "task_groups": {"Semantic": ["task"]},
+            "per_region_brains": {
+                "colorbar_bounds": {"task": {"min": 0.55, "max": 0.75}},
+                "colormaps": {"task": "plasma"},
+            },
+        },
+    }
 
     plot_per_region_brains(
         per_region_results,
@@ -625,11 +1056,96 @@ def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeyp
     )
 
     assert (tmp_path / "per_region_brains_baseline.png").exists()
-    by_hemi = dict(plotted_maps)
+    by_hemi = {hemi: stat_map for hemi, stat_map, _vmin, _vmax, _cmap in plotted_maps}
     assert by_hemi["left"][:2].tolist() == [0.6, 0.6]
     assert np.isnan(by_hemi["left"][2:]).all()
     assert by_hemi["right"][:2].tolist() == [0.7, 0.7]
     assert np.isnan(by_hemi["right"][2:]).all()
+    assert all(vmin == 0.55 for _hemi, _stat_map, vmin, _vmax, _cmap in plotted_maps)
+    assert all(vmax == 0.75 for _hemi, _stat_map, _vmin, vmax, _cmap in plotted_maps)
+    assert all(cmap.name == "plasma" for _hemi, _stat_map, _vmin, _vmax, cmap in plotted_maps)
+    assert plotted_axes
+    expected_facecolor = composite_rgba_over_background(
+        to_rgba("#ffeecc", 0.5),
+        plotted_axes[0].figure.get_facecolor(),
+    )
+    assert all(
+        np.allclose(ax.get_facecolor(), expected_facecolor)
+        for ax in plotted_axes
+    )
+    assert any(
+        text.get_text() == "Semantic" and text.get_fontweight() == "bold"
+        for text in plotted_axes[0].figure.texts
+    )
+
+
+def test_plot_per_region_brains_can_plot_left_hemisphere_only(tmp_path, monkeypatch):
+    from nilearn import plotting
+
+    electrodes = pd.DataFrame(
+        [
+            {"x": -42.0, "y": -20.0, "z": 18.0, "region_group": "EAC"},
+            {"x": 42.0, "y": -18.0, "z": 24.0, "region_group": "RIGHT"},
+        ]
+    )
+    monkeypatch.setattr(
+        "scripts.generate_paper_results._load_region_electrodes",
+        lambda *args: electrodes,
+    )
+    monkeypatch.setattr(
+        "scripts.generate_paper_results._load_destrieux_surface_atlas",
+        lambda *args: DestrieuxSurfaceAtlas(
+            labels=["Unknown", "G_temp_sup-Lateral", "G_postcentral"],
+            maps={
+                "left": np.array([1, 1, 0, 0]),
+                "right": np.array([2, 2, 0, 0]),
+            },
+            mesh={
+                "left": SimpleNamespace(coordinates=np.zeros((4, 3))),
+                "right": SimpleNamespace(coordinates=np.zeros((4, 3))),
+            },
+            sulcal={
+                "left": np.zeros(4),
+                "right": np.zeros(4),
+            },
+        ),
+    )
+    plotted_hemis = []
+    titled_axes = []
+
+    def fake_plot_surf_stat_map(**kwargs):
+        plotted_hemis.append(kwargs["hemi"])
+        titled_axes.append(kwargs["axes"])
+
+    monkeypatch.setattr(plotting, "plot_surf_stat_map", fake_plot_surf_stat_map)
+    monkeypatch.setattr(plotting, "plot_surf_contours", lambda **kwargs: None)
+    per_region_results = {
+        "task": {
+            "baseline": {
+                "EAC": pd.DataFrame({"lags": [0], "score": [0.6]}),
+                "RIGHT": pd.DataFrame({"lags": [0], "score": [0.9]}),
+            }
+        }
+    }
+    config = {
+        "metrics": {
+            "task": {"column": "score", "higher_is_better": True, "label": "Score"}
+        },
+        "plotting": {"per_region_brains": {"ignore_right_hemisphere": True}},
+    }
+
+    plot_per_region_brains(
+        per_region_results,
+        config,
+        tmp_path,
+        formats=["png"],
+        data_root=tmp_path,
+        nilearn_data_dir=tmp_path / "nilearn",
+        include_bad=False,
+    )
+
+    assert plotted_hemis == ["left"]
+    assert titled_axes[0].get_title() == "task"
 
 
 def test_build_surface_metric_maps_respects_lateralized_region_labels():
@@ -656,7 +1172,7 @@ def test_build_surface_metric_maps_respects_lateralized_region_labels():
     assert set(region_masks["right"]) == {"RIGHT"}
 
 
-def test_surface_region_labels_include_electrode_counts():
+def test_surface_region_labels_show_region_names_without_electrode_counts():
     import matplotlib.pyplot as plt
 
     fig = plt.figure()
@@ -673,11 +1189,20 @@ def test_surface_region_labels_include_electrode_counts():
             )
         ),
         {"EAC": np.array([True, True, False])},
-        {"EAC": 3},
     )
 
-    assert any(text.get_text() == "EAC\nn=3" for text in ax.texts)
+    assert any(text.get_text() == "STG" for text in ax.texts)
+    assert all("n=" not in text.get_text() for text in ax.texts)
     plt.close(fig)
+
+
+def test_region_count_legend_handles_include_electrode_counts():
+    handles = region_count_legend_handles(
+        ["PC", "EAC"],
+        {"EAC": 3, "PC": 5},
+    )
+
+    assert [handle.get_label() for handle in handles] == ["STG (n=3)", "PC (n=5)"]
 
 
 def test_surface_region_boundaries_draw_between_regions(monkeypatch):
@@ -809,6 +1334,56 @@ def test_plot_best_lag_summary_uses_independent_task_y_axes(tmp_path, monkeypatc
     axes = captured["fig"].axes[:2]
     assert len(axes) == 2
     assert axes[0].get_ylim() != axes[1].get_ylim()
+
+
+def test_plot_best_lag_summary_orders_models_from_config(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_figure(fig, output_base, formats):
+        captured["fig"] = fig
+
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+    summary = pd.DataFrame(
+        [
+            {
+                "condition": "super_subject",
+                "task": "task",
+                "model": "baseline",
+                "metric": "score",
+                "metric_label": "Score",
+                "value": 0.1,
+                "lag": 0,
+                "higher_is_better": True,
+            },
+            {
+                "condition": "super_subject",
+                "task": "task",
+                "model": "diver",
+                "metric": "score",
+                "metric_label": "Score",
+                "value": 0.2,
+                "lag": 0,
+                "higher_is_better": True,
+            },
+        ]
+    )
+
+    plot_best_lag_summary(
+        summary,
+        "super_subject",
+        tmp_path,
+        formats=["png"],
+        colors={"baseline": "#000000", "diver": "#ff0000"},
+        config={
+            "results": {
+                "diver": {"task": {"super_subject": "diver/run"}},
+                "baseline": {"task": {"super_subject": "baseline/run"}},
+            }
+        },
+    )
+
+    labels = [label.get_text() for label in captured["fig"].axes[0].get_xticklabels()]
+    assert labels == ["diver", "baseline"]
 
 
 def test_plot_best_lag_summary_draws_significance_annotations(tmp_path, monkeypatch):
