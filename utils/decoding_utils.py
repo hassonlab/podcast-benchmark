@@ -706,6 +706,49 @@ def _accumulate_batch_metrics(sums, batch_metrics):
             sums[name] += val
 
 
+def _init_streaming_corr_state(device):
+    return {
+        "n": 0,
+        "sum_pred": torch.tensor(0.0, device=device),
+        "sum_true": torch.tensor(0.0, device=device),
+        "sum_pred_sq": torch.tensor(0.0, device=device),
+        "sum_true_sq": torch.tensor(0.0, device=device),
+        "sum_prod": torch.tensor(0.0, device=device),
+    }
+
+
+def _update_streaming_corr_state(state, pred, true):
+    pred = pred.detach().to(dtype=torch.float32).reshape(-1)
+    true = true.detach().to(dtype=torch.float32).reshape(-1)
+
+    state["n"] += pred.numel()
+    state["sum_pred"] += pred.sum()
+    state["sum_true"] += true.sum()
+    state["sum_pred_sq"] += torch.sum(pred * pred)
+    state["sum_true_sq"] += torch.sum(true * true)
+    state["sum_prod"] += torch.sum(pred * true)
+
+
+def _compute_streaming_corr(state):
+    n = state["n"]
+    if n < 2:
+        return 0.0
+
+    n_tensor = torch.tensor(float(n), device=state["sum_pred"].device)
+    cov = state["sum_prod"] / n_tensor
+    cov = cov - (state["sum_pred"] / n_tensor) * (state["sum_true"] / n_tensor)
+    pred_var = state["sum_pred_sq"] / n_tensor
+    pred_var = pred_var - (state["sum_pred"] / n_tensor) ** 2
+    true_var = state["sum_true_sq"] / n_tensor
+    true_var = true_var - (state["sum_true"] / n_tensor) ** 2
+
+    if pred_var <= 0 or true_var <= 0:
+        return 0.0
+
+    corr = cov / torch.sqrt(pred_var * true_var)
+    return corr.item() if torch.isfinite(corr) else 0.0
+
+
 def _run_epoch(
     model,
     loader,
@@ -723,7 +766,19 @@ def _run_epoch(
     else:
         model.eval()
 
-    sums = {name: None if name == "confusion_matrix" else 0.0 for name in metric_names}
+    accumulate_corr = "corr" in metric_names
+    batch_metric_fns = {
+        name: fn
+        for name, fn in all_fns.items()
+        if not (accumulate_corr and name == "corr")
+    }
+    batch_metric_names = batch_metric_fns.keys()
+    corr_state = _init_streaming_corr_state(device) if accumulate_corr else None
+
+    sums = {
+        name: None if name == "confusion_matrix" else 0.0
+        for name in batch_metric_names
+    }
     sums["loss"] = 0.0
     grad_steps = training_params.grad_accumulation_steps
 
@@ -756,7 +811,10 @@ def _run_epoch(
                 out = model(Xb, **inputs_dict)
                 loss = compute_loss(out, yb, training_params, all_fns)
 
-        batch_metrics = compute_all_metrics(out, yb, all_fns, model_params)
+        if accumulate_corr:
+            _update_streaming_corr_state(corr_state, out, yb)
+
+        batch_metrics = compute_all_metrics(out, yb, batch_metric_fns, model_params)
         _accumulate_batch_metrics(sums, batch_metrics)
 
         if torch.is_tensor(loss):
@@ -767,6 +825,9 @@ def _run_epoch(
         name: sums[name] if name == "confusion_matrix" else sums[name] / len(loader)
         for name in sums
     }
+
+    if accumulate_corr:
+        result["corr"] = _compute_streaming_corr(corr_state)
 
     if "cross_entropy" in result:
         result["perplexity"] = np.exp(result["cross_entropy"])
