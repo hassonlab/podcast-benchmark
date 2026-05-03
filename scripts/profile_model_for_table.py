@@ -208,6 +208,28 @@ def _count_params(model: torch.nn.Module) -> tuple[int, int, int, float]:
     return total, trainable, frozen, memory
 
 
+def _same_cached_feature_model(
+    model: torch.nn.Module, cache_model: torch.nn.Module | None
+) -> bool:
+    if cache_model is None or not isinstance(model, CachedFeatureModel):
+        return False
+    return model.model.__class__ is cache_model.__class__
+
+
+def _count_profile_params(
+    model: torch.nn.Module, cache_model: torch.nn.Module | None = None
+) -> tuple[int, int, int, float]:
+    model_total, model_trainable, model_frozen, model_memory = _count_params(model)
+    if cache_model is None or _same_cached_feature_model(model, cache_model):
+        return model_total, model_trainable, model_frozen, model_memory
+
+    cache_total, _, _, cache_memory = _count_params(cache_model)
+    total = cache_total + model_total
+    trainable = model_trainable
+    frozen = total - trainable
+    return total, trainable, frozen, cache_memory + model_memory
+
+
 def _first_parameter_dtype(model: torch.nn.Module) -> str:
     for param in model.parameters():
         return str(param.dtype).replace("torch.", "")
@@ -352,6 +374,7 @@ def profile_config(
 
     cached_features = None
     cached_extra_inputs = None
+    cache_model = None
     cache_build_seconds = 0.0
     cache_peak = "n/a"
     if use_cache:
@@ -361,7 +384,11 @@ def profile_config(
         _reset_cuda_peak(device)
         _sync(device)
         start = time.perf_counter()
-        cached_features, cached_extra_inputs = _maybe_prepare_feature_cache_model(
+        (
+            cached_features,
+            cached_extra_inputs,
+            cache_model,
+        ) = _maybe_prepare_feature_cache_model(
             model_spec,
             lag,
             full_lag_loader,
@@ -372,6 +399,7 @@ def profile_config(
                 if getattr(model_spec, "per_subject_feature_concat", False)
                 else None
             ),
+            return_cache_model=True,
         )
         _sync(device)
         cache_build_seconds = time.perf_counter() - start
@@ -434,7 +462,9 @@ def profile_config(
         model, loaders["test"], device, warmup_iters, timing_iters
     )
 
-    total_params, trainable_params, frozen_params, param_memory = _count_params(model)
+    total_params, trainable_params, frozen_params, param_memory = _count_profile_params(
+        model, cache_model
+    )
     num_train_samples = len(loaders["train"].dataset)
     num_steps = len(loaders["train"])
     num_samples = len(neural_data)

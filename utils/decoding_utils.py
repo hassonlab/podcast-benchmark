@@ -958,12 +958,13 @@ def _maybe_prepare_feature_cache_model(
     training_params,
     device,
     subject_channel_counts=None,
+    return_cache_model=False,
 ):
     if not (
         getattr(model_spec, "feature_cache", False)
         or getattr(model_spec, "per_subject_feature_concat", False)
     ):
-        return None
+        return (None, None, None) if return_cache_model else None
 
     cache_loader_generation_start_time = time.time()
     cache_model = build_model_from_spec(model_spec, lag=lag, fold=1).to(device)
@@ -990,7 +991,10 @@ def _maybe_prepare_feature_cache_model(
             "Feature caching requires the model to implement "
             f"forward_from_features(...). Got model: {cache_model.__class__.__name__}"
         )
-    return features, _merge_input_dicts(input_dicts)
+    merged_input_dicts = _merge_input_dicts(input_dicts)
+    if return_cache_model:
+        return features, merged_input_dicts, cache_model
+    return features, merged_input_dicts
 
 
 def _save_checkpoint(model, model_path):

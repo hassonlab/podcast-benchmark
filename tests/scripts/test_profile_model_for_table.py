@@ -185,6 +185,9 @@ def test_profiler_runs_non_cache_and_per_subject_cache_specs(tmp_path, toy_raws)
     assert per_subject_row["per_subject_feature_concat"] is True
     assert per_subject_row["num_subjects"] == 2
     assert per_subject_row["cached_feature_shape"] != "n/a"
+    assert per_subject_row["total_params"] == 7
+    assert per_subject_row["trainable_params"] == 5
+    assert per_subject_row["frozen_params"] == 2
 
 
 def test_profiler_uses_first_task_for_multi_task_configs(tmp_path, toy_raws):

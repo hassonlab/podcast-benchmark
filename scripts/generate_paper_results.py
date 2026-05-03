@@ -28,24 +28,26 @@ DEFAULT_NILEARN_DATA_DIR = (
 )
 DEFAULT_SELECTED_ELECTRODE_PATH = Path("processed_data") / "all_subject_sig.csv"
 REGION_LEVEL_ORDER = ("EAC", "PC", "PRC", "IFG", "MTG", "ITG", "TPJ", "TP", "RIGHT")
-DEFAULT_TASK_GROUP_ORDER = ("Mixed", "Semantic", "Syntactic", "Auditory")
+DEFAULT_TASK_GROUP_ORDER = ("Representations", "Semantic", "Syntactic", "Acoustic")
+COMPACT_EXCLUDED_TASKS = ("llm_decoding", "gpt_surprise")
 BAR_SUMMARY_GRID_ROWS = 2
 BAR_SUMMARY_GRID_COLS = 5
 BAR_SUMMARY_PRIMARY_GRID_COLS = 3
 BAR_SUMMARY_GRID_TASK_COLS = (0, 1, 2, 3, 4)
 BAR_SUMMARY_GROUP_LAYOUT = {
-    "Mixed": ((0, 0), (1, 0), (0, 1)),
-    "Semantic": ((1, 1), (0, 2), (1, 2)),
+    "Representations": ((0, 0), (1, 0)),  # (0, 1)),
+    "Semantic": ((0, 2), (1, 2)),  # (1, 1),),
     "Syntactic": ((0, 3), (1, 3)),
     "Acoustic": ((0, 4), (1, 4)),
 }
 BAR_SUMMARY_GROUP_ALIASES = {
-    "Mixed": ("Mixed",),
+    "Representations": ("Representations", "Mixed"),
     "Semantic": ("Semantic",),
     "Syntactic": ("Syntactic",),
     "Acoustic": ("Acoustic", "Auditory"),
 }
 DEFAULT_TASK_GROUP_BACKGROUNDS = {
+    "Representations": "#C9DDF2",
     "Mixed": "#C9DDF2",
     "Semantic": "#F0D2A7",
     "Syntactic": "#CDE8BF",
@@ -103,6 +105,7 @@ class GroupedTaskFigure:
     fig: plt.Figure
     task_axes: Mapping[str, plt.Axes]
     group_axes: Sequence[tuple[str, Sequence[plt.Axes]]]
+    group_score_axes: Mapping[str, plt.Axes]
 
 
 def read_config(path: Path) -> Mapping:
@@ -224,7 +227,9 @@ def load_per_subject_runs(run_dirs: Sequence[Path], label: str) -> pd.DataFrame:
     subjects = sorted({subject for loaded in loaded_runs for subject in loaded})
     combined = {}
     for subject in subjects:
-        subject_frames = [loaded[subject] for loaded in loaded_runs if subject in loaded]
+        subject_frames = [
+            loaded[subject] for loaded in loaded_runs if subject in loaded
+        ]
         combined[subject] = combine_lag_dataframes(
             subject_frames,
             f"{label}/{subject}",
@@ -233,10 +238,11 @@ def load_per_subject_runs(run_dirs: Sequence[Path], label: str) -> pd.DataFrame:
 
 
 def load_current_style_runs(run_dirs: Sequence[Path], label: str) -> pd.DataFrame:
-    has_root_csv = [Path(run_dir, "lag_performance.csv").exists() for run_dir in run_dirs]
+    has_root_csv = [
+        Path(run_dir, "lag_performance.csv").exists() for run_dir in run_dirs
+    ]
     has_subject_csvs = [
-        any(Path(run_dir).glob("subject_*/lag_performance.csv"))
-        for run_dir in run_dirs
+        any(Path(run_dir).glob("subject_*/lag_performance.csv")) for run_dir in run_dirs
     ]
 
     if any(has_root_csv) and any(has_subject_csvs):
@@ -462,15 +468,21 @@ def brain_map_colormap(config: Mapping, task: str, metric: MetricConfig):
     brain_config = per_region_brain_plot_config(config)
     configured = brain_config.get(
         "colormaps",
-        brain_config.get("cmaps", brain_config.get("colormap", brain_config.get("cmap"))),
+        brain_config.get(
+            "cmaps", brain_config.get("colormap", brain_config.get("cmap"))
+        ),
     )
     reverse = not metric.higher_is_better
 
     if isinstance(configured, Mapping):
         task_config = configured.get(task, configured.get("default"))
         if isinstance(task_config, Mapping):
-            name = task_config.get("name", task_config.get("cmap", task_config.get("colormap")))
-            reverse = bool(task_config.get("reverse", task_config.get("reversed", reverse)))
+            name = task_config.get(
+                "name", task_config.get("cmap", task_config.get("colormap"))
+            )
+            reverse = bool(
+                task_config.get("reverse", task_config.get("reversed", reverse))
+            )
         else:
             name = task_config
     else:
@@ -776,6 +788,91 @@ def include_bar_error_bars(config: Mapping) -> bool:
     return False
 
 
+def include_overall_scores(config: Mapping) -> bool:
+    plot_config = plotting_config(config)
+    for key in (
+        "include_overall_scores",
+        "include_group_scores",
+        "add_overall_scores",
+    ):
+        if key in plot_config:
+            return bool(plot_config[key])
+        if key in config:
+            return bool(config[key])
+    return False
+
+
+def exclude_llm_decoding_and_gpt_surprise(config: Mapping) -> bool:
+    plot_config = plotting_config(config)
+    for key in (
+        "exclude_llm_decoding_and_gpt_surprise",
+        "drop_llm_decoding_and_gpt_surprise",
+        "compact_task_summary",
+    ):
+        if key in plot_config:
+            return bool(plot_config[key])
+        if key in config:
+            return bool(config[key])
+    return False
+
+
+def excluded_tasks(config: Mapping) -> set[str]:
+    plot_config = plotting_config(config)
+    tasks: set[str] = set()
+    configured = plot_config.get("exclude_tasks", config.get("exclude_tasks", ()))
+    if isinstance(configured, str):
+        tasks.add(configured)
+    elif isinstance(configured, Sequence):
+        tasks.update(str(task) for task in configured)
+    if exclude_llm_decoding_and_gpt_surprise(config):
+        tasks.update(COMPACT_EXCLUDED_TASKS)
+    return tasks
+
+
+def filter_loaded_tasks(
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    tasks_to_exclude: set[str],
+) -> Dict[str, Dict[str, Dict[str, pd.DataFrame]]]:
+    if not tasks_to_exclude:
+        return {
+            condition: {
+                task: dict(model_results)
+                for task, model_results in condition_results.items()
+            }
+            for condition, condition_results in loaded.items()
+        }
+    return {
+        condition: {
+            task: dict(model_results)
+            for task, model_results in condition_results.items()
+            if task not in tasks_to_exclude
+        }
+        for condition, condition_results in loaded.items()
+    }
+
+
+def filter_per_region_tasks(
+    per_region_results: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    tasks_to_exclude: set[str],
+) -> Dict[str, Dict[str, Dict[str, pd.DataFrame]]]:
+    if not tasks_to_exclude:
+        return {
+            task: {
+                model: dict(region_results)
+                for model, region_results in model_results.items()
+            }
+            for task, model_results in per_region_results.items()
+        }
+    return {
+        task: {
+            model: dict(region_results)
+            for model, region_results in model_results.items()
+        }
+        for task, model_results in per_region_results.items()
+        if task not in tasks_to_exclude
+    }
+
+
 def best_lag_summary_plot_style(config: Mapping) -> str:
     plot_config = plotting_config(config)
     style = plot_config.get(
@@ -870,6 +967,13 @@ def task_group_config(config: Mapping) -> Mapping:
     return configured if isinstance(configured, Mapping) else {}
 
 
+def normalize_task_group_name(group: str) -> str:
+    for canonical_group, aliases in BAR_SUMMARY_GROUP_ALIASES.items():
+        if any(group.casefold() == alias.casefold() for alias in aliases):
+            return canonical_group
+    return group
+
+
 def grouped_tasks_for_summary(
     config: Mapping, tasks: Sequence[str]
 ) -> list[tuple[str, list[str]]]:
@@ -883,17 +987,18 @@ def grouped_tasks_for_summary(
             group = configured.get(task)
             if group is None:
                 continue
-            grouped.setdefault(str(group), []).append(task)
+            grouped.setdefault(normalize_task_group_name(str(group)), []).append(task)
             assigned.add(task)
     else:
         for group, group_tasks in configured.items():
             if not isinstance(group_tasks, Sequence) or isinstance(group_tasks, str):
                 continue
+            group_name = normalize_task_group_name(str(group))
             for task in group_tasks:
                 task = str(task)
                 if task not in task_set:
                     continue
-                grouped.setdefault(str(group), []).append(task)
+                grouped.setdefault(group_name, []).append(task)
                 assigned.add(task)
 
     for task in sorted(task_set - assigned):
@@ -1301,9 +1406,34 @@ def composite_rgba_over_background(
     return (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
 
 
+def use_column_per_group_layout(config: Mapping) -> bool:
+    plot_config = plotting_config(config)
+    if "column_per_group_layout" in plot_config:
+        return bool(plot_config["column_per_group_layout"])
+    if "group_columns" in plot_config:
+        return bool(plot_config["group_columns"])
+    return exclude_llm_decoding_and_gpt_surprise(config)
+
+
 def best_lag_bar_group_slots(
+    config: Mapping,
     task_groups: Sequence[tuple[str, list[str]]],
+    *,
+    column_layout: bool | None = None,
 ) -> list[tuple[str, str, list[str], tuple[tuple[int, int], ...]]]:
+    if column_layout is None:
+        column_layout = use_column_per_group_layout(config)
+    if column_layout:
+        return [
+            (
+                group,
+                group,
+                tasks,
+                tuple((row, col) for row in range(BAR_SUMMARY_GRID_ROWS)),
+            )
+            for col, (group, tasks) in enumerate(task_groups)
+        ]
+
     remaining_groups = [(group, list(tasks)) for group, tasks in task_groups]
     planned = []
     for canonical_group, slots in BAR_SUMMARY_GROUP_LAYOUT.items():
@@ -1333,14 +1463,22 @@ def best_lag_bar_group_slots(
 
 
 def grouped_task_grid_cols(
+    config: Mapping,
     task_groups: Sequence[tuple[str, list[str]]],
+    *,
+    column_layout: bool | None = None,
 ) -> int:
+    if column_layout is None:
+        column_layout = use_column_per_group_layout(config)
+    if column_layout:
+        return max(len(task_groups), 1)
+
     for group, tasks in task_groups:
         if not tasks:
             continue
-        if group_matches_bar_layout(group, "Mixed") or group_matches_bar_layout(
-            group, "Semantic"
-        ):
+        if group_matches_bar_layout(
+            group, "Representations"
+        ) or group_matches_bar_layout(group, "Semantic"):
             continue
         return BAR_SUMMARY_GRID_COLS
     return BAR_SUMMARY_PRIMARY_GRID_COLS
@@ -1375,22 +1513,35 @@ def create_grouped_task_figure(
     figsize: tuple[float, float] = (18, 8),
     hspace: float = 0.5,
     wspace: float = 0.55,
+    include_score_axes: bool = False,
 ) -> GroupedTaskFigure:
     task_groups = grouped_tasks_for_summary(config, sorted(tasks))
+    include_scores = include_score_axes
+    column_layout = use_column_per_group_layout(config) or include_scores
     fig = plt.figure(figsize=figsize)
-    grid_cols = grouped_task_grid_cols(task_groups)
+    grid_rows = BAR_SUMMARY_GRID_ROWS + (1 if include_scores else 0)
+    grid_cols = grouped_task_grid_cols(
+        config,
+        task_groups,
+        column_layout=column_layout,
+    )
     outer_grid = fig.add_gridspec(
-        BAR_SUMMARY_GRID_ROWS,
+        grid_rows,
         grid_cols,
         hspace=hspace,
         wspace=wspace,
     )
     task_axes: dict[str, plt.Axes] = {}
+    group_score_axes: dict[str, plt.Axes] = {}
     group_title_axes = []
     used_slots: set[tuple[int, int]] = set()
 
-    for canonical_group, _group, group_tasks, slots in best_lag_bar_group_slots(
-        task_groups
+    for group_idx, (canonical_group, _group, group_tasks, slots) in enumerate(
+        best_lag_bar_group_slots(
+            config,
+            task_groups,
+            column_layout=column_layout,
+        )
     ):
         group_axes = []
         plotted_tasks = 0
@@ -1421,10 +1572,19 @@ def create_grouped_task_figure(
             empty_ax.set_axis_off()
             group_axes.append(empty_ax)
 
+        if include_scores and column_layout:
+            score_slot = (BAR_SUMMARY_GRID_ROWS, group_idx)
+            row, col = score_slot
+            if col < grid_cols and score_slot not in used_slots:
+                used_slots.add(score_slot)
+                score_ax = fig.add_subplot(outer_grid[row, col])
+                group_score_axes[canonical_group] = score_ax
+                group_axes.append(score_ax)
+
         if group_axes:
             group_title_axes.append((canonical_group, group_axes))
 
-    return GroupedTaskFigure(fig, task_axes, group_title_axes)
+    return GroupedTaskFigure(fig, task_axes, group_title_axes, group_score_axes)
 
 
 def draw_grouped_task_backgrounds(
@@ -1536,9 +1696,7 @@ def draw_grouped_task_backgrounds(
         right = max(col_edges[col][1] for _row, col in slots)
         top = max(row_edges[row][1] for row, _col in slots)
         top_slots = [
-            (row, col)
-            for row, col in slots
-            if np.isclose(row_edges[row][1], top)
+            (row, col) for row, col in slots if np.isclose(row_edges[row][1], top)
         ]
         if top_slots:
             left = min(col_edges[col][0] for _row, col in top_slots)
@@ -1552,6 +1710,258 @@ def draw_grouped_task_backgrounds(
             fontsize=plt.rcParams["axes.titlesize"],
             weight="bold",
         )
+
+
+def task_score_value(value: float, metric: MetricConfig) -> float:
+    metric_name = f"{metric.column} {metric.label}".casefold()
+    if "roc_auc" in metric_name or "auc_roc" in metric_name or "auc-roc" in metric_name:
+        return 2.0 * float(value) - 1.0
+    if "correlation" in metric_name or "corr" in metric_name:
+        return float(value)
+    return float("nan")
+
+
+def summary_with_scores(summary: pd.DataFrame) -> pd.DataFrame:
+    if summary.empty:
+        return summary.copy()
+    scored = summary.copy()
+    scored["score"] = [
+        task_score_value(
+            float(row["value"]),
+            metric_config_from_summary(pd.DataFrame([row])),
+        )
+        for row in scored.to_dict("records")
+    ]
+    return scored
+
+
+def grouped_score_rows(
+    summary: pd.DataFrame,
+    config: Mapping,
+    *,
+    condition: str | None = None,
+) -> pd.DataFrame:
+    if summary.empty:
+        return pd.DataFrame()
+    scored = summary_with_scores(summary).dropna(subset=["score"])
+    if scored.empty:
+        return pd.DataFrame()
+
+    task_groups = grouped_tasks_for_summary(config, sorted(scored["task"].unique()))
+    task_to_group = {task: group for group, tasks in task_groups for task in tasks}
+    scored = scored.assign(group=scored["task"].map(task_to_group))
+    scored = scored.dropna(subset=["group"])
+
+    group_columns = ["group", "model"]
+    if condition is None and "condition" in scored.columns:
+        group_columns.insert(0, "condition")
+    grouped = (
+        scored.groupby(group_columns, as_index=False)["score"]
+        .mean()
+        .sort_values(group_columns)
+        .reset_index(drop=True)
+    )
+    if condition is not None:
+        grouped.insert(0, "condition", condition)
+    return grouped
+
+
+def overall_score_rows(summary: pd.DataFrame, config: Mapping) -> pd.DataFrame:
+    if summary.empty:
+        return pd.DataFrame()
+    scored = summary_with_scores(summary).dropna(subset=["score"])
+    if scored.empty:
+        return pd.DataFrame()
+    group_columns = ["model"]
+    if "condition" in scored.columns:
+        group_columns.insert(0, "condition")
+    return (
+        scored.groupby(group_columns, as_index=False)["score"]
+        .mean()
+        .sort_values(group_columns)
+        .reset_index(drop=True)
+    )
+
+
+def plot_score_axis(
+    ax: plt.Axes,
+    score_summary: pd.DataFrame,
+    models: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping,
+    *,
+    title: str,
+) -> None:
+    x_positions = list(range(len(models)))
+    values = []
+    for model in models:
+        match = score_summary[score_summary["model"] == model]
+        values.append(float(match["score"].iloc[0]) if not match.empty else float("nan"))
+    for x_position, model, value in zip(x_positions, models, values):
+        if not np.isfinite(value):
+            continue
+        ax.bar(
+            [x_position],
+            [value],
+            color=colors[model],
+            edgecolor=colors[model],
+            width=0.7,
+            zorder=3,
+        )
+    ax.axhline(0.0, color="#333333", linewidth=0.8, alpha=0.75)
+    ax.set_title(title)
+    ax.set_ylabel("Overall score")
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(
+        [display_model_name(config, model) for model in models],
+        rotation=35,
+        ha="right",
+    )
+    ax.grid(axis="y", alpha=0.25)
+
+
+def plot_condition_score_axis(
+    ax: plt.Axes,
+    score_summary: pd.DataFrame,
+    models: Sequence[str],
+    conditions: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping,
+    *,
+    title: str,
+) -> None:
+    x_positions = np.arange(len(models), dtype=float)
+    bar_width = min(0.32, 0.72 / max(len(conditions), 1))
+    offsets = (
+        np.linspace(-0.18, 0.18, len(conditions))
+        if len(conditions) > 1
+        else np.array([0.0])
+    )
+    hatches = {
+        "super_subject": "",
+        "per_subject": "///",
+    }
+    for condition, offset in zip(conditions, offsets):
+        condition_summary = score_summary[score_summary["condition"] == condition]
+        for model_idx, model in enumerate(models):
+            match = condition_summary[condition_summary["model"] == model]
+            if match.empty:
+                continue
+            ax.bar(
+                [x_positions[model_idx] + offset],
+                [float(match["score"].iloc[0])],
+                color=colors[model],
+                edgecolor="#333333" if hatches.get(condition) else colors[model],
+                hatch=hatches.get(condition, "\\\\"),
+                linewidth=0.8 if hatches.get(condition) else 0.0,
+                alpha=0.9,
+                width=bar_width,
+                zorder=3,
+            )
+    ax.axhline(0.0, color="#333333", linewidth=0.8, alpha=0.75)
+    ax.set_title(title)
+    ax.set_ylabel("Overall score")
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(
+        [display_model_name(config, model) for model in models],
+        rotation=35,
+        ha="right",
+    )
+    ax.grid(axis="y", alpha=0.25)
+
+
+def plot_group_score_axes(
+    layout: GroupedTaskFigure,
+    summary: pd.DataFrame,
+    models: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping,
+) -> None:
+    if not layout.group_score_axes:
+        return
+    group_scores = grouped_score_rows(summary, config)
+    if group_scores.empty:
+        for ax in layout.group_score_axes.values():
+            ax.set_axis_off()
+        return
+    for group, ax in layout.group_score_axes.items():
+        score_summary = group_scores[group_scores["group"] == group]
+        if score_summary.empty:
+            ax.set_axis_off()
+            continue
+        plot_score_axis(ax, score_summary, models, colors, config, title="Overall")
+
+
+def plot_combined_group_score_axes(
+    layout: GroupedTaskFigure,
+    summary: pd.DataFrame,
+    models: Sequence[str],
+    conditions: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping,
+) -> None:
+    if not layout.group_score_axes:
+        return
+    group_scores = grouped_score_rows(summary, config)
+    if group_scores.empty:
+        for ax in layout.group_score_axes.values():
+            ax.set_axis_off()
+        return
+    for group, ax in layout.group_score_axes.items():
+        score_summary = group_scores[group_scores["group"] == group]
+        if score_summary.empty:
+            ax.set_axis_off()
+            continue
+        plot_condition_score_axis(
+            ax,
+            score_summary,
+            models,
+            conditions,
+            colors,
+            config,
+            title="Overall",
+        )
+
+
+def plot_overall_score_summary(
+    summary: pd.DataFrame,
+    output_dir: Path,
+    formats: Sequence[str],
+    colors: Mapping[str, str],
+    config: Mapping,
+    *,
+    suffix: str,
+    title: str,
+) -> None:
+    score_summary = overall_score_rows(summary, config)
+    if score_summary.empty:
+        return
+    models = configured_model_order(score_summary["model"].unique(), config)
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    if (
+        "condition" in score_summary.columns
+        and score_summary["condition"].nunique() > 1
+    ):
+        available_conditions = set(
+            str(condition) for condition in score_summary["condition"]
+        )
+        conditions = [
+            condition for condition in CONDITIONS if condition in available_conditions
+        ]
+        conditions.extend(sorted(available_conditions - set(conditions)))
+        plot_condition_score_axis(
+            ax,
+            score_summary,
+            models,
+            conditions,
+            colors,
+            config,
+            title=title,
+        )
+    else:
+        plot_score_axis(ax, score_summary, models, colors, config, title=title)
+    fig.subplots_adjust(left=0.12, right=0.98, bottom=0.24, top=0.88)
+    save_figure(fig, output_dir / f"overall_score_{suffix}", formats)
 
 
 def plot_best_lag_summary(
@@ -1569,7 +1979,9 @@ def plot_best_lag_summary(
     layout = create_grouped_task_figure(
         config,
         tasks,
+        figsize=(18, 10) if include_overall_scores(config) else (18, 8),
         hspace=0.75 if check_best_lag_significance(config) else 0.5,
+        include_score_axes=include_overall_scores(config),
     )
     fig = layout.fig
     x_positions = list(range(len(models)))
@@ -1704,6 +2116,8 @@ def plot_best_lag_summary(
                 errors,
             )
 
+    plot_group_score_axes(layout, summary, models, colors, config)
+
     handles = [
         Line2D(
             [0],
@@ -1737,6 +2151,16 @@ def plot_best_lag_summary(
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
     draw_grouped_task_backgrounds(layout, config)
     save_figure(fig, output_dir / f"best_lag_summary_{condition}", formats)
+    if include_overall_scores(config):
+        plot_overall_score_summary(
+            summary,
+            output_dir,
+            formats,
+            colors,
+            config,
+            suffix=condition,
+            title=f"{condition.replace('_', ' ').title()} Overall Score",
+        )
 
 
 def plot_combined_best_lag_summary(
@@ -1761,7 +2185,13 @@ def plot_combined_best_lag_summary(
     if not conditions:
         return
 
-    layout = create_grouped_task_figure(config, tasks, figsize=(19, 8), hspace=0.5)
+    layout = create_grouped_task_figure(
+        config,
+        tasks,
+        figsize=(19, 10) if include_overall_scores(config) else (19, 8),
+        hspace=0.5,
+        include_score_axes=include_overall_scores(config),
+    )
     fig = layout.fig
     condition_markers = {
         "super_subject": "o",
@@ -1913,6 +2343,8 @@ def plot_combined_best_lag_summary(
             ax.axhline(bar_start, color="#333333", linewidth=0.8, alpha=0.75)
         apply_metric_ylim(ax, metric)
 
+    plot_combined_group_score_axes(layout, summary, models, conditions, colors, config)
+
     model_handles = [
         Line2D(
             [0],
@@ -1975,6 +2407,16 @@ def plot_combined_best_lag_summary(
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
     draw_grouped_task_backgrounds(layout, config)
     save_figure(fig, output_dir / "best_lag_summary_combined", formats)
+    if include_overall_scores(config):
+        plot_overall_score_summary(
+            summary,
+            output_dir,
+            formats,
+            colors,
+            config,
+            suffix="combined",
+            title="Overall Score",
+        )
 
 
 def plot_lag_curves(
@@ -2304,9 +2746,7 @@ def _load_selected_electrode_coordinates(
         for selection_order, electrode_name in enumerate(electrode_names)
     ]
     if not selected_rows:
-        return pd.DataFrame(
-            columns=["subject_id", "subject", "name", "x", "y", "z"]
-        )
+        return pd.DataFrame(columns=["subject_id", "subject", "name", "x", "y", "z"])
 
     selected = pd.DataFrame(selected_rows)
     localized = load_electrodes(data_root, include_bad=include_bad).copy()
@@ -2341,9 +2781,7 @@ def _load_selected_electrode_coordinates(
             f"{missing_text}"
         )
 
-    return merged.sort_values(["subject_id", "selection_order"]).reset_index(
-        drop=True
-    )
+    return merged.sort_values(["subject_id", "selection_order"]).reset_index(drop=True)
 
 
 def _load_all_electrode_coordinates(data_root: Path) -> pd.DataFrame:
@@ -2486,7 +2924,8 @@ def plot_selected_electrode_glass_brains(
             subject_electrodes,
             subject_colors,
             title=f"Subject {int(subject_id):02d} All Electrodes",
-            output_base=electrode_output_dir / f"subject_{int(subject_id):02d}_electrodes",
+            output_base=electrode_output_dir
+            / f"subject_{int(subject_id):02d}_electrodes",
             formats=formats,
             marker_size=42,
             legend_subject_ids=[subject_id],
@@ -2954,8 +3393,12 @@ def generate_paper_results(
     include_bad: bool = False,
 ) -> None:
     config = read_config(config_path)
-    loaded = load_results(config)
-    per_region_results = load_per_region_results(config)
+    tasks_to_exclude = excluded_tasks(config)
+    loaded = filter_loaded_tasks(load_results(config), tasks_to_exclude)
+    per_region_results = filter_per_region_tasks(
+        load_per_region_results(config),
+        tasks_to_exclude,
+    )
     all_models = {
         model
         for condition_results in loaded.values()
@@ -2995,6 +3438,21 @@ def generate_paper_results(
     if all_summaries:
         combined_summary = pd.concat(all_summaries, ignore_index=True)
         write_summary_tables(combined_summary, output_dir, table_formats, config)
+        if include_overall_scores(config):
+            score_dir = output_dir / "summary_tables"
+            score_dir.mkdir(parents=True, exist_ok=True)
+            summary_with_scores(combined_summary).to_csv(
+                score_dir / "best_lag_scores.csv",
+                index=False,
+            )
+            grouped_score_rows(combined_summary, config).to_csv(
+                score_dir / "group_scores.csv",
+                index=False,
+            )
+            overall_score_rows(combined_summary, config).to_csv(
+                score_dir / "overall_scores.csv",
+                index=False,
+            )
         plot_combined_best_lag_summary(
             combined_summary,
             loaded,
