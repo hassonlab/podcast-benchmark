@@ -48,6 +48,23 @@ def _flatten_baseline_features(X):
     return np.reshape(X, (X.shape[0], -1))
 
 
+class BaselineTorchAdapter:
+    """Expose sklearn/Himalaya baselines through the torch model interface."""
+
+    def __init__(self, model):
+        self.model = model
+
+    def eval(self):
+        return self
+
+    def __call__(self, X, **kwargs):
+        X_np = X.detach().cpu().numpy()
+        X_flat = _flatten_baseline_features(X_np)
+        predictions = self.model.predict(X_flat)
+        predictions = np.asarray(predictions)
+        return torch.tensor(predictions, dtype=torch.float32, device=X.device)
+
+
 def train_logistic_regression(X_train, y_train, baseline_params=None):
     """
     Train a logistic regression model.
@@ -499,7 +516,12 @@ def _word_embedding_metric_names(training_params: TrainingParams):
     return embedding_metrics
 
 
-def _init_cv_results(metric_names, task_name: str, training_params: TrainingParams):
+def _init_cv_results(
+    metric_names,
+    task_name: str,
+    training_params: TrainingParams,
+    include_embedding_metrics: bool = True,
+):
     phases = ("train", "val", "test")
     cv_results = {
         f"{phase}_{name}": []
@@ -511,7 +533,7 @@ def _init_cv_results(metric_names, task_name: str, training_params: TrainingPara
     cv_results["fold_nums"] = []
 
     embedding_metrics = None
-    if task_name == "word_embedding_decoding_task":
+    if include_embedding_metrics and task_name == "word_embedding_decoding_task":
         embedding_metrics = _word_embedding_metric_names(training_params)
         for metric in embedding_metrics:
             cv_results[metric] = []
@@ -909,6 +931,7 @@ def _train_and_eval_baseline(
     all_fns,
     model_params,
     baseline_params=None,
+    return_model=False,
     **kwargs,
 ):
     tr_idx = split_indices["train"]
@@ -925,7 +948,10 @@ def _train_and_eval_baseline(
     Y_splits = {
         phase: targets.cpu().numpy() for phase, targets in target_splits.items()
     }
-    return compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params)
+    metrics = compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params)
+    if return_model:
+        return metrics, model
+    return metrics
 
 
 def _train_enabled_baselines(
@@ -935,53 +961,82 @@ def _train_enabled_baselines(
     training_params,
     all_fns,
     model_params,
+    return_models=False,
 ):
     results = {}
+    models = {}
+
+    def _store_result(name, train_result):
+        if return_models:
+            metrics_dict, model = train_result
+            results[name] = metrics_dict
+            models[name] = model
+        else:
+            results[name] = train_result
+
     if training_params.logistic_regression_baseline:
         print("Training logistic regression baseline...")
-        results["logistic_regression"] = _train_and_eval_baseline(
-            train_logistic_regression,
-            neural_data,
-            split_indices,
-            target_splits,
-            all_fns,
-            model_params,
+        _store_result(
+            "logistic_regression",
+            _train_and_eval_baseline(
+                train_logistic_regression,
+                neural_data,
+                split_indices,
+                target_splits,
+                all_fns,
+                model_params,
+                return_model=return_models,
+            ),
         )
     if training_params.ridge_logistic_regression_baseline:
         print("Training ridge logistic regression baseline...")
-        results["ridge_logistic_regression"] = _train_and_eval_baseline(
-            train_ridge_logistic_regression,
-            neural_data,
-            split_indices,
-            target_splits,
-            all_fns,
-            model_params,
-            baseline_params=model_params,
+        _store_result(
+            "ridge_logistic_regression",
+            _train_and_eval_baseline(
+                train_ridge_logistic_regression,
+                neural_data,
+                split_indices,
+                target_splits,
+                all_fns,
+                model_params,
+                baseline_params=model_params,
+                return_model=return_models,
+            ),
         )
     if training_params.linear_regression_baseline:
         print("Training linear regression baseline...")
-        results["linear_regression"] = _train_and_eval_baseline(
-            train_linear_regression,
-            neural_data,
-            split_indices,
-            target_splits,
-            all_fns,
-            model_params,
+        _store_result(
+            "linear_regression",
+            _train_and_eval_baseline(
+                train_linear_regression,
+                neural_data,
+                split_indices,
+                target_splits,
+                all_fns,
+                model_params,
+                return_model=return_models,
+            ),
         )
     if training_params.ridge_regression_baseline:
         print("Training ridge regression baseline...")
         ridge_params = dict(model_params or {})
         if "alphas" not in ridge_params and "alpha" not in ridge_params:
             ridge_params["alpha"] = training_params.ridge_alpha
-        results["ridge_regression"] = _train_and_eval_baseline(
-            train_ridge_regression,
-            neural_data,
-            split_indices,
-            target_splits,
-            all_fns,
-            model_params,
-            baseline_params=ridge_params,
+        _store_result(
+            "ridge_regression",
+            _train_and_eval_baseline(
+                train_ridge_regression,
+                neural_data,
+                split_indices,
+                target_splits,
+                all_fns,
+                model_params,
+                baseline_params=ridge_params,
+                return_model=return_models,
+            ),
         )
+    if return_models:
+        return results, models
     return results
 
 
@@ -1330,6 +1385,42 @@ def _maybe_compute_word_embedding_metrics(
         cv_results[key].append(val)
 
 
+def _maybe_compute_word_embedding_baseline_metrics(
+    cv_results,
+    embedding_metrics,
+    baseline_model,
+    neural_data,
+    target_splits,
+    data_df,
+    task_config,
+    tr_idx,
+    te_idx,
+    training_params,
+):
+    if embedding_metrics is None:
+        return
+
+    test_indices = _as_index_tensor(te_idx)
+    test_features = neural_data[test_indices]
+    test_targets = target_splits["test"]
+    adapted_model = BaselineTorchAdapter(baseline_model)
+    results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
+        test_features,
+        test_targets,
+        adapted_model,
+        torch.device("cpu"),
+        data_df[task_config.data_params.word_column],
+        te_idx,
+        tr_idx,
+        training_params.top_k_thresholds,
+        training_params.min_train_freq_auc,
+        training_params.min_test_freq_auc,
+        preserve_ensemble=True,
+    )
+    for key, val in results.items():
+        cv_results[key].append(val)
+
+
 def _print_single_baseline_summary(title, baseline_results):
     if not baseline_results:
         return
@@ -1399,6 +1490,8 @@ def _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_me
     if embedding_metrics is not None:
         for metric_name in embedding_metrics:
             vals = cv_results[metric_name]
+            if not vals:
+                continue
             print(f"Mean {metric_name}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
 
@@ -1430,7 +1523,10 @@ def train_decoding_model(
     all_fns = setup_metrics_and_loss(training_params)
     metric_names = all_fns.keys()
     cv_results, embedding_metrics = _init_cv_results(
-        metric_names, task_name, training_params
+        metric_names,
+        task_name,
+        training_params,
+        include_embedding_metrics=True,
     )
 
     models, histories = [], []
@@ -1445,13 +1541,14 @@ def train_decoding_model(
             target_splits = _normalize_fold_targets(
                 Y, tr_idx, va_idx, te_idx, training_params
             )
-            fold_baseline_results = _train_enabled_baselines(
+            fold_baseline_results, fold_baseline_models = _train_enabled_baselines(
                 neural_data,
                 split_indices,
                 target_splits,
                 training_params,
                 all_fns,
                 model_spec.params,
+                return_models=True,
             )
             _append_baseline_results(baseline_results, fold_baseline_results)
             fold_conf_matrices = _record_baseline_only_fold_results(
@@ -1461,6 +1558,18 @@ def train_decoding_model(
             )
             if fold_conf_matrices:
                 conf_matrices = fold_conf_matrices
+            _maybe_compute_word_embedding_baseline_metrics(
+                cv_results,
+                embedding_metrics,
+                fold_baseline_models[baseline_only_name],
+                neural_data,
+                target_splits,
+                data_df,
+                task_config,
+                tr_idx,
+                te_idx,
+                training_params,
+            )
 
         _print_baseline_summaries(training_params, baseline_results)
         _print_main_cv_summary(
