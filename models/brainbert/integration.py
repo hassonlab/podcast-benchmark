@@ -416,6 +416,19 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 load_pretrained_model = load_reference_pretrained_model
 
 
+def _center_crop_temporal_patches(features, temporal_patches_to_keep):
+    seq_len = features.shape[1]
+    if seq_len < temporal_patches_to_keep:
+        raise ValueError(
+            "BrainBERT emitted fewer temporal tokens than requested: "
+            f"got {seq_len}, requested {temporal_patches_to_keep}."
+        )
+    surplus = seq_len - temporal_patches_to_keep
+    start = surplus // 2
+    end = start + temporal_patches_to_keep
+    return features[:, start:end, :]
+
+
 class ReferenceBrainBERTDecoder(nn.Module):
     def __init__(
         self,
@@ -423,6 +436,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
         output_dim=1,
         num_electrodes=None,
         hidden_dim=768,
+        temporal_patches_to_keep=10,
         mlp_layer_sizes=None,
         dropout=0.0,
         output_activation="linear",
@@ -432,10 +446,15 @@ class ReferenceBrainBERTDecoder(nn.Module):
         self.output_dim = output_dim
         self.num_electrodes = num_electrodes
         self.hidden_dim = hidden_dim
+        self.temporal_patches_to_keep = temporal_patches_to_keep
         self.output_activation = output_activation
 
         if self.num_electrodes is not None and self.hidden_dim is not None:
-            input_dim = self.num_electrodes * self.hidden_dim
+            input_dim = (
+                self.num_electrodes
+                * self.temporal_patches_to_keep
+                * self.hidden_dim
+            )
             if mlp_layer_sizes:
                 layers = []
                 curr_dim = input_dim
@@ -477,19 +496,22 @@ class ReferenceBrainBERTDecoder(nn.Module):
                 )
 
             if features.shape[0] == batch_size * num_channels:
-                seq_len = features.shape[1]
-                middle = seq_len // 2
-                start = max(0, middle - 5)
-                end = min(seq_len, middle + 5)
-                if end <= start:
-                    pooled = features.mean(dim=1)
-                else:
-                    pooled = features[:, start:end, :].mean(dim=1)
+                features = _center_crop_temporal_patches(
+                    features, self.temporal_patches_to_keep
+                )
             else:
-                pooled = features.mean(dim=0)
+                raise ValueError(
+                    "BrainBERT upstream returned an unexpected batch dimension: "
+                    f"got {features.shape[0]}, expected {batch_size * num_channels}."
+                )
 
-            pooled = pooled.view(batch_size, num_channels, -1)
-            return pooled.view(batch_size, num_channels, -1).reshape(batch_size, -1)
+            features = features.view(
+                batch_size,
+                num_channels,
+                self.temporal_patches_to_keep,
+                -1,
+            )
+            return features.reshape(batch_size, -1)
 
         out = self.finetune_model(inputs, pad_mask)
         return out.view(batch_size, num_channels, -1).mean(dim=1)
@@ -696,6 +718,7 @@ def create_finetuning_decoder(model_params):
     mlp_layer_sizes = model_params.get("mlp_layer_sizes", [])
     dropout = model_params.get("dropout", 0.0)
     num_electrodes = model_params.get("num_electrodes")
+    temporal_patches_to_keep = model_params.get("temporal_patches_to_keep", 10)
 
     ckpt_path, config_dir = _resolve_checkpoint_and_config_dir(model_params)
     random_init = ckpt_path is None
@@ -771,6 +794,7 @@ def create_finetuning_decoder(model_params):
             output_dim=output_dim,
             num_electrodes=num_electrodes,
             hidden_dim=hidden_dim,
+            temporal_patches_to_keep=temporal_patches_to_keep,
             mlp_layer_sizes=mlp_layer_sizes,
             dropout=dropout,
             output_activation=_resolve_output_activation(model_params, output_dim),
@@ -899,6 +923,7 @@ def set_finetuning_config(experiment_config, raws, _df_word):
 
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
+    model_params.setdefault("temporal_patches_to_keep", 10)
     if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 
