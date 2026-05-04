@@ -36,15 +36,12 @@ training_params:
   - top_10_acc_llm
   early_stopping_metric: cross_entropy
   smaller_is_better: true
-  fold_ids:
-  - 1
-  - 5
 trial_name: popt_persubject_concat_llm_decoding
 model_spec:
   constructor_name: popt_finetune
   params:
-    model_dir: models/popt/pretrained_model
-    brainbert_model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
+    brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     use_lip_coords: true
     max_coord_value: 5000
     use_brainbert: true

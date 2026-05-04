@@ -57,7 +57,7 @@ model_spec:
   params:
     # Path to pretrained weights (DeepSpeed format)
     # Download from DIVER-1 release and place in this directory
-    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
 
     # Output dimension matches embedding_pca_dim
     output_dim: 50

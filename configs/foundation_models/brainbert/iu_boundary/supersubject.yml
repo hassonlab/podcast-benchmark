@@ -34,16 +34,14 @@ training_params:
   - acc_logits
   early_stopping_metric: f1_logits
   smaller_is_better: false
-  fold_ids:
-  - 1
-  - 5
 trial_name: brainbert_supersubject_iu_boundary
 model_spec:
   constructor_name: brainbert_finetune
   params:
-    model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     output_dim: 1
     mlp_layer_sizes: []
     dropout: 0.0
     freeze_foundation: true
+    temporal_patches_to_keep: 3
   sub_models: {}

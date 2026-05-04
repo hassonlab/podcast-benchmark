@@ -58,7 +58,4 @@ training_params:
   n_folds: 5
   smaller_is_better: false
   weight_decay: 1.0e-05
-  fold_ids:
-  - 1
-  - 5
 trial_name: diver_subject1_full_volume_level_exp_lazy

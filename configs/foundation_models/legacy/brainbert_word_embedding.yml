@@ -38,7 +38,7 @@ trial_name: brainbert_word_embedding
 model_spec:
   constructor_name: brainbert_finetune
   params:
-    model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     output_dim: 50
     mlp_layer_sizes:
       - 256

@@ -2,12 +2,12 @@ config_setter_name: popt_finetune
 model_spec:
   constructor_name: popt_finetune
   params:
-    brainbert_model_dir: models/brainbert/pretrained_model
+    brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     dropout: 0.0
     freeze_foundation: true
     max_coord_value: 5000
     mlp_layer_sizes: []
-    model_dir: models/popt/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
     num_frozen_layers: 0
     output_dim: 1
     use_brainbert: true
@@ -53,7 +53,4 @@ training_params:
   n_folds: 5
   smaller_is_better: false
   weight_decay: 1.0e-05
-  fold_ids:
-  - 1
-  - 5
 trial_name: popt_subject1_full_iu_boundary

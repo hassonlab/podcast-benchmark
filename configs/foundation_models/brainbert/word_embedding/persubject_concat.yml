@@ -36,17 +36,15 @@ training_params:
   - similarity_entropy
   early_stopping_metric: cosine_sim
   smaller_is_better: false
-  fold_ids:
-  - 1
-  - 5
 trial_name: brainbert_persubject_concat_word_embedding
 model_spec:
   constructor_name: brainbert_finetune
   params:
-    model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     output_dim: 50
     mlp_layer_sizes: []
     dropout: 0.0
     freeze_foundation: true
+    temporal_patches_to_keep: 3
   sub_models: {}
   per_subject_feature_concat: true

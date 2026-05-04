@@ -55,7 +55,7 @@ model_spec:
   constructor_name: population_transformer_finetune
   params:
     # Path to pretrained model directory (contains config.yaml and checkpoint.pth)
-    model_dir: models/popt/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
 
     # Output dimension matches embedding_pca_dim
     output_dim: 50

@@ -36,14 +36,11 @@ training_params:
   - similarity_entropy
   early_stopping_metric: cosine_sim
   smaller_is_better: false
-  fold_ids:
-  - 1
-  - 5
 trial_name: diver_persubject_concat_whisper_embedding
 model_spec:
   constructor_name: diver_finetune
   params:
-    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
     patch_sampling_rate: 500
     patch_size: 50
     d_model: 256

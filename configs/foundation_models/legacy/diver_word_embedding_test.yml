@@ -47,7 +47,7 @@ trial_name: diver_word_embedding_test
 model_spec:
   constructor_name: diver_finetune
   params:
-    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
     output_dim: 50
     task_name: word_embedding
     d_model: 256

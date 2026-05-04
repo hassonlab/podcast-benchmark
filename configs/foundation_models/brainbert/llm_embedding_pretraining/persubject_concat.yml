@@ -39,18 +39,16 @@ training_params:
   early_stopping_metric: mse
   smaller_is_better: true
   normalize_targets: false
-  fold_ids:
-  - 1
-  - 5
 trial_name: brainbert_persubject_concat_llm_embedding_pretraining
 model_spec:
   constructor_name: brainbert_finetune
   params:
-    model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     output_dim: 768
     mlp_layer_sizes: []
     dropout: 0.0
     freeze_foundation: false
     num_frozen_layers: 0
+    temporal_patches_to_keep: 3
   sub_models: {}
   per_subject_feature_concat: true

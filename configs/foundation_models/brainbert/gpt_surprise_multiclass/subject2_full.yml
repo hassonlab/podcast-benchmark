@@ -5,8 +5,9 @@ model_spec:
     dropout: 0.0
     freeze_foundation: true
     mlp_layer_sizes: []
-    model_dir: models/brainbert/pretrained_model
+    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
     output_dim: 3
+    temporal_patches_to_keep: 3
   sub_models: {}
 task_config:
   data_params:
@@ -42,7 +43,4 @@ training_params:
   n_folds: 5
   smaller_is_better: false
   weight_decay: 1.0e-05
-  fold_ids:
-  - 1
-  - 5
 trial_name: brainbert_subject2_full_gpt_surprise_multiclass
