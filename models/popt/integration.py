@@ -699,11 +699,6 @@ class ReferencePOPTDecoder(nn.Module):
                     seq, pad_mask, intermediate_rep=True, positions=positions
                 )
                 if self.flatten_electrode_sequence:
-                    if encoded.shape[1] != self.num_electrodes + 1:
-                        raise ValueError(
-                            "PopT upstream returned an unexpected sequence length: "
-                            f"got {encoded.shape[1]}, expected {self.num_electrodes + 1}."
-                        )
                     features = self.classifier_norm(encoded)
                     return features.reshape(batch_size, -1)
                 cls_repr = encoded[:, 0, :]

@@ -177,3 +177,22 @@ def test_reference_popt_decoder_flattens_cls_plus_electrode_sequence():
     assert features.shape == (batch_size, (num_electrodes + 1) * hidden_dim)
     expected_first_cls = torch.tensor([0.0, 1.0, 2.0])
     torch.testing.assert_close(features[0, :hidden_dim], expected_first_cls)
+
+
+def test_reference_popt_feature_extraction_accepts_subject_channel_chunk():
+    batch_size = 2
+    actual_electrodes = 4
+    configured_electrodes = 183
+    hidden_dim = 3
+    decoder = ReferencePOPTDecoder(
+        upstream=StubPOPTUpstream(hidden_dim=hidden_dim),
+        brainbert_upstream=StubBrainBERTUpstream(),
+        num_electrodes=configured_electrodes,
+        hidden_dim=hidden_dim,
+    )
+    decoder.classifier_norm = nn.Identity()
+    x = torch.zeros(batch_size, actual_electrodes, 6, 7)
+
+    features = decoder(x, return_feature_emb_instead_of_projection=True)
+
+    assert features.shape == (batch_size, (actual_electrodes + 1) * hidden_dim)
