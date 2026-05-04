@@ -6,6 +6,7 @@ task_config:
   data_params:
     data_root: data
     electrode_file_path: null
+    use_high_gamma: true
     channel_reg_ex: null
     window_width: 0.2
     preprocessing_fn_name: window_rms
@@ -21,7 +22,6 @@ task_config:
     per_subject_electrodes: null
   task_specific_config:
     audio_path: stimuli/podcast.wav
-    target_sr: 512
     cutoff_hz: 8.0
     butter_order: 4
     zero_phase: true

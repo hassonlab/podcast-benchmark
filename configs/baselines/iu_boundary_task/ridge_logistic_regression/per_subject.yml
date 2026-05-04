@@ -3,8 +3,7 @@ task_config:
   data_params:
     data_root: data
     electrode_file_path: processed_data/all_subject_sig.csv
-    use_high_gamma: false
-    target_sr: 2048
+    use_high_gamma: true
     window_width: 1.0
   task_specific_config:
     iu_boundaries_csv_path: processed_data/iu_boundaries.csv

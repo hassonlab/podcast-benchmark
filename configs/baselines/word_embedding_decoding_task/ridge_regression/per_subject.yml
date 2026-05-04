@@ -4,8 +4,7 @@ task_config:
     data_root: data
     word_column: word
     electrode_file_path: processed_data/all_subject_sig.csv
-    use_high_gamma: false
-    target_sr: 2048
+    use_high_gamma: true
     window_width: 1.0
   task_specific_config:
     embedding_type: gpt-2xl
