@@ -108,6 +108,23 @@ class GroupedTaskFigure:
     group_score_axes: Mapping[str, plt.Axes]
 
 
+@dataclass(frozen=True)
+class HalfPeakProfile:
+    peak_value: float
+    peak_lag: float
+    reference_value: float
+    half_peak_value: float
+    ramp_half_peak_lag: float
+    ramp_duration: float
+    ramp_slope: float
+    ramp_rate: float
+    decay_half_peak_lag: float
+    decay_duration: float
+    decay_slope: float
+    decay_rate: float
+    half_peak_width: float
+
+
 def read_config(path: Path) -> Mapping:
     with path.open("r") as f:
         config = yaml.safe_load(f)
@@ -731,6 +748,26 @@ def write_baseline_region_peak_tables(
         )
 
 
+def write_half_peak_profile_tables(
+    profile: pd.DataFrame,
+    output_dir: Path,
+    formats: Sequence[str],
+    output_name: str = "baseline_half_peak_profile",
+) -> None:
+    if profile.empty:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if "csv" in formats:
+        profile.to_csv(output_dir / f"{output_name}.csv", index=False)
+    if "markdown" in formats or "md" in formats:
+        (output_dir / f"{output_name}.md").write_text(to_markdown_table(profile))
+    if "latex" in formats or "tex" in formats:
+        (output_dir / f"{output_name}.tex").write_text(
+            profile.to_latex(index=False, escape=False)
+        )
+
+
 def to_markdown_table(df: pd.DataFrame) -> str:
     columns = [str(column) for column in df.columns]
     rows = [[str(value) for value in row] for row in df.to_numpy()]
@@ -777,6 +814,37 @@ def save_figure(fig: plt.Figure, output_base: Path, formats: Sequence[str]) -> N
 def plotting_config(config: Mapping) -> Mapping:
     configured = config.get("plotting", {})
     return configured if isinstance(configured, Mapping) else {}
+
+
+def half_peak_profile_config(config: Mapping) -> Mapping:
+    plot_config = plotting_config(config)
+    configured = plot_config.get("half_peak_profile", {})
+    return configured if isinstance(configured, Mapping) else {}
+
+
+def half_peak_profile_enabled(config: Mapping) -> bool:
+    profile_config = half_peak_profile_config(config)
+    return bool(profile_config.get("enabled", False))
+
+
+def half_peak_profile_model(config: Mapping) -> str:
+    return str(half_peak_profile_config(config).get("model", "baseline"))
+
+
+def half_peak_profile_output_name(config: Mapping) -> str:
+    return str(
+        half_peak_profile_config(config).get(
+            "output_name", "baseline_half_peak_profile"
+        )
+    )
+
+
+def half_peak_profile_bar_output_name(config: Mapping) -> str:
+    return str(
+        half_peak_profile_config(config).get(
+            "bar_output_name", "baseline_half_peak_profile_bars"
+        )
+    )
 
 
 def include_bar_error_bars(config: Mapping) -> bool:
@@ -2551,6 +2619,613 @@ def curve_for_metric(df: pd.DataFrame, metric: MetricConfig) -> pd.DataFrame:
     return curve.dropna().sort_values("lags")
 
 
+def metric_reference_value(metric: MetricConfig) -> float:
+    if metric.chance_level is not None:
+        return float(metric.chance_level)
+    if metric.min_value is not None:
+        return float(metric.min_value)
+    return 0.0
+
+
+def _interpolate_threshold_crossing(
+    lag_a: float,
+    value_a: float,
+    lag_b: float,
+    value_b: float,
+    threshold: float,
+) -> float:
+    if value_a == threshold:
+        return float(lag_a)
+    if value_b == threshold:
+        return float(lag_b)
+    if value_a == value_b:
+        return float("nan")
+    fraction = (threshold - value_a) / (value_b - value_a)
+    if fraction < 0.0 or fraction > 1.0:
+        return float("nan")
+    return float(lag_a + fraction * (lag_b - lag_a))
+
+
+def _crosses_threshold(value_a: float, value_b: float, threshold: float) -> bool:
+    return (value_a - threshold) * (value_b - threshold) <= 0.0
+
+
+def _closest_half_peak_crossing(
+    lags: np.ndarray,
+    values: np.ndarray,
+    peak_index: int,
+    half_peak: float,
+    *,
+    before_peak: bool,
+) -> float:
+    if before_peak:
+        segment_indices = range(peak_index - 1, -1, -1)
+    else:
+        segment_indices = range(peak_index, len(values) - 1)
+
+    for idx in segment_indices:
+        lag_a = float(lags[idx])
+        value_a = float(values[idx])
+        lag_b = float(lags[idx + 1])
+        value_b = float(values[idx + 1])
+        if not (
+            np.isfinite(lag_a)
+            and np.isfinite(lag_b)
+            and np.isfinite(value_a)
+            and np.isfinite(value_b)
+        ):
+            continue
+        if not _crosses_threshold(value_a, value_b, half_peak):
+            continue
+        return _interpolate_threshold_crossing(
+            lag_a,
+            value_a,
+            lag_b,
+            value_b,
+            half_peak,
+        )
+    return float("nan")
+
+
+def half_peak_profile_for_curve(
+    curve: pd.DataFrame,
+    metric: MetricConfig,
+) -> HalfPeakProfile:
+    if curve.empty:
+        raise ValueError("Cannot compute half-peak profile for an empty curve")
+    if "lags" not in curve.columns or metric.column not in curve.columns:
+        raise KeyError("Curve must contain lags and the configured metric column")
+
+    clean = curve[["lags", metric.column]].dropna().sort_values("lags")
+    if clean.empty:
+        raise ValueError("Cannot compute half-peak profile without numeric values")
+
+    lags = clean["lags"].to_numpy(dtype=float)
+    values = clean[metric.column].to_numpy(dtype=float)
+    peak_index = int(
+        np.nanargmax(values) if metric.higher_is_better else np.nanargmin(values)
+    )
+    peak_lag = float(lags[peak_index])
+    peak_value = float(values[peak_index])
+    reference_value = metric_reference_value(metric)
+    half_peak_value = float(reference_value + 0.5 * (peak_value - reference_value))
+
+    ramp_half_peak_lag = _closest_half_peak_crossing(
+        lags,
+        values,
+        peak_index,
+        half_peak_value,
+        before_peak=True,
+    )
+    decay_half_peak_lag = _closest_half_peak_crossing(
+        lags,
+        values,
+        peak_index,
+        half_peak_value,
+        before_peak=False,
+    )
+
+    ramp_duration = (
+        float(peak_lag - ramp_half_peak_lag)
+        if np.isfinite(ramp_half_peak_lag)
+        else float("nan")
+    )
+    decay_duration = (
+        float(decay_half_peak_lag - peak_lag)
+        if np.isfinite(decay_half_peak_lag)
+        else float("nan")
+    )
+    half_peak_width = (
+        float(decay_half_peak_lag - ramp_half_peak_lag)
+        if np.isfinite(ramp_half_peak_lag) and np.isfinite(decay_half_peak_lag)
+        else float("nan")
+    )
+    ramp_slope = (
+        float((peak_value - half_peak_value) / ramp_duration)
+        if np.isfinite(ramp_duration) and ramp_duration != 0
+        else float("nan")
+    )
+    decay_slope = (
+        float((half_peak_value - peak_value) / decay_duration)
+        if np.isfinite(decay_duration) and decay_duration != 0
+        else float("nan")
+    )
+
+    return HalfPeakProfile(
+        peak_value=peak_value,
+        peak_lag=peak_lag,
+        reference_value=reference_value,
+        half_peak_value=half_peak_value,
+        ramp_half_peak_lag=ramp_half_peak_lag,
+        ramp_duration=ramp_duration,
+        ramp_slope=ramp_slope,
+        ramp_rate=abs(ramp_slope) if np.isfinite(ramp_slope) else float("nan"),
+        decay_half_peak_lag=decay_half_peak_lag,
+        decay_duration=decay_duration,
+        decay_slope=decay_slope,
+        decay_rate=abs(decay_slope) if np.isfinite(decay_slope) else float("nan"),
+        half_peak_width=half_peak_width,
+    )
+
+
+def half_peak_profile_rows(
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    config: Mapping,
+) -> pd.DataFrame:
+    model = half_peak_profile_model(config)
+    rows = []
+    tasks = sorted(
+        {
+            task
+            for condition_results in loaded.values()
+            for task, model_results in condition_results.items()
+            if model in model_results
+        }
+    )
+    for task in tasks:
+        metric = get_metric_config(config, task)
+        for condition in CONDITIONS:
+            df = loaded.get(condition, {}).get(task, {}).get(model)
+            if df is None or metric.column not in df.columns:
+                continue
+            curve = curve_for_metric(df, metric)
+            profile = half_peak_profile_for_curve(curve, metric)
+            rows.append(
+                {
+                    "task": task,
+                    "condition": condition,
+                    "model": model,
+                    "metric": metric.column,
+                    "metric_label": metric.label,
+                    "reference_value": profile.reference_value,
+                    "half_peak_value": profile.half_peak_value,
+                    "peak_value": profile.peak_value,
+                    "peak_lag": profile.peak_lag,
+                    "ramp_half_peak_lag": profile.ramp_half_peak_lag,
+                    "ramp_duration": profile.ramp_duration,
+                    "decay_half_peak_lag": profile.decay_half_peak_lag,
+                    "decay_duration": profile.decay_duration,
+                    "half_peak_width": profile.half_peak_width,
+                    "ramp_slope": profile.ramp_slope,
+                    "ramp_rate": profile.ramp_rate,
+                    "decay_slope": profile.decay_slope,
+                    "decay_rate": profile.decay_rate,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def task_group_lookup(config: Mapping, tasks: Sequence[str]) -> dict[str, str]:
+    lookup = {}
+    for group, group_tasks in grouped_tasks_for_summary(config, tasks):
+        for task in group_tasks:
+            lookup[task] = group
+    return lookup
+
+
+def ordered_tasks_by_group_average(
+    profile: pd.DataFrame,
+    config: Mapping,
+    value_column: str,
+) -> list[str]:
+    if profile.empty or value_column not in profile.columns:
+        return []
+
+    tasks = sorted(str(task) for task in profile["task"].unique())
+    group_by_task = task_group_lookup(config, tasks)
+    sortable = profile.copy()
+    sortable["group"] = sortable["task"].map(group_by_task).fillna("Other")
+    group_means = (
+        sortable.groupby("group", sort=False)[value_column]
+        .mean()
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    group_order = sorted(
+        group_means.index,
+        key=lambda group: (
+            float(group_means.loc[group])
+            if pd.notna(group_means.loc[group])
+            else float("inf"),
+            str(group),
+        ),
+    )
+
+    ordered_tasks = []
+    for group in group_order:
+        group_rows = sortable[sortable["group"] == group]
+        task_means = (
+            group_rows.groupby("task", sort=False)[value_column]
+            .mean()
+            .replace([np.inf, -np.inf], np.nan)
+        )
+        ordered_tasks.extend(
+            sorted(
+                task_means.index,
+                key=lambda task: (
+                    float(task_means.loc[task])
+                    if pd.notna(task_means.loc[task])
+                    else float("inf"),
+                    str(task),
+                ),
+            )
+        )
+    return ordered_tasks
+
+
+def plot_half_peak_profile_bars(
+    profile: pd.DataFrame,
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+) -> None:
+    if profile.empty:
+        return
+
+    metrics = [
+        ("peak_lag", "Peak lag (ms)"),
+        ("ramp_duration", "Ramp duration (ms)"),
+        ("decay_duration", "Decay duration (ms)"),
+        ("half_peak_width", "Half-peak width (ms)"),
+    ]
+    available_metrics = [
+        (column, label) for column, label in metrics if column in profile.columns
+    ]
+    if not available_metrics:
+        return
+
+    fig, axes = plt.subplots(
+        len(available_metrics),
+        1,
+        figsize=(18, 4.2 * len(available_metrics)),
+        squeeze=False,
+    )
+    axes = axes[:, 0]
+    tasks = sorted(str(task) for task in profile["task"].unique())
+    group_by_task = task_group_lookup(config, tasks)
+    background_colors = task_group_background_colors(config)
+    fallback_color = background_colors.get("Other", "#E8E8E8")
+    conditions = [condition for condition in CONDITIONS if condition in set(profile["condition"])]
+    conditions.extend(
+        sorted(set(str(condition) for condition in profile["condition"]) - set(conditions))
+    )
+    condition_offsets = (
+        np.linspace(-0.11, 0.11, len(conditions))
+        if len(conditions) > 1
+        else np.array([0.0])
+    )
+    bar_width = min(0.20, 0.46 / max(len(conditions), 1))
+    hatches = {
+        "super_subject": "",
+        "per_subject": "///",
+    }
+
+    for ax, (value_column, ylabel) in zip(axes, available_metrics):
+        ordered_tasks = ordered_tasks_by_group_average(profile, config, value_column)
+        positions = {task: idx for idx, task in enumerate(ordered_tasks)}
+
+        group_spans = []
+        for group in dict.fromkeys(group_by_task.get(task, "Other") for task in ordered_tasks):
+            group_positions = [
+                positions[task]
+                for task in ordered_tasks
+                if group_by_task.get(task, "Other") == group
+            ]
+            if group_positions:
+                group_spans.append((group, min(group_positions), max(group_positions)))
+
+        for group, start, end in group_spans:
+            ax.axvspan(
+                start - 0.5,
+                end + 0.5,
+                color=background_colors.get(group, fallback_color),
+                alpha=0.22,
+                linewidth=0,
+                zorder=0,
+            )
+            ax.text(
+                (start + end) / 2,
+                1.015,
+                group,
+                transform=ax.get_xaxis_transform(),
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+            group_tasks = [
+                task
+                for task in ordered_tasks
+                if group_by_task.get(task, "Other") == group
+            ]
+            group_values = pd.to_numeric(
+                profile.loc[
+                    profile["task"].isin(group_tasks),
+                    value_column,
+                ],
+                errors="coerce",
+            ).dropna()
+            if not group_values.empty:
+                ax.hlines(
+                    float(group_values.mean()),
+                    start - 0.36,
+                    end + 0.36,
+                    color="#333333",
+                    linestyle="--",
+                    linewidth=1.2,
+                    alpha=0.85,
+                    zorder=4,
+                )
+
+        for condition, offset in zip(conditions, condition_offsets):
+            condition_profile = profile[profile["condition"] == condition]
+            by_task = {
+                str(row["task"]): row
+                for row in condition_profile.to_dict("records")
+            }
+            x_values = []
+            y_values = []
+            colors = []
+            for task in ordered_tasks:
+                if task not in by_task:
+                    continue
+                value = by_task[task][value_column]
+                if pd.isna(value):
+                    continue
+                x_values.append(positions[task] + float(offset))
+                y_values.append(float(value))
+                group = group_by_task.get(task, "Other")
+                colors.append(background_colors.get(group, fallback_color))
+
+            ax.bar(
+                x_values,
+                y_values,
+                width=bar_width,
+                color=colors,
+                edgecolor="#333333",
+                linewidth=0.7,
+                hatch=hatches.get(condition, "\\\\"),
+                label=condition.replace("_", " ").title(),
+                zorder=3,
+            )
+
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(range(len(ordered_tasks)))
+        ax.set_xticklabels(
+            [display_task_name(config, task) for task in ordered_tasks],
+            rotation=38,
+            ha="right",
+            fontsize=9,
+        )
+        ax.grid(axis="y", alpha=0.25, zorder=1)
+
+    condition_handles = [
+        plt.Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor="white",
+            edgecolor="#333333",
+            hatch=hatches.get(condition, "\\\\"),
+            label=condition.replace("_", " ").title(),
+        )
+        for condition in conditions
+    ]
+    group_handles = [
+        plt.Rectangle(
+            (0, 0),
+            1,
+            1,
+            facecolor=background_colors.get(group, fallback_color),
+            edgecolor="none",
+            label=group,
+        )
+        for group in dict.fromkeys(group_by_task.get(task, "Other") for task in tasks)
+    ]
+    model = str(profile["model"].iloc[0])
+    fig.text(
+        0.01,
+        0.985,
+        f"{display_model_name(config, model)} Half-Peak Profile Bars",
+        ha="left",
+        va="top",
+        fontsize=plt.rcParams["axes.titlesize"],
+    )
+    fig.legend(
+        handles=[*condition_handles, *group_handles],
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=min(len(condition_handles) + len(group_handles), 8),
+        frameon=False,
+    )
+    fig.subplots_adjust(left=0.07, right=0.985, bottom=0.08, top=0.92, hspace=1.08)
+    save_figure(fig, output_dir / half_peak_profile_bar_output_name(config), formats)
+
+
+def plot_half_peak_profile(
+    profile: pd.DataFrame,
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+    colors: Mapping[str, str],
+) -> None:
+    if profile.empty:
+        return
+
+    model = str(profile["model"].iloc[0])
+    tasks = sorted(profile["task"].unique())
+    layout = create_grouped_task_figure(config, tasks, figsize=(18, 8), hspace=0.6)
+    fig = layout.fig
+    condition_colors = {
+        "super_subject": "#1F4E79",
+        "per_subject": "#2CA7A0",
+    }
+    condition_markers = {
+        "super_subject": "o",
+        "per_subject": "s",
+    }
+
+    for task, ax in layout.task_axes.items():
+        metric = get_metric_config(config, task)
+        task_profile = profile[profile["task"] == task]
+        for condition in CONDITIONS:
+            df = loaded.get(condition, {}).get(task, {}).get(model)
+            if df is None or metric.column not in df.columns:
+                continue
+            curve = curve_for_metric(df, metric)
+            row = task_profile[task_profile["condition"] == condition]
+            if row.empty:
+                continue
+            item = row.iloc[0]
+            color = condition_colors.get(
+                condition, colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+            )
+            marker = condition_markers.get(condition, "D")
+            ax.plot(
+                curve["lags"],
+                curve[metric.column],
+                color=color,
+                linewidth=1.7,
+                label=condition.replace("_", " ").title(),
+                zorder=2,
+            )
+            ax.scatter(
+                [item["peak_lag"]],
+                [item["peak_value"]],
+                color=color,
+                marker=marker,
+                s=42,
+                zorder=5,
+            )
+            ax.axhline(
+                item["half_peak_value"],
+                color=color,
+                linestyle=":",
+                linewidth=1.0,
+                alpha=0.55,
+                zorder=1,
+            )
+            if np.isfinite(item["ramp_half_peak_lag"]):
+                ax.scatter(
+                    [item["ramp_half_peak_lag"]],
+                    [item["half_peak_value"]],
+                    color="white",
+                    edgecolor=color,
+                    marker=marker,
+                    s=34,
+                    zorder=5,
+                )
+                ax.hlines(
+                    item["half_peak_value"],
+                    item["ramp_half_peak_lag"],
+                    item["peak_lag"],
+                    color=color,
+                    linewidth=4.0,
+                    alpha=0.28,
+                    zorder=3,
+                )
+            if np.isfinite(item["decay_half_peak_lag"]):
+                ax.scatter(
+                    [item["decay_half_peak_lag"]],
+                    [item["half_peak_value"]],
+                    color="white",
+                    edgecolor=color,
+                    marker=marker,
+                    s=34,
+                    zorder=5,
+                )
+                ax.hlines(
+                    item["half_peak_value"],
+                    item["peak_lag"],
+                    item["decay_half_peak_lag"],
+                    color=color,
+                    linewidth=4.0,
+                    alpha=0.42,
+                    zorder=3,
+                )
+            if np.isfinite(item["ramp_half_peak_lag"]) and np.isfinite(
+                item["decay_half_peak_lag"]
+            ):
+                ax.axvspan(
+                    item["ramp_half_peak_lag"],
+                    item["decay_half_peak_lag"],
+                    color=color,
+                    alpha=0.07,
+                    linewidth=0,
+                    zorder=0,
+                )
+
+        ax.set_title(display_task_name(config, task))
+        ax.set_xlabel("Lag relative to word onset (ms)")
+        ax.set_ylabel(metric.label)
+        ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
+        plot_chance_level(ax, metric)
+        ax.grid(alpha=0.25)
+        apply_metric_ylim(ax, metric)
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=condition_colors.get(
+                condition, colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+            ),
+            marker=condition_markers.get(condition, "D"),
+            linewidth=1.8,
+            markersize=6,
+            label=condition.replace("_", " ").title(),
+        )
+        for condition in CONDITIONS
+        if condition in set(profile["condition"])
+    ]
+    width_handle = plt.Rectangle(
+        (0, 0),
+        1,
+        1,
+        facecolor="#777777",
+        edgecolor="none",
+        alpha=0.16,
+        label="Half-peak width",
+    )
+    fig.text(
+        0.01,
+        0.985,
+        f"{display_model_name(config, model)} Half-Peak Temporal Profile",
+        ha="left",
+        va="top",
+        fontsize=plt.rcParams["axes.titlesize"],
+    )
+    fig.legend(
+        handles=[*handles, width_handle],
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=min(len(handles) + 1, 4),
+        frameon=False,
+    )
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
+    draw_grouped_task_backgrounds(layout, config)
+    save_figure(fig, output_dir / half_peak_profile_output_name(config), formats)
+
+
 def lag_curve_error_values(df: pd.DataFrame, metric: MetricConfig) -> pd.Series | None:
     fold_columns = metric_fold_columns(df, metric)
     if fold_columns:
@@ -3466,6 +4141,28 @@ def generate_paper_results(
         output_dir,
         table_formats,
     )
+    if half_peak_profile_enabled(config):
+        half_peak_profile = half_peak_profile_rows(loaded, config)
+        write_half_peak_profile_tables(
+            half_peak_profile,
+            output_dir,
+            table_formats,
+            half_peak_profile_output_name(config),
+        )
+        plot_half_peak_profile(
+            half_peak_profile,
+            loaded,
+            config,
+            output_dir,
+            formats,
+            colors,
+        )
+        plot_half_peak_profile_bars(
+            half_peak_profile,
+            config,
+            output_dir,
+            formats,
+        )
     plot_lag_curves(loaded, config, output_dir, formats, colors)
     plot_per_region_lag_curves(per_region_results, config, output_dir, formats)
     plot_selected_electrode_glass_brains(

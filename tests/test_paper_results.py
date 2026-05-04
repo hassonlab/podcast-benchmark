@@ -25,6 +25,8 @@ from scripts.generate_paper_results import (
     create_grouped_task_figure,
     draw_grouped_task_backgrounds,
     get_metric_config,
+    half_peak_profile_for_curve,
+    half_peak_profile_rows,
     holm_adjust_p_values,
     iter_per_region_result_specs,
     load_current_style_run,
@@ -33,6 +35,7 @@ from scripts.generate_paper_results import (
     load_per_region_run,
     curve_for_metric,
     metric_norm,
+    ordered_tasks_by_group_average,
     significance_label,
     normalize_region_name,
     plot_best_lag_summary,
@@ -63,6 +66,136 @@ def test_loads_current_style_super_subject(tmp_path):
     loaded = load_current_style_run(run_dir)
 
     assert loaded.to_dict("records") == [{"lags": 0, "score": 0.5}]
+
+
+def test_half_peak_profile_exact_crossing_on_symmetric_curve():
+    curve = pd.DataFrame(
+        {
+            "lags": [-500, -250, 0, 250, 500],
+            "score": [0.0, 0.5, 1.0, 0.5, 0.0],
+        }
+    )
+
+    profile = half_peak_profile_for_curve(
+        curve,
+        MetricConfig("score", True, "Score"),
+    )
+
+    assert profile.peak_value == 1.0
+    assert profile.peak_lag == 0.0
+    assert profile.half_peak_value == 0.5
+    assert profile.ramp_half_peak_lag == -250.0
+    assert profile.decay_half_peak_lag == 250.0
+    assert profile.ramp_duration == 250.0
+    assert profile.decay_duration == 250.0
+    assert profile.half_peak_width == 500.0
+    assert profile.ramp_slope == pytest.approx(0.002)
+    assert profile.decay_slope == pytest.approx(-0.002)
+    assert profile.ramp_rate == pytest.approx(0.002)
+    assert profile.decay_rate == pytest.approx(0.002)
+
+
+def test_half_peak_profile_interpolates_between_lag_samples():
+    curve = pd.DataFrame(
+        {
+            "lags": [-500, -250, 0, 250, 500],
+            "score": [0.0, 0.25, 1.0, 0.25, 0.0],
+        }
+    )
+
+    profile = half_peak_profile_for_curve(
+        curve,
+        MetricConfig("score", True, "Score"),
+    )
+
+    assert profile.ramp_half_peak_lag == pytest.approx(-166.6666667)
+    assert profile.decay_half_peak_lag == pytest.approx(166.6666667)
+    assert profile.half_peak_width == pytest.approx(333.3333333)
+
+
+def test_half_peak_profile_missing_crossing_returns_nan():
+    curve = pd.DataFrame(
+        {
+            "lags": [-500, -250, 0, 250, 500],
+            "score": [0.75, 0.80, 1.0, 0.80, 0.75],
+        }
+    )
+
+    profile = half_peak_profile_for_curve(
+        curve,
+        MetricConfig("score", True, "Score"),
+    )
+
+    assert profile.half_peak_value == 0.5
+    assert np.isnan(profile.ramp_half_peak_lag)
+    assert np.isnan(profile.decay_half_peak_lag)
+    assert np.isnan(profile.ramp_duration)
+    assert np.isnan(profile.decay_duration)
+    assert np.isnan(profile.ramp_slope)
+    assert np.isnan(profile.decay_slope)
+
+
+def test_half_peak_profile_roc_auc_stays_auc_units_and_uses_chance():
+    loaded = {
+        "super_subject": {
+            "task": {
+                "baseline": pd.DataFrame(
+                    {
+                        "lags": [-250, 0, 250],
+                        "test_roc_auc_mean": [0.5, 0.7, 0.5],
+                    }
+                )
+            }
+        }
+    }
+    config = {
+        "plotting": {"half_peak_profile": {"model": "baseline"}},
+        "metrics": {
+            "task": {
+                "column": "test_roc_auc_mean",
+                "higher_is_better": True,
+                "label": "ROC-AUC",
+                "chance": 0.5,
+            }
+        },
+    }
+
+    rows = half_peak_profile_rows(loaded, config)
+
+    assert rows.loc[0, "reference_value"] == 0.5
+    assert rows.loc[0, "peak_value"] == 0.7
+    assert rows.loc[0, "half_peak_value"] == 0.6
+
+
+def test_half_peak_bar_task_order_sorts_groups_by_group_average():
+    profile = pd.DataFrame(
+        {
+            "task": ["a1", "a2", "b1", "b2", "a1", "a2", "b1", "b2"],
+            "condition": [
+                "super_subject",
+                "super_subject",
+                "super_subject",
+                "super_subject",
+                "per_subject",
+                "per_subject",
+                "per_subject",
+                "per_subject",
+            ],
+            "half_peak_width": [10.0, 30.0, 5.0, 7.0, 20.0, 40.0, 6.0, 8.0],
+        }
+    )
+    config = {
+        "plotting": {
+            "task_groups": {
+                "High": ["a1", "a2"],
+                "Low": ["b1", "b2"],
+            }
+        }
+    }
+
+    ordered = ordered_tasks_by_group_average(profile, config, "half_peak_width")
+
+    assert ordered == ["b1", "b2", "a1", "a2"]
 
 
 def test_loads_and_averages_current_style_per_subject(tmp_path):
