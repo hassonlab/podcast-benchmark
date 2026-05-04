@@ -140,6 +140,8 @@ class TrainingParams:
     ridge_alpha: float = 1.0
     # If true trains and evaluates a logistic regression baseline.
     logistic_regression_baseline: bool = False
+    # If true trains and evaluates an L2-regularized logistic regression CV baseline.
+    ridge_logistic_regression_baseline: bool = False
     # If true, normalizes targets (Y) to zero mean and unit variance using training set statistics.
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).

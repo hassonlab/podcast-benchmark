@@ -19,6 +19,7 @@ dependencies = [
     "pandas>=2.0.0",
     "scipy>=1.12.0",
     "scikit-learn>=1.5.0",
+    "himalaya>=0.4.0",
 
     # Deep learning (PyTorch)
     "torch>=2.0.0",

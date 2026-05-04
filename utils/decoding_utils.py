@@ -2,6 +2,7 @@ from collections import Counter
 from typing import Optional
 import os
 import math
+import inspect
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -34,13 +35,20 @@ from utils.model_utils import build_model_from_spec
 import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import LinearRegression
 import time
 
+DEFAULT_RIDGE_ALPHAS = np.logspace(-3, 6, 10).tolist()
+DEFAULT_RIDGE_LOGISTIC_CS = np.logspace(-3, 3, 7).tolist()
 
-def train_logistic_regression(X_train, y_train):
+
+def _flatten_baseline_features(X):
+    return np.reshape(X, (X.shape[0], -1))
+
+
+def train_logistic_regression(X_train, y_train, baseline_params=None):
     """
     Train a logistic regression model.
 
@@ -51,13 +59,13 @@ def train_logistic_regression(X_train, y_train):
     Returns:
         Trained LogisticRegression model
     """
-    X_train = np.reshape(X_train, (X_train.shape[0], -1))
+    X_train = _flatten_baseline_features(X_train)
     model = LogisticRegression(max_iter=1000)
     model.fit(X_train, y_train)
     return model
 
 
-def train_linear_regression(X_train, y_train):
+def train_linear_regression(X_train, y_train, baseline_params=None):
     """
     Train a linear regression model.
 
@@ -68,28 +76,92 @@ def train_linear_regression(X_train, y_train):
     Returns:
         Trained LinearRegression model
     """
-    X_train = np.reshape(X_train, (X_train.shape[0], -1))
+    X_train = _flatten_baseline_features(X_train)
     model = LinearRegression()
     model.fit(X_train, y_train)
     return model
 
 
-def train_ridge_regression(X_train, y_train, alpha=1.0):
+def train_ridge_regression(X_train, y_train, baseline_params=None):
     """
-    Train a ridge regression model.
+    Train a Himalaya RidgeCV regression baseline.
 
     Args:
         X_train: Training features
         y_train: Training targets
-        alpha: Regularization strength (default=1.0)
+        baseline_params: Optional model_spec.params for ridge tuning/backend options
 
     Returns:
-        Trained Ridge model
+        Trained Himalaya RidgeCV model
     """
-    X_train = np.reshape(X_train, (X_train.shape[0], -1))
-    model = Ridge(alpha=alpha)
+    from himalaya.backend import set_backend
+    from himalaya.ridge import RidgeCV
+
+    baseline_params = baseline_params or {}
+    if baseline_params.get("alphas") is not None:
+        alphas = baseline_params["alphas"]
+    elif baseline_params.get("alpha") is not None:
+        alphas = [baseline_params["alpha"]]
+    else:
+        alphas = DEFAULT_RIDGE_ALPHAS
+
+    backend = baseline_params.get("backend", "torch_cuda")
+    set_backend(backend, on_error="warn")
+
+    X_train = _flatten_baseline_features(X_train).astype(np.float32, copy=False)
+    y_train = np.asarray(y_train, dtype=np.float32)
+    model = RidgeCV(
+        alphas=alphas,
+        cv=baseline_params.get("cv", 5),
+        fit_intercept=baseline_params.get("fit_intercept", True),
+        Y_in_cpu=baseline_params.get("Y_in_cpu", False),
+        force_cpu=baseline_params.get("force_cpu", False),
+    )
     model.fit(X_train, y_train)
     return model
+
+
+def train_ridge_logistic_regression(X_train, y_train, baseline_params=None):
+    """Train an L2-regularized LogisticRegressionCV baseline."""
+    baseline_params = baseline_params or {}
+    X_train = _flatten_baseline_features(X_train)
+    y_train = np.asarray(y_train).ravel()
+    kwargs = {
+        "Cs": baseline_params.get("Cs", DEFAULT_RIDGE_LOGISTIC_CS),
+        "cv": baseline_params.get("cv", 5),
+        "penalty": "l2",
+        "solver": baseline_params.get("solver", "lbfgs"),
+        "max_iter": baseline_params.get("max_iter", 1000),
+        "class_weight": baseline_params.get("class_weight"),
+    }
+    if "multi_class" in inspect.signature(LogisticRegressionCV).parameters:
+        kwargs["multi_class"] = baseline_params.get("multi_class", "auto")
+    model = LogisticRegressionCV(**kwargs)
+    model.fit(X_train, y_train)
+    return model
+
+
+def _baseline_logits_from_estimator(model, X_flat, probabilities):
+    if hasattr(model, "decision_function"):
+        scores = model.decision_function(X_flat)
+        if scores.ndim == 1:
+            return np.stack([-scores, scores], axis=1)
+        return scores
+
+    probabilities = np.clip(probabilities, 1e-7, 1.0)
+    return np.log(probabilities)
+
+
+def _baseline_predictions_for_metric(model, X_flat, metric_name):
+    if not hasattr(model, "predict_proba"):
+        return model.predict(X_flat)
+
+    probabilities = model.predict_proba(X_flat)
+    if metric_name in {"cross_entropy", "weighted_cross_entropy", "confusion_matrix"}:
+        return _baseline_logits_from_estimator(model, X_flat, probabilities)
+    if probabilities.shape[-1] == 2:
+        return probabilities[:, 1]
+    return probabilities
 
 
 def compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params=None):
@@ -113,20 +185,14 @@ def compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params=No
         Y = Y_splits[phase]
 
         # Flatten X if needed
-        X_flat = np.reshape(X, (X.shape[0], -1))
+        X_flat = _flatten_baseline_features(X)
 
-        # Get predictions
-        # For classification tasks, use predict_proba if available (needed for cross_entropy)
-        if hasattr(model, "predict_proba"):
-            predictions = model.predict_proba(X_flat)
-            # Catch binary case.
-            if predictions.shape[-1] == 2:
-                predictions = predictions[:, 1]
-        else:
-            predictions = model.predict(X_flat)
-
-        # Compute all metrics
-        metrics = compute_all_metrics(predictions, Y, all_fns, model_params)
+        metrics = {}
+        for name, fn in all_fns.items():
+            predictions = _baseline_predictions_for_metric(model, X_flat, name)
+            metrics.update(
+                compute_all_metrics(predictions, Y, {name: fn}, model_params)
+            )
 
         # Store with phase prefix
         for metric_name, metric_value in metrics.items():
@@ -842,12 +908,14 @@ def _train_and_eval_baseline(
     target_splits,
     all_fns,
     model_params,
+    baseline_params=None,
     **kwargs,
 ):
     tr_idx = split_indices["train"]
     model = training_fn(
         neural_data[tr_idx].cpu().numpy(),
         target_splits["train"].cpu().numpy(),
+        baseline_params=baseline_params,
         **kwargs,
     )
     X_splits = {
@@ -879,6 +947,17 @@ def _train_enabled_baselines(
             all_fns,
             model_params,
         )
+    if training_params.ridge_logistic_regression_baseline:
+        print("Training ridge logistic regression baseline...")
+        results["ridge_logistic_regression"] = _train_and_eval_baseline(
+            train_ridge_logistic_regression,
+            neural_data,
+            split_indices,
+            target_splits,
+            all_fns,
+            model_params,
+            baseline_params=model_params,
+        )
     if training_params.linear_regression_baseline:
         print("Training linear regression baseline...")
         results["linear_regression"] = _train_and_eval_baseline(
@@ -891,6 +970,9 @@ def _train_enabled_baselines(
         )
     if training_params.ridge_regression_baseline:
         print("Training ridge regression baseline...")
+        ridge_params = dict(model_params or {})
+        if "alphas" not in ridge_params and "alpha" not in ridge_params:
+            ridge_params["alpha"] = training_params.ridge_alpha
         results["ridge_regression"] = _train_and_eval_baseline(
             train_ridge_regression,
             neural_data,
@@ -898,7 +980,7 @@ def _train_enabled_baselines(
             target_splits,
             all_fns,
             model_params,
-            alpha=training_params.ridge_alpha,
+            baseline_params=ridge_params,
         )
     return results
 
@@ -906,6 +988,69 @@ def _train_enabled_baselines(
 def _append_baseline_results(all_baseline_results, fold_baseline_results):
     for name, metrics_dict in fold_baseline_results.items():
         all_baseline_results[name].append(metrics_dict)
+
+
+def _baseline_result_keys():
+    return (
+        "logistic_regression",
+        "ridge_logistic_regression",
+        "linear_regression",
+        "ridge_regression",
+    )
+
+
+def _init_baseline_results():
+    return {name: [] for name in _baseline_result_keys()}
+
+
+def _enabled_baseline_flags(training_params: TrainingParams):
+    return {
+        "logistic_regression": training_params.logistic_regression_baseline,
+        "ridge_logistic_regression": training_params.ridge_logistic_regression_baseline,
+        "linear_regression": training_params.linear_regression_baseline,
+        "ridge_regression": training_params.ridge_regression_baseline,
+    }
+
+
+def _baseline_only_enabled(model_spec: ModelSpec):
+    return model_spec.constructor_name == ""
+
+
+def _validate_baseline_only_config(
+    model_spec: ModelSpec, training_params: TrainingParams
+):
+    if not _baseline_only_enabled(model_spec):
+        return None
+
+    enabled = [
+        name
+        for name, is_enabled in _enabled_baseline_flags(training_params).items()
+        if is_enabled
+    ]
+    if len(enabled) != 1:
+        raise ValueError(
+            "Baseline-only mode requires exactly one enabled baseline among "
+            "logistic_regression_baseline, ridge_logistic_regression_baseline, "
+            "linear_regression_baseline, and ridge_regression_baseline. "
+            f"Found {len(enabled)}: {enabled}"
+        )
+    return enabled[0]
+
+
+def _record_baseline_only_fold_results(cv_results, baseline_metrics, metric_names):
+    conf_matrices = {}
+    for name in metric_names:
+        if name == "confusion_matrix":
+            conf_matrices = {
+                phase: baseline_metrics[f"{phase}_{name}"]
+                for phase in ("train", "val", "test")
+                if f"{phase}_{name}" in baseline_metrics
+            }
+            continue
+        for phase in ("train", "val", "test"):
+            cv_results[f"{phase}_{name}"].append(baseline_metrics[f"{phase}_{name}"])
+    cv_results["num_epochs"].append(0)
+    return conf_matrices
 
 
 def _maybe_prepare_per_subject_concat_model(
@@ -1206,6 +1351,11 @@ def _print_baseline_summaries(training_params, baseline_results):
             "LOGISTIC REGRESSION BASELINE RESULTS",
             baseline_results["logistic_regression"],
         )
+    if training_params.ridge_logistic_regression_baseline:
+        _print_single_baseline_summary(
+            "RIDGE LOGISTIC REGRESSION BASELINE RESULTS",
+            baseline_results["ridge_logistic_regression"],
+        )
     if training_params.linear_regression_baseline:
         _print_single_baseline_summary(
             "LINEAR REGRESSION BASELINE RESULTS",
@@ -1268,7 +1418,9 @@ def train_decoding_model(
     subject_channel_counts: list[int] = None,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    baseline_only_name = _validate_baseline_only_config(model_spec, training_params)
+    if baseline_only_name is None:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     Y = _maybe_shuffle_targets(Y, training_params)
     fold_indices = _get_fold_indices(neural_data, data_df, task_config, training_params)
@@ -1282,12 +1434,44 @@ def train_decoding_model(
     )
 
     models, histories = [], []
-    baseline_results = {
-        "logistic_regression": [],
-        "linear_regression": [],
-        "ridge_regression": [],
-    }
+    baseline_results = _init_baseline_results()
     conf_matrices = {}
+
+    if baseline_only_name is not None:
+        for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
+            _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
+            cv_results["fold_nums"].append(fold)
+            split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+            target_splits = _normalize_fold_targets(
+                Y, tr_idx, va_idx, te_idx, training_params
+            )
+            fold_baseline_results = _train_enabled_baselines(
+                neural_data,
+                split_indices,
+                target_splits,
+                training_params,
+                all_fns,
+                model_spec.params,
+            )
+            _append_baseline_results(baseline_results, fold_baseline_results)
+            fold_conf_matrices = _record_baseline_only_fold_results(
+                cv_results,
+                fold_baseline_results[baseline_only_name],
+                metric_names,
+            )
+            if fold_conf_matrices:
+                conf_matrices = fold_conf_matrices
+
+        _print_baseline_summaries(training_params, baseline_results)
+        _print_main_cv_summary(
+            cv_results, metric_names, conf_matrices, embedding_metrics
+        )
+
+        if plot_results:
+            plot_cv_results(cv_results)
+
+        return models, histories, cv_results
+
     cached_lag_features = None
     cached_lag_extra_inputs = None
     use_lag_feature_cache = getattr(model_spec, "feature_cache", False) or getattr(
