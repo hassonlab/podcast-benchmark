@@ -7,52 +7,52 @@
 #   - configs/controls/llm_decoding/no_brain_data.yml
 # baselines/neural_conv_decoder:
 #   word_embedding_decoding_task:
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_supersubject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_per_subject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_per_region.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_glove_supersubject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_glove_per_subject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_glove_per_region.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_arbitrary_supersubject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_arbitrary_per_subject.yml
-#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder_arbitrary_per_region.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_supersubject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_per_subject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_per_region.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_supersubject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_per_subject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_per_region.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_supersubject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_per_subject.yml
+#   - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_per_region.yml
 #   sentence_onset_task:
-#   - configs/baselines/sentence_onset_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/sentence_onset_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/sentence_onset_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/sentence_onset_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/sentence_onset_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/sentence_onset_task/neural_conv_decoder/per_region.yml
 #   gpt_surprise_task:
-#   - configs/baselines/gpt_surprise_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/gpt_surprise_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/gpt_surprise_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/gpt_surprise_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/gpt_surprise_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/gpt_surprise_task/neural_conv_decoder/per_region.yml
 #   gpt_surprise_multiclass_task:
-#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/per_region.yml
 #   content_noncontent_task:
-#   - configs/baselines/content_noncontent_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/content_noncontent_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/content_noncontent_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/content_noncontent_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/content_noncontent_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/content_noncontent_task/neural_conv_decoder/per_region.yml
 #   pos_task:
-#   - configs/baselines/pos_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/pos_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/pos_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/pos_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/pos_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/pos_task/neural_conv_decoder/per_region.yml
 #   llm_decoding_task:
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_per_subject_batch0.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_per_subject_batch1.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_per_subject_batch2.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_per_region.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_two_stage_multi_supersubject.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_two_stage_multi_per_subject.yml
-#   - configs/baselines/llm_decoding_task/neural_conv_decoder_two_stage_multi_per_region.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch0.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch1.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch2.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/per_region.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_supersubject.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_per_subject.yml
+#   - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_per_region.yml
 #   whisper_embedding_decoding_task:
-#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/per_region.yml
 #   iu_boundary_task:
-#   - configs/baselines/iu_boundary_task/neural_conv_decoder_supersubject.yml
-#   - configs/baselines/iu_boundary_task/neural_conv_decoder_per_subject.yml
-#   - configs/baselines/iu_boundary_task/neural_conv_decoder_per_region.yml
+#   - configs/baselines/iu_boundary_task/neural_conv_decoder/supersubject.yml
+#   - configs/baselines/iu_boundary_task/neural_conv_decoder/per_subject.yml
+#   - configs/baselines/iu_boundary_task/neural_conv_decoder/per_region.yml
 # baselines/time_pooling_model:
 #   volume_level_decoding_task:
 #   - configs/baselines/volume_level_decoding_task/time_pooling_model_simple_supersubject.yml
@@ -63,23 +63,41 @@
 #   - configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_per_region.yml
 baselines/simple_models:
   word_embedding_decoding_task:
-  - configs/baselines/word_embedding_decoding_task/ridge_regression.yml
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/per_region.yml
   whisper_embedding_decoding_task:
-  - configs/baselines/whisper_embedding_decoding_task/ridge_regression.yml
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_region.yml
   gpt_surprise_task:
-  - configs/baselines/gpt_surprise_task/ridge_regression.yml
+  - configs/baselines/gpt_surprise_task/ridge_regression/supersubject.yml
+  - configs/baselines/gpt_surprise_task/ridge_regression/per_subject.yml
+  - configs/baselines/gpt_surprise_task/ridge_regression/per_region.yml
   volume_level_decoding_task:
-  - configs/baselines/volume_level_decoding_task/ridge_regression.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/per_region.yml
   sentence_onset_task:
-  - configs/baselines/sentence_onset_task/ridge_logistic_regression.yml
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/per_region.yml
   content_noncontent_task:
-  - configs/baselines/content_noncontent_task/ridge_logistic_regression.yml
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/per_region.yml
   gpt_surprise_multiclass_task:
-  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression.yml
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/per_region.yml
   pos_task:
-  - configs/baselines/pos_task/ridge_logistic_regression.yml
+  - configs/baselines/pos_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/pos_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/pos_task/ridge_logistic_regression/per_region.yml
   iu_boundary_task:
-  - configs/baselines/iu_boundary_task/ridge_logistic_regression.yml
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/per_region.yml
 foundation_models/brainbert:
   word_embedding_decoding_task:
   - configs/foundation_models/brainbert/word_embedding/persubject_concat.yml

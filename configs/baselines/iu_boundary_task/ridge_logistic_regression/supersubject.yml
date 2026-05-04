@@ -1,14 +1,13 @@
 task_config:
-  task_name: whisper_embedding_decoding_task
+  task_name: iu_boundary_task
   data_params:
     data_root: data
-    word_column: word
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: false
     target_sr: 2048
     window_width: 1.0
   task_specific_config:
-    embedding_pca_dim: 50
+    iu_boundaries_csv_path: processed_data/iu_boundaries.csv
 training_params:
   batch_size: 512
   n_folds: 5
@@ -16,23 +15,26 @@ training_params:
   max_lag: 1500
   lag_step_size: 500
   losses:
-  - mse
+  - cross_entropy
   loss_weights:
   - 1.0
   metrics:
-  - mse
-  - corr
-  - cosine_sim
-  - cosine_dist
-  early_stopping_metric: cosine_sim
+  - roc_auc
+  early_stopping_metric: roc_auc
   smaller_is_better: false
-  ridge_regression_baseline: true
+  ridge_logistic_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_regression_whisper_embedding
+trial_name: ridge_logistic_regression_iu_boundary_supersubject
 model_spec:
-  constructor_name: ""
+  constructor_name: ''
   params:
-    alphas: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+    Cs:
+    - 0.001
+    - 0.01
+    - 0.1
+    - 1.0
+    - 10.0
+    - 100.0
     cv: 5
-    backend: torch_cuda
-    fit_intercept: true
+    solver: lbfgs
+    max_iter: 1000

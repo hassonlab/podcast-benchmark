@@ -64,7 +64,7 @@ See [Baseline Results](baseline-results.md) for performance benchmarks across al
 To modify data, behavior, or hyperparameters:
 
 Edit the relevant configuration file in `configs/`:
-- `configs/baselines/<task_name>/` - Task-grouped baseline configs, including supersubject, per-subject, and per-region variants
+- `configs/baselines/<task_name>/<baseline_family>/` - Task-grouped baseline configs, including supersubject, per-subject, and per-region variants
 - `configs/examples/example_foundation_model/` - Example foundation-model configs
 - `configs/foundation_models/` - Production foundation-model configs
 - `configs/controls/llm_decoding/` - Control runs for LLM decoding

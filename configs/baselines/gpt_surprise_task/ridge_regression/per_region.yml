@@ -1,16 +1,13 @@
 task_config:
-  task_name: word_embedding_decoding_task
+  task_name: gpt_surprise_task
   data_params:
     data_root: data
-    word_column: word
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: false
     target_sr: 2048
     window_width: 1.0
   task_specific_config:
-    embedding_type: gpt-2xl
-    embedding_layer: 24
-    embedding_pca_dim: 50
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
   batch_size: 512
   n_folds: 5
@@ -24,17 +21,24 @@ training_params:
   metrics:
   - mse
   - corr
-  - cosine_sim
-  - cosine_dist
-  early_stopping_metric: cosine_sim
-  smaller_is_better: false
+  - r2
+  early_stopping_metric: mse
+  smaller_is_better: true
   ridge_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_regression_word_embedding
+trial_name: ridge_regression_gpt_surprise_per_region
 model_spec:
-  constructor_name: ""
+  constructor_name: ''
   params:
-    alphas: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+    alphas:
+    - 0.001
+    - 0.01
+    - 0.1
+    - 1.0
+    - 10.0
+    - 100.0
+    - 1000.0
     cv: 5
     backend: torch_cuda
     fit_intercept: true
+run_mode: per_region

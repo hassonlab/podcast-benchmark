@@ -1,5 +1,5 @@
 task_config:
-  task_name: content_noncontent_task
+  task_name: gpt_surprise_task
   data_params:
     data_root: data
     electrode_file_path: processed_data/all_subject_sig.csv
@@ -15,20 +15,30 @@ training_params:
   max_lag: 1500
   lag_step_size: 500
   losses:
-  - cross_entropy
+  - mse
   loss_weights:
   - 1.0
   metrics:
-  - roc_auc
-  early_stopping_metric: roc_auc
-  smaller_is_better: false
-  ridge_logistic_regression_baseline: true
+  - mse
+  - corr
+  - r2
+  early_stopping_metric: mse
+  smaller_is_better: true
+  ridge_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_logistic_regression_content_noncontent
+trial_name: ridge_regression_gpt_surprise_per_subject
 model_spec:
-  constructor_name: ""
+  constructor_name: ''
   params:
-    Cs: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+    alphas:
+    - 0.001
+    - 0.01
+    - 0.1
+    - 1.0
+    - 10.0
+    - 100.0
+    - 1000.0
     cv: 5
-    solver: lbfgs
-    max_iter: 1000
+    backend: torch_cuda
+    fit_intercept: true
+run_mode: per_subject
