@@ -1,42 +1,45 @@
-import pytest
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 from models.brainbert.integration import (
     ReferenceBrainBERTDecoder,
-    _center_crop_temporal_patches,
+    _adaptive_avg_pool_temporal_patches,
 )
 
 
-def test_center_crop_temporal_patches_exact_length_noop():
-    features = torch.arange(2 * 10 * 3).view(2, 10, 3)
+def test_adaptive_avg_pool_temporal_patches_exact_length_noop():
+    features = torch.arange(2 * 10 * 3, dtype=torch.float32).view(2, 10, 3)
 
-    cropped = _center_crop_temporal_patches(features, 10)
+    pooled = _adaptive_avg_pool_temporal_patches(features, 10)
 
-    torch.testing.assert_close(cropped, features)
-
-
-def test_center_crop_temporal_patches_even_surplus():
-    features = torch.arange(1 * 14 * 2).view(1, 14, 2)
-
-    cropped = _center_crop_temporal_patches(features, 10)
-
-    torch.testing.assert_close(cropped, features[:, 2:12, :])
+    torch.testing.assert_close(pooled, features)
 
 
-def test_center_crop_temporal_patches_odd_surplus():
-    features = torch.arange(1 * 13 * 2).view(1, 13, 2)
+def test_adaptive_avg_pool_temporal_patches_downsamples_with_means():
+    features = torch.arange(1 * 8 * 1, dtype=torch.float32).view(1, 8, 1)
 
-    cropped = _center_crop_temporal_patches(features, 10)
+    pooled = _adaptive_avg_pool_temporal_patches(features, 4)
 
-    torch.testing.assert_close(cropped, features[:, 1:11, :])
+    expected = torch.tensor([[[0.5], [2.5], [4.5], [6.5]]])
+    torch.testing.assert_close(pooled, expected)
 
 
-def test_center_crop_temporal_patches_too_short_raises():
-    features = torch.zeros(2, 9, 3)
+def test_adaptive_avg_pool_temporal_patches_uses_all_tokens():
+    features = torch.arange(1 * 13 * 2, dtype=torch.float32).view(1, 13, 2)
 
-    with pytest.raises(ValueError, match="fewer temporal tokens"):
-        _center_crop_temporal_patches(features, 10)
+    pooled = _adaptive_avg_pool_temporal_patches(features, 10)
+
+    expected = F.adaptive_avg_pool1d(features.transpose(1, 2), 10).transpose(1, 2)
+    torch.testing.assert_close(pooled, expected)
+
+
+def test_adaptive_avg_pool_temporal_patches_can_expand_to_requested_length():
+    features = torch.arange(2 * 3 * 4, dtype=torch.float32).view(2, 3, 4)
+
+    pooled = _adaptive_avg_pool_temporal_patches(features, 5)
+
+    assert pooled.shape == (2, 5, 4)
 
 
 class StubBrainBERTUpstream(nn.Module):
@@ -62,7 +65,7 @@ class StubFinetuneModel(nn.Module):
         self.frozen_upstream = False
 
 
-def test_brainbert_decoder_keeps_central_temporal_tokens_flattened():
+def test_brainbert_decoder_pools_temporal_tokens_flattened():
     batch_size = 2
     num_electrodes = 3
     temporal_patches_to_keep = 4

@@ -416,17 +416,16 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 load_pretrained_model = load_reference_pretrained_model
 
 
-def _center_crop_temporal_patches(features, temporal_patches_to_keep):
-    seq_len = features.shape[1]
-    if seq_len < temporal_patches_to_keep:
+def _adaptive_avg_pool_temporal_patches(features, temporal_patches_to_keep):
+    if temporal_patches_to_keep < 1:
         raise ValueError(
-            "BrainBERT emitted fewer temporal tokens than requested: "
-            f"got {seq_len}, requested {temporal_patches_to_keep}."
+            "BrainBERT temporal_patches_to_keep must be at least 1: "
+            f"got {temporal_patches_to_keep}."
         )
-    surplus = seq_len - temporal_patches_to_keep
-    start = surplus // 2
-    end = start + temporal_patches_to_keep
-    return features[:, start:end, :]
+
+    features = features.transpose(1, 2).contiguous()
+    features = F.adaptive_avg_pool1d(features, temporal_patches_to_keep)
+    return features.transpose(1, 2)
 
 
 class ReferenceBrainBERTDecoder(nn.Module):
@@ -496,7 +495,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
                 )
 
             if features.shape[0] == batch_size * num_channels:
-                features = _center_crop_temporal_patches(
+                features = _adaptive_avg_pool_temporal_patches(
                     features, self.temporal_patches_to_keep
                 )
             else:
