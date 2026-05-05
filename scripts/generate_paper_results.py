@@ -62,6 +62,14 @@ DEFAULT_COLORS = {
     "brainbert": "#54A24B",
     "popt": "#E45756",
 }
+BEST_COLOR = "#F58518"
+PLOT_TITLE_FONTSIZE = 18
+GROUP_TITLE_FONTSIZE = 20
+BRAIN_MAP_COLORBAR_LABEL_FONTSIZE = 14
+BRAIN_MAP_COLORBAR_TICK_FONTSIZE = 12
+
+plt.rcParams["axes.titlesize"] = PLOT_TITLE_FONTSIZE
+plt.rcParams["figure.titlesize"] = PLOT_TITLE_FONTSIZE
 
 
 @dataclass(frozen=True)
@@ -520,7 +528,31 @@ def metric_values(df: pd.DataFrame, metric: MetricConfig) -> pd.Series:
     return -values if metric.negate else values
 
 
-def select_best_lag(df: pd.DataFrame, metric: MetricConfig) -> pd.Series:
+def select_best_lag(
+    df: pd.DataFrame,
+    metric: MetricConfig,
+    valid_lags: Sequence[float] | None = None,
+    task: str | None = None,
+    model: str | None = None,
+) -> pd.Series:
+    if valid_lags is not None:
+        if "lags" not in df.columns:
+            raise KeyError("Lag column 'lags' is missing")
+        numeric_lags = pd.to_numeric(df["lags"], errors="coerce")
+        valid_lag_values = set(float(lag) for lag in valid_lags)
+        df = df.loc[numeric_lags.isin(valid_lag_values)]
+        if df.empty:
+            context = []
+            if task is not None:
+                context.append(f"task '{task}'")
+            if model is not None:
+                context.append(f"model '{model}'")
+            context_text = f" for {', '.join(context)}" if context else ""
+            raise ValueError(
+                f"No rows remain{context_text} after filtering to valid best lags "
+                f"{list(valid_lags)}"
+            )
+
     values = metric_values(df, metric)
     if values.notna().sum() == 0:
         raise ValueError(f"Metric column '{metric.column}' has no numeric values")
@@ -546,12 +578,13 @@ def best_lag_std_value(best: pd.Series, metric: MetricConfig) -> float:
 def best_lag_rows(
     condition_results: Mapping[str, Mapping[str, pd.DataFrame]],
     metrics: Mapping[str, MetricConfig],
+    valid_lags: Sequence[float] | None = None,
 ) -> pd.DataFrame:
     rows = []
     for task, model_results in sorted(condition_results.items()):
         metric = metrics[task]
         for model, df in sorted(model_results.items()):
-            best = select_best_lag(df, metric)
+            best = select_best_lag(df, metric, valid_lags, task=task, model=model)
             rows.append(
                 {
                     "task": task,
@@ -816,6 +849,19 @@ def plotting_config(config: Mapping) -> Mapping:
     return configured if isinstance(configured, Mapping) else {}
 
 
+def valid_best_lags(config: Mapping) -> tuple[float, ...] | None:
+    configured = plotting_config(config).get("valid_best_lags")
+    if configured is None:
+        return None
+    if isinstance(configured, str) or not isinstance(configured, Sequence):
+        raise ValueError("plotting.valid_best_lags must be configured as a list")
+
+    lags = pd.to_numeric(pd.Series(list(configured)), errors="coerce")
+    if lags.isna().any():
+        raise ValueError("plotting.valid_best_lags must contain only numeric values")
+    return tuple(float(lag) for lag in lags)
+
+
 def half_peak_profile_config(config: Mapping) -> Mapping:
     plot_config = plotting_config(config)
     configured = plot_config.get("half_peak_profile", {})
@@ -983,6 +1029,66 @@ def bar_start_for_task(config: Mapping, task: str) -> float:
     return 0.0
 
 
+def best_lag_model_bar_textures(config: Mapping) -> Mapping[str, str]:
+    plot_config = plotting_config(config)
+    configured = plot_config.get(
+        "best_lag_model_bar_textures",
+        plot_config.get(
+            "best_lag_model_textures",
+            plot_config.get(
+                "model_bar_textures",
+                config.get(
+                    "best_lag_model_bar_textures",
+                    config.get(
+                        "best_lag_model_textures", config.get("model_bar_textures", {})
+                    ),
+                ),
+            ),
+        ),
+    )
+    if not isinstance(configured, Mapping):
+        return {}
+
+    textures = {}
+    for model, texture in configured.items():
+        if texture is None:
+            textures[str(model)] = ""
+            continue
+        texture = str(texture)
+        textures[str(model)] = (
+            "" if texture.strip().lower() in {"", "none"} else texture
+        )
+    return textures
+
+
+def lag_curve_models(config: Mapping) -> tuple[str, ...]:
+    plot_config = plotting_config(config)
+    configured = plot_config.get(
+        "lag_curve_models",
+        plot_config.get(
+            "lag_models",
+            plot_config.get(
+                "lag_result_models",
+                config.get(
+                    "lag_curve_models",
+                    config.get("lag_models", config.get("lag_result_models")),
+                ),
+            ),
+        ),
+    )
+    if configured is None:
+        return ("baseline",)
+    if isinstance(configured, str):
+        return (configured,)
+    if not isinstance(configured, Sequence):
+        raise ValueError("Lag curve models must be configured as a list of model names")
+
+    models = tuple(str(model) for model in configured)
+    if not models:
+        raise ValueError("Lag curve models must contain at least one model name")
+    return models
+
+
 def check_best_lag_significance(config: Mapping) -> bool:
     plot_config = plotting_config(config)
     if "check_best_lag_significance" in plot_config:
@@ -1027,6 +1133,14 @@ def model_display_names(config: Mapping) -> Mapping[str, str]:
 
 def display_model_name(config: Mapping, model: str) -> str:
     return model_display_names(config).get(model, model)
+
+
+def display_condition_name(condition: str) -> str:
+    names = {
+        "super_subject": "Super Subject",
+        "per_subject": "Single Subject",
+    }
+    return names.get(condition, condition.replace("_", " ").title())
 
 
 def task_group_config(config: Mapping) -> Mapping:
@@ -1660,6 +1774,7 @@ def draw_grouped_task_backgrounds(
     config: Mapping,
     *,
     label_axis_off_groups: bool = False,
+    draw_backgrounds: bool = True,
 ) -> None:
     background_colors = task_group_background_colors(config)
     alpha = task_group_background_alpha(config)
@@ -1727,26 +1842,27 @@ def draw_grouped_task_backgrounds(
             cell_bottom = (bottom + row_bounds[next_row][1]) / 2
         row_edges[row] = (cell_bottom, cell_top)
 
-    for group, group_axes in layout.group_axes:
-        color = background_colors.get(group, fallback_color)
-        facecolor = to_rgba(color, alpha)
-        for ax in group_axes:
-            spec = ax.get_subplotspec()
-            row = spec.rowspan.start
-            col = spec.colspan.start
-            rect_left, rect_right = col_edges[col]
-            rect_bottom, rect_top = row_edges[row]
-            rect = plt.Rectangle(
-                (rect_left, rect_bottom),
-                rect_right - rect_left,
-                rect_top - rect_bottom,
-                transform=layout.fig.transFigure,
-                facecolor=facecolor,
-                edgecolor="none",
-                clip_on=False,
-                zorder=-1,
-            )
-            layout.fig.add_artist(rect)
+    if draw_backgrounds:
+        for group, group_axes in layout.group_axes:
+            color = background_colors.get(group, fallback_color)
+            facecolor = to_rgba(color, alpha)
+            for ax in group_axes:
+                spec = ax.get_subplotspec()
+                row = spec.rowspan.start
+                col = spec.colspan.start
+                rect_left, rect_right = col_edges[col]
+                rect_bottom, rect_top = row_edges[row]
+                rect = plt.Rectangle(
+                    (rect_left, rect_bottom),
+                    rect_right - rect_left,
+                    rect_top - rect_bottom,
+                    transform=layout.fig.transFigure,
+                    facecolor=facecolor,
+                    edgecolor="none",
+                    clip_on=False,
+                    zorder=-1,
+                )
+                layout.fig.add_artist(rect)
 
     for group, group_axes in layout.group_axes:
         visible_axes = (
@@ -1775,7 +1891,7 @@ def draw_grouped_task_backgrounds(
             group,
             ha="center",
             va="top",
-            fontsize=plt.rcParams["axes.titlesize"],
+            fontsize=GROUP_TITLE_FONTSIZE,
             weight="bold",
         )
 
@@ -1864,7 +1980,9 @@ def plot_score_axis(
     values = []
     for model in models:
         match = score_summary[score_summary["model"] == model]
-        values.append(float(match["score"].iloc[0]) if not match.empty else float("nan"))
+        values.append(
+            float(match["score"].iloc[0]) if not match.empty else float("nan")
+        )
     for x_position, model, value in zip(x_positions, models, values):
         if not np.isfinite(value):
             continue
@@ -2057,12 +2175,27 @@ def plot_best_lag_summary(
     show_bar_error_bars = include_bar_error_bars(config)
     show_significance = check_best_lag_significance(config)
     correct_significance = correct_best_lag_significance(config)
+    model_bar_textures = best_lag_model_bar_textures(config)
+
+    # Neutral color for non-winners
+    neutral_color = "#95a5a6"
 
     for task, ax in layout.task_axes.items():
         task_summary = summary[summary["task"] == task]
         metric = metric_config_from_summary(task_summary)
         task_results = condition_results.get(task, {}) if condition_results else None
         bar_start = bar_start_for_task(config, task)
+
+        # --- PER-SUBPLOT HIGHLIGHT LOGIC ---
+        # Find the model with the highest value in this specific task
+        if not task_summary.empty:
+            best_model_in_task = task_summary.loc[
+                task_summary["value"].idxmax(), "model"
+            ]
+        else:
+            best_model_in_task = None
+        # -----------------------------------
+
         values = []
         errors = []
         for model in models:
@@ -2087,25 +2220,31 @@ def plot_best_lag_summary(
             values.append(mean_value)
             errors.append(display_error)
 
-            color = colors[model]
+            # Assign color: highlight if it's the winner of THIS subplot
+            is_best = model == best_model_in_task
+            current_color = BEST_COLOR if is_best else neutral_color
+
+            hatch = model_bar_textures.get(model, "")
             x_position = x_positions[models.index(model)]
+            edge_color = "#333333" if (hatch or is_best) else current_color
+            line_width = 0.8 if (hatch or is_best) else 0.0
+
             if plot_style == "bar":
                 ax.bar(
                     [x_position],
                     [mean_value - bar_start],
                     bottom=bar_start,
                     yerr=[display_error] if show_bar_error_bars else None,
-                    error_kw={
-                        "elinewidth": 1.0,
-                        "capsize": 3,
-                        "capthick": 1.0,
-                    },
-                    color=color,
-                    edgecolor=color,
+                    error_kw={"elinewidth": 1.0, "capsize": 3, "capthick": 1.0},
+                    color=current_color,
+                    edgecolor=edge_color,
+                    linewidth=line_width,
+                    hatch=hatch,
                     width=0.7,
-                    zorder=3,
+                    zorder=3 if is_best else 2,
                 )
             else:
+                pt_alpha = 0.7 if is_best else 0.3
                 if fold_values:
                     jitter = (
                         np.linspace(-0.18, 0.18, len(fold_values))
@@ -2115,8 +2254,8 @@ def plot_best_lag_summary(
                     ax.scatter(
                         x_position + jitter,
                         fold_values,
-                        color=color,
-                        alpha=0.38,
+                        color=current_color,
+                        alpha=pt_alpha,
                         s=28,
                         edgecolors="none",
                         zorder=2,
@@ -2125,18 +2264,19 @@ def plot_best_lag_summary(
                     ax.scatter(
                         [x_position],
                         [summary_value],
-                        color=color,
-                        alpha=0.38,
+                        color=current_color,
+                        alpha=pt_alpha,
                         s=28,
                         edgecolors="none",
                         zorder=2,
                     )
+
                 ax.errorbar(
                     [x_position],
                     [mean_value],
                     yerr=[sem],
                     fmt="none",
-                    ecolor=color,
+                    ecolor=current_color,
                     elinewidth=1.6,
                     capsize=4,
                     capthick=1.6,
@@ -2146,18 +2286,18 @@ def plot_best_lag_summary(
                     mean_value,
                     x_position - 0.24,
                     x_position + 0.24,
-                    color=color,
-                    linewidth=4.0,
+                    color=current_color,
+                    linewidth=4.0 if is_best else 2.0,
                     zorder=4,
                 )
 
-        label = (
+        # Standard axis formatting
+        ax.set_title(display_task_name(config, task))
+        ax.set_ylabel(
             str(task_summary["metric_label"].iloc[0])
-            if task_summary["metric_label"].nunique() == 1
+            if not task_summary.empty
             else "Metric"
         )
-        ax.set_title(display_task_name(config, task))
-        ax.set_ylabel(label)
         ax.set_xticks(x_positions)
         ax.set_xticklabels(
             [display_model_name(config, model) for model in models],
@@ -2169,6 +2309,7 @@ def plot_best_lag_summary(
         if plot_style == "bar":
             ax.axhline(bar_start, color="#333333", linewidth=0.8, alpha=0.75)
         apply_metric_ylim(ax, metric)
+
         if show_significance and condition_results is not None:
             comparisons = best_lag_significance_tests(
                 task_summary,
@@ -2176,35 +2317,48 @@ def plot_best_lag_summary(
                 metric,
                 correct_multiple_comparisons=correct_significance,
             )
-            draw_significance_annotations(
-                ax,
-                comparisons,
-                models,
-                values,
-                errors,
+            draw_significance_annotations(ax, comparisons, models, values, errors)
+
+    # --- LEGEND ---
+    # In this mode, the legend shows the "original" colors so the reader knows
+    # what the colors mean when they do appear as highlights.
+    if plot_style == "bar":
+        handles = [
+            plt.Rectangle(
+                (0, 0),
+                1,
+                1,
+                facecolor=colors[model],
+                edgecolor=(
+                    "#333333" if model_bar_textures.get(model, "") else colors[model]
+                ),
+                linewidth=0.8 if model_bar_textures.get(model, "") else 0.0,
+                hatch=model_bar_textures.get(model, ""),
+                label=display_model_name(config, model),
             )
+            for model in models
+        ]
+    else:
+        handles = [
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="-",
+                color=colors[model],
+                markerfacecolor=colors[model],
+                markeredgecolor="none",
+                linewidth=3,
+                markersize=6,
+                label=display_model_name(config, model),
+            )
+            for model in models
+        ]
 
-    plot_group_score_axes(layout, summary, models, colors, config)
-
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            linestyle="-",
-            color=colors[model],
-            markerfacecolor=colors[model],
-            markeredgecolor="none",
-            linewidth=3,
-            markersize=6,
-            label=display_model_name(config, model),
-        )
-        for model in models
-    ]
     fig.text(
         0.01,
         0.985,
-        condition.replace("_", " ").title(),
+        display_condition_name(condition),
         ha="left",
         va="top",
         fontsize=plt.rcParams["axes.titlesize"],
@@ -2219,16 +2373,6 @@ def plot_best_lag_summary(
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
     draw_grouped_task_backgrounds(layout, config)
     save_figure(fig, output_dir / f"best_lag_summary_{condition}", formats)
-    if include_overall_scores(config):
-        plot_overall_score_summary(
-            summary,
-            output_dir,
-            formats,
-            colors,
-            config,
-            suffix=condition,
-            title=f"{condition.replace('_', ' ').title()} Overall Score",
-        )
 
 
 def plot_combined_best_lag_summary(
@@ -2283,6 +2427,7 @@ def plot_combined_best_lag_summary(
         "super_subject": "",
         "per_subject": "///",
     }
+    model_bar_textures = best_lag_model_bar_textures(config)
 
     for task, ax in layout.task_axes.items():
         task_summary = summary[summary["task"] == task]
@@ -2295,7 +2440,7 @@ def plot_combined_best_lag_summary(
             condition_offset = float(condition_offset_by_name[condition])
             marker = condition_markers.get(condition, "D")
             linestyle = condition_linestyles.get(condition, ":")
-            hatch = condition_hatches.get(condition, "\\\\")
+            condition_hatch = condition_hatches.get(condition, "\\\\")
 
             for model_idx, model in enumerate(models):
                 match = condition_summary[condition_summary["model"] == model]
@@ -2316,6 +2461,7 @@ def plot_combined_best_lag_summary(
                 display_error = sem if fold_values else summary_std_error(match)
                 color = colors[model]
                 x_position = model_idx + condition_offset
+                hatch = f"{model_bar_textures.get(model, '')}{condition_hatch}"
 
                 if plot_style == "bar":
                     ax.bar(
@@ -2413,21 +2559,38 @@ def plot_combined_best_lag_summary(
 
     plot_combined_group_score_axes(layout, summary, models, conditions, colors, config)
 
-    model_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            linestyle="-",
-            color=colors[model],
-            markerfacecolor=colors[model],
-            markeredgecolor="none",
-            linewidth=3,
-            markersize=6,
-            label=display_model_name(config, model),
-        )
-        for model in models
-    ]
+    if plot_style == "bar":
+        model_handles = [
+            plt.Rectangle(
+                (0, 0),
+                1,
+                1,
+                facecolor=colors[model],
+                edgecolor=(
+                    "#333333" if model_bar_textures.get(model, "") else colors[model]
+                ),
+                linewidth=0.8 if model_bar_textures.get(model, "") else 0.0,
+                hatch=model_bar_textures.get(model, ""),
+                label=display_model_name(config, model),
+            )
+            for model in models
+        ]
+    else:
+        model_handles = [
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="-",
+                color=colors[model],
+                markerfacecolor=colors[model],
+                markeredgecolor="none",
+                linewidth=3,
+                markersize=6,
+                label=display_model_name(config, model),
+            )
+            for model in models
+        ]
     if plot_style == "bar":
         condition_handles = [
             plt.Rectangle(
@@ -2437,7 +2600,7 @@ def plot_combined_best_lag_summary(
                 facecolor="white",
                 edgecolor="#333333",
                 hatch=condition_hatches.get(condition, "\\\\"),
-                label=condition.replace("_", " ").title(),
+                label=display_condition_name(condition),
             )
             for condition in conditions
         ]
@@ -2453,7 +2616,7 @@ def plot_combined_best_lag_summary(
                 markeredgecolor="#333333",
                 linewidth=2,
                 markersize=6,
-                label=condition.replace("_", " ").title(),
+                label=display_condition_name(condition),
             )
             for condition in conditions
         ]
@@ -2487,6 +2650,164 @@ def plot_combined_best_lag_summary(
         )
 
 
+def plot_baseline_condition_comparison(
+    summary: pd.DataFrame,
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    output_dir: Path,
+    formats: Sequence[str],
+    config: Mapping | None = None,
+    *,
+    baseline_model: str = "baseline",
+) -> None:
+    if summary.empty or "condition" not in summary.columns:
+        return
+
+    config = config or {}
+    available_conditions = set(str(condition) for condition in summary["condition"])
+    conditions = [
+        condition for condition in CONDITIONS if condition in available_conditions
+    ]
+    if "super_subject" not in conditions or "per_subject" not in conditions:
+        return
+
+    baseline_summary = summary[
+        (summary["model"] == baseline_model)
+        & (summary["condition"].isin(("super_subject", "per_subject")))
+    ].copy()
+    if baseline_summary.empty:
+        return
+
+    condition_counts = baseline_summary.groupby("task")["condition"].nunique()
+    tasks = sorted(condition_counts[condition_counts == 2].index)
+    if not tasks:
+        return
+
+    layout = create_grouped_task_figure(
+        config,
+        tasks,
+        figsize=(18, 8),
+        hspace=0.5,
+    )
+    fig = layout.fig
+    x_positions = np.arange(2, dtype=float)
+    condition_labels = {
+        "super_subject": "Super",
+        "per_subject": "Single",
+    }
+    loser_color = "#9A9A9A"
+
+    for task, ax in layout.task_axes.items():
+        task_summary = baseline_summary[baseline_summary["task"] == task]
+        metric = metric_config_from_summary(task_summary)
+        bar_start = bar_start_for_task(config, task)
+        by_condition = {
+            str(row["condition"]): row for row in task_summary.to_dict("records")
+        }
+        values = {
+            condition: float(by_condition[condition]["value"])
+            for condition in ("super_subject", "per_subject")
+        }
+        best_condition = (
+            max(values, key=values.get)
+            if metric.higher_is_better
+            else min(values, key=values.get)
+        )
+
+        for condition_idx, condition in enumerate(("super_subject", "per_subject")):
+            item = by_condition[condition]
+            condition_results = loaded.get(condition, {}).get(task, {})
+            fold_values = best_lag_fold_values(
+                condition_results,
+                baseline_model,
+                item["lag"],
+                metric,
+            )
+            mean_value = (
+                float(np.nanmean(fold_values)) if fold_values else values[condition]
+            )
+            display_error = (
+                standard_error(fold_values)
+                if fold_values
+                else summary_std_error(pd.DataFrame([item]))
+            )
+            color = BEST_COLOR if condition == best_condition else loser_color
+            edgecolor = "#333333" if condition == best_condition else loser_color
+            ax.bar(
+                [x_positions[condition_idx]],
+                [mean_value - bar_start],
+                bottom=bar_start,
+                yerr=[display_error] if display_error > 0 else None,
+                error_kw={
+                    "elinewidth": 1.0,
+                    "capsize": 2.5,
+                    "capthick": 1.0,
+                },
+                color=color,
+                edgecolor=edgecolor,
+                linewidth=0.8,
+                width=0.62,
+                zorder=3,
+            )
+
+        label = (
+            str(task_summary["metric_label"].iloc[0])
+            if task_summary["metric_label"].nunique() == 1
+            else "Metric"
+        )
+        ax.set_title(display_task_name(config, task))
+        ax.set_ylabel(label)
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(
+            [
+                condition_labels[condition]
+                for condition in ("super_subject", "per_subject")
+            ]
+        )
+        ax.grid(axis="y", alpha=0.25)
+        plot_chance_level(ax, metric)
+        ax.axhline(bar_start, color="#333333", linewidth=0.8, alpha=0.75)
+        apply_metric_ylim(ax, metric)
+
+    model_name = display_model_name(config, baseline_model)
+    fig.text(
+        0.01,
+        0.985,
+        f"{model_name} Single- vs Super-Subject",
+        ha="left",
+        va="top",
+        fontsize=plt.rcParams["axes.titlesize"],
+    )
+    fig.legend(
+        handles=[
+            plt.Rectangle(
+                (0, 0),
+                1,
+                1,
+                facecolor=BEST_COLOR,
+                edgecolor="#333333",
+                linewidth=0.8,
+                label="Better",
+            ),
+            plt.Rectangle(
+                (0, 0),
+                1,
+                1,
+                facecolor=loser_color,
+                edgecolor=loser_color,
+                linewidth=0.8,
+                label="Lower bar",
+            ),
+        ],
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=2,
+        frameon=False,
+    )
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
+    draw_grouped_task_backgrounds(layout, config)
+    save_figure(fig, output_dir / "baseline_condition_comparison", formats)
+
+
 def plot_lag_curves(
     loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
     config: Mapping,
@@ -2494,23 +2815,28 @@ def plot_lag_curves(
     formats: Sequence[str],
     colors: Mapping[str, str],
 ) -> None:
-    baseline_model = "baseline"
-    baseline_tasks = sorted(
+    selected_models = lag_curve_models(config)
+    selected_model_set = set(selected_models)
+    lag_tasks = sorted(
         {
             task
             for condition_results in loaded.values()
             for task, model_results in condition_results.items()
-            if baseline_model in model_results
+            if selected_model_set.intersection(model_results)
         }
     )
-    if not baseline_tasks:
+    if not lag_tasks:
         return
 
-    layout = create_grouped_task_figure(config, baseline_tasks)
+    layout = create_grouped_task_figure(config, lag_tasks)
     fig = layout.fig
     condition_styles = {
         "super_subject": "-",
         "per_subject": "-",
+    }
+    multi_model_condition_styles = {
+        "super_subject": "-",
+        "per_subject": "--",
     }
     condition_colors = {
         "super_subject": "#1F4E79",
@@ -2519,35 +2845,51 @@ def plot_lag_curves(
 
     for task, ax in layout.task_axes.items():
         metric = get_metric_config(config, task)
-        for condition in CONDITIONS:
-            df = loaded.get(condition, {}).get(task, {}).get(baseline_model)
-            if df is None or metric.column not in df.columns:
-                continue
-            curve = curve_for_metric(df, metric)
-            condition_color = condition_colors.get(
-                condition, colors.get(baseline_model, DEFAULT_COLORS[baseline_model])
-            )
-            ax.plot(
-                curve["lags"],
-                curve[metric.column],
-                linestyle=condition_styles.get(condition, "-"),
-                linewidth=1.8,
-                label=condition.replace("_", " ").title(),
-                color=condition_color,
-            )
-            errors = lag_curve_error_values(df.loc[curve.index], metric)
-            if errors is not None:
-                y_values = curve[metric.column].to_numpy(dtype=float)
-                error_values = errors.to_numpy(dtype=float)
-                ax.fill_between(
+        for condition in config.get("plotting", {}).get(
+            "lag_curve_conditions", CONDITIONS
+        ):
+            for model in selected_models:
+                df = loaded.get(condition, {}).get(task, {}).get(model)
+                if df is None or metric.column not in df.columns:
+                    continue
+                curve = curve_for_metric(df, metric)
+                if len(selected_models) == 1:
+                    line_color = condition_colors.get(
+                        condition,
+                        colors.get(model, DEFAULT_COLORS.get(model, "#333333")),
+                    )
+                    line_label = display_condition_name(condition)
+                else:
+                    line_color = colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+                    line_label = (
+                        f"{display_model_name(config, model)} "
+                        f"{display_condition_name(condition)}"
+                    )
+                ax.plot(
                     curve["lags"],
-                    y_values - error_values,
-                    y_values + error_values,
-                    color=condition_color,
-                    alpha=0.16,
-                    linewidth=0,
-                    zorder=1,
+                    curve[metric.column],
+                    linestyle=(
+                        multi_model_condition_styles
+                        if len(selected_models) > 1
+                        else condition_styles
+                    ).get(condition, "-"),
+                    linewidth=1.8,
+                    label=line_label,
+                    color=line_color,
                 )
+                errors = lag_curve_error_values(df.loc[curve.index], metric)
+                if errors is not None:
+                    y_values = curve[metric.column].to_numpy(dtype=float)
+                    error_values = errors.to_numpy(dtype=float)
+                    ax.fill_between(
+                        curve["lags"],
+                        y_values - error_values,
+                        y_values + error_values,
+                        color=line_color,
+                        alpha=0.16,
+                        linewidth=0,
+                        zorder=1,
+                    )
 
         ax.set_title(display_task_name(config, task))
         ax.set_xlabel("Lag relative to word onset (ms)")
@@ -2557,27 +2899,43 @@ def plot_lag_curves(
         ax.grid(alpha=0.25)
         apply_metric_ylim(ax, metric)
 
-    handles = [
-        plt.Line2D(
-            [0],
-            [0],
-            color=condition_colors.get(
-                condition, colors.get(baseline_model, DEFAULT_COLORS[baseline_model])
-            ),
-            linestyle=condition_styles.get(condition, "-"),
-            linewidth=1.8,
-            label=condition.replace("_", " ").title(),
-        )
-        for condition in CONDITIONS
-        if any(
-            baseline_model in loaded.get(condition, {}).get(task, {})
-            for task in baseline_tasks
-        )
-    ]
+    handles = []
+    for condition in CONDITIONS:
+        for model in selected_models:
+            if not any(
+                model in loaded.get(condition, {}).get(task, {}) for task in lag_tasks
+            ):
+                continue
+            if len(selected_models) == 1:
+                color = condition_colors.get(
+                    condition,
+                    colors.get(model, DEFAULT_COLORS.get(model, "#333333")),
+                )
+                label = display_condition_name(condition)
+            else:
+                color = colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+                label = (
+                    f"{display_model_name(config, model)} "
+                    f"{display_condition_name(condition)}"
+                )
+            handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color=color,
+                    linestyle=(
+                        multi_model_condition_styles
+                        if len(selected_models) > 1
+                        else condition_styles
+                    ).get(condition, "-"),
+                    linewidth=1.8,
+                    label=label,
+                )
+            )
     fig.text(
         0.01,
         0.985,
-        f"{display_model_name(config, baseline_model)} Lag Curves",
+        "Lag Curves",
         ha="left",
         va="top",
         fontsize=plt.rcParams["axes.titlesize"],
@@ -2843,9 +3201,11 @@ def ordered_tasks_by_group_average(
     group_order = sorted(
         group_means.index,
         key=lambda group: (
-            float(group_means.loc[group])
-            if pd.notna(group_means.loc[group])
-            else float("inf"),
+            (
+                float(group_means.loc[group])
+                if pd.notna(group_means.loc[group])
+                else float("inf")
+            ),
             str(group),
         ),
     )
@@ -2862,14 +3222,329 @@ def ordered_tasks_by_group_average(
             sorted(
                 task_means.index,
                 key=lambda task: (
-                    float(task_means.loc[task])
-                    if pd.notna(task_means.loc[task])
-                    else float("inf"),
+                    (
+                        float(task_means.loc[task])
+                        if pd.notna(task_means.loc[task])
+                        else float("inf")
+                    ),
                     str(task),
                 ),
             )
         )
     return ordered_tasks
+
+
+def plot_peak_profile_pyramid(
+    profile: pd.DataFrame,
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+) -> None:
+    import matplotlib.gridspec as gridspec
+
+    # 1. Filter for super_subject only
+    profile = profile[profile["condition"] == "super_subject"].copy()
+    if profile.empty:
+        return
+
+    numeric_cols = [
+        "peak_lag",
+        "half_peak_width",
+        "ramp_duration",
+        "decay_duration",
+        "ramp_slope",
+        "decay_slope",
+    ]
+    for col in numeric_cols:
+        profile[col] = pd.to_numeric(profile[col], errors="coerce")
+
+    metric_grid = [
+        [
+            ("ramp_duration", "Ramp Duration (ms)"),
+            ("decay_duration", "Decay Duration (ms)"),
+        ],
+        [("ramp_slope", "Ramp Slope"), ("decay_slope", "Decay Slope")],
+    ]
+
+    tasks = profile["task"].unique()
+    group_by_task = task_group_lookup(config, tasks)
+    background_colors = task_group_background_colors(config)
+    fallback_color = "#E8E8E8"
+    profile["group"] = profile["task"].map(lambda t: group_by_task.get(str(t), "Other"))
+
+    fig = plt.figure(figsize=(14, 14))
+    gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1], hspace=0.4, wspace=0.25)
+
+    # --- TOP OF PYRAMID: Mean Peak Lag ---
+    ax_top = fig.add_subplot(gs[0, :])
+    peak_sort_order = (
+        profile.groupby("group")["peak_lag"].mean().sort_values().index.tolist()
+    )
+
+    for i, group in enumerate(peak_sort_order):
+        group_data = profile[profile["group"] == group].dropna(subset=["peak_lag"])
+        if group_data.empty:
+            continue
+
+        ax_top.bar(
+            i,
+            group_data["peak_lag"].mean(),
+            color=background_colors.get(group, fallback_color),
+            alpha=0.7,
+            edgecolor="#333333",
+            linewidth=0.8,
+            zorder=2,
+        )
+
+        rng = np.random.default_rng(i)
+        ax_top.scatter(
+            np.full(len(group_data), i) + rng.uniform(-0.15, 0.15, len(group_data)),
+            group_data["peak_lag"],
+            color="white",
+            edgecolor="#333333",
+            linewidth=0.6,
+            s=35,
+            zorder=3,
+        )
+
+    ax_top.set_title(
+        "Mean Peak Lag", fontweight="bold", fontsize=PLOT_TITLE_FONTSIZE, pad=10
+    )
+    ax_top.set_ylabel("Time (ms)", fontweight="bold")
+    ax_top.set_xticks(range(len(peak_sort_order)))
+    ax_top.set_xticklabels(peak_sort_order, rotation=25, ha="right", fontsize=9)
+    ax_top.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+
+    # --- BOTTOM 2x2 GRID ---
+    axes_map = {}  # To store axes for limit adjustments
+    sort_metric_col = ["ramp_duration", "decay_duration"]
+
+    for col_idx in range(2):
+        duration_col = metric_grid[0][col_idx][0]
+        column_sort_order = (
+            profile[profile[duration_col].notna()]
+            .groupby("group")[sort_metric_col[col_idx]]
+            .mean()
+            .sort_values()
+            .index.tolist()
+        )
+
+        for row_idx in range(2):
+            ax = fig.add_subplot(gs[row_idx + 1, col_idx])
+            axes_map[(row_idx, col_idx)] = ax
+            value_column, ylabel = metric_grid[row_idx][col_idx]
+
+            for i, group in enumerate(column_sort_order):
+                group_data = profile[profile["group"] == group].dropna(
+                    subset=[value_column]
+                )
+                if group_data.empty:
+                    continue
+
+                ax.bar(
+                    i,
+                    group_data[value_column].mean(),
+                    color=background_colors.get(group, fallback_color),
+                    alpha=0.7,
+                    edgecolor="#333333",
+                    linewidth=0.8,
+                    zorder=2,
+                )
+
+                rng = np.random.default_rng(i + 100)
+                ax.scatter(
+                    np.full(len(group_data), i)
+                    + rng.uniform(-0.15, 0.15, len(group_data)),
+                    group_data[value_column],
+                    color="white",
+                    edgecolor="#333333",
+                    linewidth=0.6,
+                    s=35,
+                    zorder=3,
+                )
+
+            ax.set_ylabel(ylabel, fontweight="bold", fontsize=10)
+            ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+            ax.set_xticks(range(len(column_sort_order)))
+
+            if row_idx == 1:
+                ax.set_xticklabels(
+                    column_sort_order, rotation=25, ha="right", fontsize=9
+                )
+            else:
+                ax.set_xticklabels([])
+                side = "Ramp" if col_idx == 0 else "Decay"
+                ax.set_title(
+                    f"{side} Metrics",
+                    fontweight="bold",
+                    fontsize=PLOT_TITLE_FONTSIZE,
+                    pad=10,
+                )
+
+    # --- AXIS SYNCHRONIZATION ---
+
+    # 1. Share Y-axis for Duration row (Row 1)
+    duration_max = (
+        max(profile["ramp_duration"].max(), profile["decay_duration"].max()) * 1.1
+    )
+    axes_map[(0, 0)].set_ylim(0, duration_max)
+    axes_map[(0, 1)].set_ylim(0, duration_max)
+
+    # 2. Symmetric magnitude for Slope row (Row 2)
+    # We find the absolute max magnitude across both ramp and decay slopes
+    slope_mag = (
+        max(profile["ramp_slope"].abs().max(), profile["decay_slope"].abs().max()) * 1.1
+    )
+    if not np.isnan(slope_mag):
+        axes_map[(1, 0)].set_ylim(-slope_mag, slope_mag)
+        axes_map[(1, 1)].set_ylim(-slope_mag, slope_mag)
+        # Add a zero line for reference on the slope plots
+        axes_map[(1, 0)].axhline(0, color="black", linewidth=0.8, zorder=1)
+        axes_map[(1, 1)].axhline(0, color="black", linewidth=0.8, zorder=1)
+
+    # Final Titles and Save
+    model = str(profile["model"].iloc[0])
+    fig.suptitle(
+        f"{display_model_name(config, model)}: Peak & Ramp/Decay Profile",
+        fontsize=PLOT_TITLE_FONTSIZE,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    save_figure(fig, output_dir / "peak_pyramid_summary", formats)
+
+
+def plot_peak_profile_grid_2x2_column_sorted(
+    profile: pd.DataFrame,
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+) -> None:
+    # 1. Filter for super_subject only
+    profile = profile[profile["condition"] == "super_subject"].copy()
+    if profile.empty:
+        return
+
+    numeric_cols = [
+        "half_peak_width",
+        "ramp_duration",
+        "decay_duration",
+        "ramp_slope",
+        "decay_slope",
+    ]
+    for col in numeric_cols:
+        profile[col] = pd.to_numeric(profile[col], errors="coerce")
+
+    # [Row][Column]
+    metric_grid = [
+        [
+            ("ramp_duration", "Ramp Duration (ms)"),
+            ("decay_duration", "Decay Duration (ms)"),
+        ],
+        [("ramp_slope", "Ramp Slope"), ("decay_slope", "Decay Slope")],
+    ]
+
+    tasks = profile["task"].unique()
+    group_by_task = task_group_lookup(config, tasks)
+    background_colors = task_group_background_colors(config)
+    fallback_color = "#E8E8E8"
+    profile["group"] = profile["task"].map(lambda t: group_by_task.get(str(t), "Other"))
+
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(14, 9),  # Slightly narrower to bring plots closer
+        sharex=False,  # We handle ticks manually to ensure sort consistency
+    )
+
+    sort_metric_col = ["ramp_duration", "decay_duration"]
+    for col_idx in range(2):
+        # Determine the metric to sort by for THIS column
+        # If col 0 (Ramp), we check ramp data; if col 1 (Decay), we check decay data.
+        # We filter for non-null values of the duration metric in this column first
+        duration_col = metric_grid[0][col_idx][0]
+        mask = profile[duration_col].notna()
+
+        # Calculate sort order based on ramp/decay duration for groups present in this column
+        column_sort_order = (
+            profile[mask]
+            .groupby("group")[sort_metric_col[col_idx]]
+            .mean()
+            .sort_values()
+            .index.tolist()
+        )
+
+        for row_idx in range(2):
+            ax = axes[row_idx, col_idx]
+            value_column, ylabel = metric_grid[row_idx][col_idx]
+
+            for i, group in enumerate(column_sort_order):
+                group_data = profile[profile["group"] == group].dropna(
+                    subset=[value_column]
+                )
+                if group_data.empty:
+                    continue
+
+                mean_val = group_data[value_column].mean()
+                color = background_colors.get(group, fallback_color)
+
+                ax.bar(
+                    i,
+                    mean_val,
+                    color=color,
+                    alpha=0.7,
+                    edgecolor="#333333",
+                    linewidth=0.8,
+                    zorder=2,
+                )
+
+                rng = np.random.default_rng(i)
+                x_jitter = rng.uniform(-0.15, 0.15, size=len(group_data))
+                ax.scatter(
+                    np.full(len(group_data), i) + x_jitter,
+                    group_data[value_column],
+                    color="white",
+                    edgecolor="#333333",
+                    linewidth=0.6,
+                    s=35,
+                    zorder=3,
+                )
+
+            # Formatting
+            ax.set_ylabel(ylabel, fontweight="bold", fontsize=10)
+            ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+            ax.set_xticks(range(len(column_sort_order)))
+
+            # X-labels only on bottom row
+            if row_idx == 1:
+                ax.set_xticklabels(
+                    column_sort_order, rotation=25, ha="right", fontsize=9
+                )
+            else:
+                ax.set_xticklabels([])
+                side = "Ramp" if col_idx == 0 else "Decay"
+                ax.set_title(
+                    f"{side} Metrics",
+                    fontweight="bold",
+                    fontsize=PLOT_TITLE_FONTSIZE,
+                    pad=10,
+                )
+
+    # Tighten the padding between subplots
+    # hspace = vertical space, wspace = horizontal space
+    plt.subplots_adjust(
+        left=0.08, right=0.95, bottom=0.12, top=0.90, wspace=0.25, hspace=0.35
+    )
+
+    model = str(profile["model"].iloc[0])
+    fig.suptitle(
+        f"{display_model_name(config, model)}: Ramp/Decay Summary",
+        fontsize=PLOT_TITLE_FONTSIZE,
+        fontweight="bold",
+    )
+
+    save_figure(fig, output_dir / "ramp_decay_2x2_fixed", formats)
 
 
 def plot_half_peak_profile_bars(
@@ -2904,9 +3579,13 @@ def plot_half_peak_profile_bars(
     group_by_task = task_group_lookup(config, tasks)
     background_colors = task_group_background_colors(config)
     fallback_color = background_colors.get("Other", "#E8E8E8")
-    conditions = [condition for condition in CONDITIONS if condition in set(profile["condition"])]
+    conditions = [
+        condition for condition in CONDITIONS if condition in set(profile["condition"])
+    ]
     conditions.extend(
-        sorted(set(str(condition) for condition in profile["condition"]) - set(conditions))
+        sorted(
+            set(str(condition) for condition in profile["condition"]) - set(conditions)
+        )
     )
     condition_offsets = (
         np.linspace(-0.11, 0.11, len(conditions))
@@ -2924,7 +3603,9 @@ def plot_half_peak_profile_bars(
         positions = {task: idx for idx, task in enumerate(ordered_tasks)}
 
         group_spans = []
-        for group in dict.fromkeys(group_by_task.get(task, "Other") for task in ordered_tasks):
+        for group in dict.fromkeys(
+            group_by_task.get(task, "Other") for task in ordered_tasks
+        ):
             group_positions = [
                 positions[task]
                 for task in ordered_tasks
@@ -2978,8 +3659,7 @@ def plot_half_peak_profile_bars(
         for condition, offset in zip(conditions, condition_offsets):
             condition_profile = profile[profile["condition"] == condition]
             by_task = {
-                str(row["task"]): row
-                for row in condition_profile.to_dict("records")
+                str(row["task"]): row for row in condition_profile.to_dict("records")
             }
             x_values = []
             y_values = []
@@ -3003,7 +3683,7 @@ def plot_half_peak_profile_bars(
                 edgecolor="#333333",
                 linewidth=0.7,
                 hatch=hatches.get(condition, "\\\\"),
-                label=condition.replace("_", " ").title(),
+                label=display_condition_name(condition),
                 zorder=3,
             )
 
@@ -3025,7 +3705,7 @@ def plot_half_peak_profile_bars(
             facecolor="white",
             edgecolor="#333333",
             hatch=hatches.get(condition, "\\\\"),
-            label=condition.replace("_", " ").title(),
+            label=display_condition_name(condition),
         )
         for condition in conditions
     ]
@@ -3087,7 +3767,9 @@ def plot_half_peak_profile(
     for task, ax in layout.task_axes.items():
         metric = get_metric_config(config, task)
         task_profile = profile[profile["task"] == task]
-        for condition in CONDITIONS:
+        for condition in config.get("plotting", {}).get(
+            "half_peak_profile_conditions", CONDITIONS
+        ):
             df = loaded.get(condition, {}).get(task, {}).get(model)
             if df is None or metric.column not in df.columns:
                 continue
@@ -3105,7 +3787,7 @@ def plot_half_peak_profile(
                 curve[metric.column],
                 color=color,
                 linewidth=1.7,
-                label=condition.replace("_", " ").title(),
+                label=display_condition_name(condition),
                 zorder=2,
             )
             ax.scatter(
@@ -3192,7 +3874,7 @@ def plot_half_peak_profile(
             marker=condition_markers.get(condition, "D"),
             linewidth=1.8,
             markersize=6,
-            label=condition.replace("_", " ").title(),
+            label=display_condition_name(condition),
         )
         for condition in CONDITIONS
         if condition in set(profile["condition"])
@@ -3799,7 +4481,7 @@ def brain_map_figsize(config: Mapping) -> tuple[float, float]:
     brain_config = per_region_brain_plot_config(config)
     configured = brain_config.get("figsize")
     if configured is None:
-        return (24, 10)
+        return (30, 13)
     if not isinstance(configured, Sequence) or isinstance(configured, str):
         raise ValueError(
             "plotting.per_region_brains.figsize must be a two-item sequence"
@@ -3821,24 +4503,29 @@ def add_brain_map_task_axes(
     if panel_count < 1:
         raise ValueError("Brain map panel_count must be at least 1")
 
-    cbar_width = bbox.width * 0.04
-    cbar_gap = bbox.width * 0.03
-    right_pad = bbox.width * 0.025
+    cbar_width = bbox.width * 0.065
+    cbar_gap = bbox.width * 0.015
+    right_pad = 0.0
     panel_area_width = bbox.width - cbar_width - cbar_gap - right_pad
-    gap = bbox.width * 0.04 if panel_count > 1 else 0.0
+    gap = bbox.width * 0.01 if panel_count > 1 else 0.0
     panel_width = (panel_area_width - gap * (panel_count - 1)) / panel_count
     axes = [
         fig.add_axes(
-            [bbox.x0 + idx * (panel_width + gap), bbox.y0, panel_width, bbox.height],
+            [
+                bbox.x0 + idx * (panel_width + gap),
+                bbox.y0 - bbox.height * 0.02,
+                panel_width,
+                bbox.height * 1.08,
+            ],
             projection="3d",
         )
         for idx in range(panel_count)
     ]
     colorbar_bounds = [
         bbox.x0 + panel_area_width + cbar_gap,
-        bbox.y0 + bbox.height * 0.15,
+        bbox.y0 + bbox.height * 0.08,
         cbar_width,
-        bbox.height * 0.7,
+        bbox.height * 0.84,
     ]
     return axes, colorbar_bounds
 
@@ -3936,19 +4623,15 @@ def plot_per_region_brains(
             continue
 
         left_only = ignore_right_hemisphere_for_brain_maps(config)
-        task_backgrounds = task_group_background_facecolors(
-            config,
-            [task for task, _region_results in task_items],
-        )
         layout = create_grouped_task_figure(
             config,
             [task for task, _region_results in task_items],
             figsize=brain_map_figsize(config),
-            hspace=0.5,
-            wspace=0.35,
+            hspace=0.32,
+            wspace=0.18,
         )
         fig = layout.fig
-        fig.subplots_adjust(left=0.03, right=0.985, bottom=0.07, top=0.88)
+        fig.subplots_adjust(left=0.02, right=0.99, bottom=0.055, top=0.9)
         colorbar_specs = []
         legend_regions = set()
 
@@ -4002,10 +4685,7 @@ def plot_per_region_brains(
                 )
                 set_brain_map_panel_background(
                     ax,
-                    composite_rgba_over_background(
-                        task_backgrounds.get(task, to_rgba("#E8E8E8", 0.5)),
-                        fig.get_facecolor(),
-                    ),
+                    fig.get_facecolor(),
                 )
                 set_brain_map_panel_title(ax, title)
                 _draw_surface_region_boundaries(
@@ -4048,11 +4728,26 @@ def plot_per_region_brains(
         for _task, metric, sm, colorbar_bounds in colorbar_specs:
             cbar_ax = fig.add_axes(colorbar_bounds)
             cbar = fig.colorbar(sm, cax=cbar_ax)
-            cbar.set_label(metric.label, fontsize=8, labelpad=4)
+            cbar.set_label(
+                metric.label,
+                fontsize=BRAIN_MAP_COLORBAR_LABEL_FONTSIZE,
+                labelpad=8,
+                weight="bold",
+            )
             cbar.ax.yaxis.set_label_position("left")
-            cbar.ax.tick_params(labelsize=7)
+            cbar.ax.tick_params(
+                labelsize=BRAIN_MAP_COLORBAR_TICK_FONTSIZE,
+                width=1.1,
+                length=4,
+            )
+            cbar.outline.set_linewidth(1.0)
 
-        draw_grouped_task_backgrounds(layout, config, label_axis_off_groups=True)
+        draw_grouped_task_backgrounds(
+            layout,
+            config,
+            label_axis_off_groups=True,
+            draw_backgrounds=False,
+        )
         save_figure(fig, output_dir / f"per_region_brains_{model}", formats)
 
     remove_legacy_per_region_brain_outputs(output_dir, per_region_results, formats)
@@ -4070,6 +4765,7 @@ def generate_paper_results(
     config = read_config(config_path)
     tasks_to_exclude = excluded_tasks(config)
     loaded = filter_loaded_tasks(load_results(config), tasks_to_exclude)
+    configured_valid_best_lags = valid_best_lags(config)
     per_region_results = filter_per_region_tasks(
         load_per_region_results(config),
         tasks_to_exclude,
@@ -4095,7 +4791,11 @@ def generate_paper_results(
         }
     }
     for condition, condition_results in loaded.items():
-        summary = best_lag_rows(condition_results, metrics)
+        summary = best_lag_rows(
+            condition_results,
+            metrics,
+            valid_lags=configured_valid_best_lags,
+        )
         if summary.empty:
             continue
         summary.insert(0, "condition", condition)
@@ -4136,6 +4836,13 @@ def generate_paper_results(
             colors,
             config,
         )
+        plot_baseline_condition_comparison(
+            combined_summary,
+            loaded,
+            output_dir,
+            formats,
+            config,
+        )
     write_baseline_region_peak_tables(
         baseline_region_peak_lag_rows(per_region_results, metrics),
         output_dir,
@@ -4158,6 +4865,19 @@ def generate_paper_results(
             colors,
         )
         plot_half_peak_profile_bars(
+            half_peak_profile,
+            config,
+            output_dir,
+            formats,
+        )
+        plot_peak_profile_grid_2x2_column_sorted(
+            half_peak_profile,
+            config,
+            output_dir,
+            formats,
+        )
+
+        plot_peak_profile_pyramid(
             half_peak_profile,
             config,
             output_dir,

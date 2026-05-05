@@ -9,7 +9,7 @@ import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, Optional, Sequence
 
 import yaml
 
@@ -19,6 +19,11 @@ DEFAULT_STEP = 25
 DEFAULT_REGIONS = ("EAC", "PC", "PRC", "IFG", "MTG", "ITG", "TPJ", "TP", "RIGHT")
 SCOPES = ("super_subject", "per_subject", "per_region")
 LAG_TRAINING_KEYS = {"lag", "min_lag", "max_lag", "lag_step_size"}
+TASK_KEY_ALIASES = {
+    "volume_level_decoding": "volume_level",
+    "whisper_embedding_decoding": "whisper_embedding",
+    "word_embedding_decoding": "word_embedding",
+}
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,9 @@ class RunMetadata:
     run_mode: str
     fingerprint: str
     subject_ids: tuple[str, ...]
+    model_key: Optional[str] = None
+    task_key: Optional[str] = None
+    has_config: bool = True
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,6 +114,11 @@ def normalize_run_mode(value) -> str:
     if "." in text:
         text = text.rsplit(".", 1)[-1]
     return text.strip().lower()
+
+
+def normalize_task_key(value: str) -> str:
+    task_key = str(value).removesuffix("_task")
+    return TASK_KEY_ALIASES.get(task_key, task_key)
 
 
 def scope_matches_run_mode(scope: str, run_mode: str) -> bool:
@@ -189,7 +202,45 @@ def metadata_for_run(run_dir: Path) -> RunMetadata | None:
         run_mode=run_mode,
         fingerprint=model_fingerprint(config),
         subject_ids=subject_ids_from_config(config),
+        task_key=normalize_task_key(str(task_name)),
     )
+
+
+def infer_cleaned_metadata(run_dir: Path) -> RunMetadata | None:
+    parts = run_dir.parts
+    try:
+        root_index = parts.index("cleaned-paper-results")
+    except ValueError:
+        return None
+
+    relative_parts = parts[root_index + 1 :]
+    if len(relative_parts) != 3:
+        return None
+
+    model_key, task_key, scope = relative_parts
+    run_mode = normalize_run_mode(scope)
+    if run_mode not in SCOPES:
+        return None
+    if not coverage_for_run(run_dir, run_mode):
+        return None
+
+    return RunMetadata(
+        path=run_dir,
+        task_name=f"{task_key}_task",
+        run_mode=run_mode,
+        fingerprint="",
+        subject_ids=(),
+        model_key=model_key,
+        task_key=task_key,
+        has_config=False,
+    )
+
+
+def metadata_for_path(run_dir: Path) -> RunMetadata | None:
+    metadata = metadata_for_run(run_dir)
+    if metadata is not None:
+        return metadata
+    return infer_cleaned_metadata(run_dir)
 
 
 def expected_lags(min_lag: int, max_lag: int, step: int) -> set[int]:
@@ -208,6 +259,15 @@ def discover_candidate_metadata(results_root: Path) -> list[RunMetadata]:
         metadata = metadata_for_run(config_path.parent)
         if metadata is not None:
             candidates.append(metadata)
+    if results_root.name == "cleaned-paper-results":
+        for scope_dir in sorted(
+            path
+            for path in results_root.glob("*/*/*")
+            if path.is_dir() and path.name in SCOPES
+        ):
+            metadata = infer_cleaned_metadata(scope_dir)
+            if metadata is not None:
+                candidates.append(metadata)
     return candidates
 
 
@@ -324,33 +384,57 @@ def expand_config(
                 configured_metadata = [
                     metadata
                     for run_dir in resolved_paths
-                    if (metadata := metadata_for_run(run_dir)) is not None
+                    if (metadata := metadata_for_path(run_dir)) is not None
                 ]
-                if not configured_metadata:
-                    print(f"Skipping {model}/{task}/{scope}: no readable configured config.yml")
-                    continue
-
-                task_names = {metadata.task_name for metadata in configured_metadata}
-                fingerprints = {metadata.fingerprint for metadata in configured_metadata}
-                run_modes = {metadata.run_mode for metadata in configured_metadata}
+                task_keys = {
+                    metadata.task_key or normalize_task_key(metadata.task_name)
+                    for metadata in configured_metadata
+                } or {str(task)}
+                fingerprints = {
+                    metadata.fingerprint
+                    for metadata in configured_metadata
+                    if metadata.has_config and metadata.fingerprint
+                }
+                run_modes = {metadata.run_mode for metadata in configured_metadata} or {scope}
                 current_coverage: dict[str, set[int]] = {}
                 for run_dir in resolved_paths:
                     merge_coverage(current_coverage, coverage_for_run(run_dir, scope))
 
+                matching_candidates = []
+                for candidate in candidates:
+                    if candidate.model_key is not None and candidate.model_key != str(model):
+                        continue
+                    candidate_task_key = candidate.task_key or normalize_task_key(candidate.task_name)
+                    if candidate_task_key not in task_keys and candidate_task_key != str(task):
+                        continue
+                    if (
+                        fingerprints
+                        and candidate.has_config
+                        and candidate.fingerprint not in fingerprints
+                    ):
+                        continue
+                    if candidate.run_mode not in run_modes or not scope_matches_run_mode(scope, candidate.run_mode):
+                        continue
+                    matching_candidates.append(candidate)
+
                 required = required_entities(scope, configured_metadata, current_coverage)
+                if not required and scope == "per_subject":
+                    subject_entities = set(current_coverage)
+                    for candidate in matching_candidates:
+                        subject_entities.update(coverage_for_run(candidate.path, scope))
+                    required = tuple(
+                        sorted(
+                            subject_entities,
+                            key=lambda item: int(item.removeprefix("subject_")),
+                        )
+                    )
                 if not missing_for_entities(current_coverage, required, desired_lags):
                     continue
 
                 existing_resolved = {path.resolve() for path in resolved_paths}
                 additions: list[Path] = []
-                for candidate in candidates:
+                for candidate in matching_candidates:
                     if candidate.path.resolve() in existing_resolved:
-                        continue
-                    if candidate.task_name not in task_names:
-                        continue
-                    if candidate.fingerprint not in fingerprints:
-                        continue
-                    if candidate.run_mode not in run_modes or not scope_matches_run_mode(scope, candidate.run_mode):
                         continue
 
                     candidate_coverage = coverage_for_run(candidate.path, scope)

@@ -49,6 +49,7 @@ from scripts.generate_paper_results import (
     resolve_nilearn_data_dir,
     select_best_lag,
     summary_wide,
+    valid_best_lags,
     write_baseline_region_peak_tables,
 )
 from scripts.migrate_fm_results import migrate
@@ -709,6 +710,50 @@ def test_select_best_lag_maximize_and_minimize():
     assert min_row["lags"] == 1
 
 
+def test_valid_best_lags_selects_only_allowed_lags():
+    condition_results = {
+        "task": {
+            "baseline": pd.DataFrame(
+                {"lags": [0, 150, 250], "score_mean": [0.20, 0.50, 0.99]}
+            ),
+            "diver": pd.DataFrame(
+                {"lags": [0.0, 150.0, 250.0], "score_mean": [0.60, 0.40, 0.95]}
+            ),
+        }
+    }
+
+    summary = best_lag_rows(
+        condition_results,
+        {"task": MetricConfig("score_mean", True, "Score")},
+        valid_lags=valid_best_lags({"plotting": {"valid_best_lags": [0, 150]}}),
+    )
+
+    lags_by_model = dict(zip(summary["model"], summary["lag"]))
+    assert lags_by_model == {"baseline": 150, "diver": 0.0}
+
+
+def test_missing_valid_best_lags_preserves_existing_selection_behavior():
+    assert valid_best_lags({}) is None
+    df = pd.DataFrame({"lags": [0, 150, 250], "score": [0.20, 0.50, 0.99]})
+
+    row = select_best_lag(df, MetricConfig("score", True, "Score"), valid_best_lags({}))
+
+    assert row["lags"] == 250
+
+
+def test_select_best_lag_raises_when_model_has_no_valid_best_lags():
+    df = pd.DataFrame({"lags": [250, 500], "score": [0.90, 0.95]})
+
+    with pytest.raises(ValueError, match="task 'task'.*model 'baseline'.*\\[0.0, 150.0\\]"):
+        select_best_lag(
+            df,
+            MetricConfig("score", True, "Score"),
+            valid_lags=(0.0, 150.0),
+            task="task",
+            model="baseline",
+        )
+
+
 def test_select_best_lag_uses_negated_metric_values():
     df = pd.DataFrame({"lags": [0, 1], "loss": [2.0, 1.0]})
 
@@ -716,6 +761,19 @@ def test_select_best_lag_uses_negated_metric_values():
 
     assert row["lags"] == 1
     assert row["loss"] == -1.0
+
+
+def test_select_best_lag_filters_before_negating_metric_values():
+    df = pd.DataFrame({"lags": [0, 150, 250], "loss": [10.0, 2.0, 1.0]})
+
+    row = select_best_lag(
+        df,
+        MetricConfig("loss", True, "Negative loss", negate=True),
+        valid_lags=(0.0, 150.0),
+    )
+
+    assert row["lags"] == 150
+    assert row["loss"] == -2.0
 
 
 def test_curve_for_metric_uses_negated_metric_values():
@@ -1039,10 +1097,68 @@ def test_plot_lag_curves_only_plots_baseline_conditions(tmp_path, monkeypatch):
     ]
     assert [line.get_label() for line in plotted_lines] == [
         "Super Subject",
-        "Per Subject",
+        "Single Subject",
     ]
     assert [line.get_color() for line in plotted_lines] == ["#1F4E79", "#2CA7A0"]
     assert [line.get_linestyle() for line in plotted_lines] == ["-", "-"]
+
+
+def test_plot_lag_curves_includes_configured_models(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_figure(fig, output_base, formats):
+        captured["fig"] = fig
+
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+    loaded = {
+        "super_subject": {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.5, 0.6]}),
+                "linear": pd.DataFrame({"lags": [-1, 0], "score": [0.4, 0.7]}),
+                "diver": pd.DataFrame({"lags": [-1, 0], "score": [0.1, 0.2]}),
+            }
+        },
+        "per_subject": {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [-1, 0], "score": [0.45, 0.65]}),
+                "linear": pd.DataFrame({"lags": [-1, 0], "score": [0.35, 0.75]}),
+            }
+        },
+    }
+    config = {
+        "plotting": {
+            "lag_curve_models": ["baseline", "linear"],
+            "model_display_names": {"baseline": "CNN", "linear": "Linear"},
+        },
+        "metrics": {
+            "task": {"column": "score", "higher_is_better": True, "label": "Score"}
+        },
+    }
+
+    plot_lag_curves(
+        loaded,
+        config,
+        tmp_path,
+        formats=["png"],
+        colors={"baseline": "#000000", "linear": "#ff00ff", "diver": "#ff0000"},
+    )
+
+    plotted_lines = [
+        line for line in captured["fig"].axes[0].lines if line.get_label()[0] != "_"
+    ]
+    assert [line.get_label() for line in plotted_lines] == [
+        "CNN Super Subject",
+        "Linear Super Subject",
+        "CNN Single Subject",
+        "Linear Single Subject",
+    ]
+    assert [line.get_color() for line in plotted_lines] == [
+        "#000000",
+        "#ff00ff",
+        "#000000",
+        "#ff00ff",
+    ]
+    assert [line.get_linestyle() for line in plotted_lines] == ["-", "-", "--", "--"]
 
 
 def test_region_gradient_colors_use_stable_low_to_high_order():
