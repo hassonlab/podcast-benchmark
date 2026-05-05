@@ -14,7 +14,7 @@ task_config:
     zero_phase: true
     allow_resample_audio: true
     window_size: 200.0
-    hop_size: 25.0
+    hop_size: 100.0
 training_params:
   batch_size: 512
   n_folds: 5
@@ -33,19 +33,13 @@ training_params:
   smaller_is_better: false
   ridge_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_regression_volume_level_per_subject
+  weight_decay: 0.001
+  learning_rate: 0.05
 model_spec:
-  constructor_name: ''
+  constructor_name: 'torch_linear_model'
   params:
-    alphas:
-    - 0.001
-    - 0.01
-    - 0.1
-    - 1.0
-    - 10.0
-    - 100.0
-    - 1000.0
-    cv: 5
-    backend: torch_cuda
-    fit_intercept: true
+    output_dim: 1
+    bias: true
+    activation: linear
+trial_name: ridge_regression_volume_level_per_subject
 run_mode: per_subject

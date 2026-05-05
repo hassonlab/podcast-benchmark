@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 
 from core import registry
+from models.shared_model_helpers import apply_activation
 
 
-class TorchRidgeModel(nn.Module):
-    """Simple linear ridge-like readout implemented in PyTorch.
+class TorchLinearModel(nn.Module):
+    """Simple linear readout implemented in PyTorch.
 
     Behavior:
       - Expects input shaped (B, C, T).
@@ -17,10 +18,17 @@ class TorchRidgeModel(nn.Module):
         Set `training_params.weight_decay` to the desired ridge lambda.
     """
 
-    def __init__(self, input_channels: int, output_dim: int, bias: bool = True):
+    def __init__(
+        self,
+        input_channels: int,
+        output_dim: int,
+        bias: bool = True,
+        activation: str = "linear",
+    ):
         super(TorchRidgeModel, self).__init__()
         self.input_channels = int(input_channels)
         self.output_dim = int(output_dim)
+        self.activation = activation
 
         self.time_pool = nn.AdaptiveAvgPool1d(1)
         self.linear = nn.Linear(self.input_channels, self.output_dim, bias=bias)
@@ -48,6 +56,8 @@ class TorchRidgeModel(nn.Module):
             )
 
         out = self.linear(x)
+
+        out = apply_activation(out, self.activation)
         # Squeeze final dim for scalar outputs
         if out.shape[1] == 1:
             return out.squeeze(1)
@@ -55,9 +65,10 @@ class TorchRidgeModel(nn.Module):
 
 
 @registry.register_model_constructor()
-def torch_ridge_model(model_params):
-    return TorchRidgeModel(
+def torch_linear_model(model_params):
+    return TorchLinearModel(
         input_channels=model_params["input_channels"],
         output_dim=model_params.get("embedding_dim", 1),
         bias=model_params.get("bias", True),
+        activation=model_params.get("activation", "linear"),
     )

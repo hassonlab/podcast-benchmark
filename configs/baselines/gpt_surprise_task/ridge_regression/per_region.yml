@@ -25,19 +25,13 @@ training_params:
   smaller_is_better: true
   ridge_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_regression_gpt_surprise_per_region
+  weight_decay: 0.001
+  learning_rate: 0.05
 model_spec:
-  constructor_name: ''
+  constructor_name: 'torch_linear_model'
   params:
-    alphas:
-    - 0.001
-    - 0.01
-    - 0.1
-    - 1.0
-    - 10.0
-    - 100.0
-    - 1000.0
-    cv: 5
-    backend: torch_cuda
-    fit_intercept: true
+    output_dim: 1
+    bias: true
+    activation: linear
+trial_name: ridge_regression_gpt_surprise_per_region
 run_mode: per_region

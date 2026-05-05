@@ -23,18 +23,13 @@ training_params:
   smaller_is_better: false
   ridge_logistic_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_logistic_regression_sentence_onset_per_subject
+  weight_decay: 0.001
+  learning_rate: 0.05
 model_spec:
-  constructor_name: ''
+  constructor_name: 'torch_linear_model'
   params:
-    Cs:
-    - 0.001
-    - 0.01
-    - 0.1
-    - 1.0
-    - 10.0
-    - 100.0
-    cv: 5
-    solver: lbfgs
-    max_iter: 1000
+    output_dim: 1
+    bias: true
+    activation: sigmoid
+trial_name: ridge_logistic_regression_sentence_onset_per_subject
 run_mode: per_subject
