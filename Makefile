@@ -23,8 +23,8 @@ CONFIG_OVERRIDES ?=
 
 # Specify a single config to use.
 # Usage:
-#   make train-config CONFIG=configs/baselines/word_embedding_decoding_task/neural_conv_decoder_gpt2_supersubject.yml
-#   make train-config CONFIG=configs/baselines/sentence_onset_task/neural_conv_decoder_per_subject.yml CONFIG_OVERRIDES='--training_params.epochs=5'
+#   make train-config CONFIG=configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_supersubject.yml
+#   make train-config CONFIG=configs/baselines/sentence_onset_task/neural_conv_decoder/per_subject.yml CONFIG_OVERRIDES='--training_params.epochs=5'
 train-config:
 	@if [ -z "$(CONFIG)" ]; then \
 		echo "CONFIG is required"; \

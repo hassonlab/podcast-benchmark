@@ -13,8 +13,10 @@ from scripts.generate_paper_results import (
     _draw_surface_region_labels,
     _surface_contour_map,
     bar_start_for_task,
+    baseline_condition_comparison_rows,
     baseline_region_peak_lag_rows,
     baseline_region_peak_wide,
+    best_lag_latex_table,
     best_lag_summary_plot_style,
     best_lag_significance_tests,
     best_lag_rows,
@@ -38,6 +40,7 @@ from scripts.generate_paper_results import (
     ordered_tasks_by_group_average,
     significance_label,
     normalize_region_name,
+    plot_atlas_region_electrodes,
     plot_best_lag_summary,
     plot_lag_curves,
     plot_per_region_brains,
@@ -732,6 +735,48 @@ def test_valid_best_lags_selects_only_allowed_lags():
     assert lags_by_model == {"baseline": 150, "diver": 0.0}
 
 
+def test_baseline_condition_comparison_rows_uses_all_baseline_lags():
+    loaded = {
+        "super_subject": {
+            "task": {
+                "baseline": pd.DataFrame(
+                    {"lags": [0, 150, 250], "score_mean": [0.20, 0.50, 0.99]}
+                ),
+                "diver": pd.DataFrame(
+                    {"lags": [0, 150, 250], "score_mean": [0.60, 0.70, 0.80]}
+                ),
+            }
+        },
+        "per_subject": {
+            "task": {
+                "baseline": pd.DataFrame(
+                    {"lags": [0, 150, 250], "score_mean": [0.30, 0.40, 0.95]}
+                ),
+                "diver": pd.DataFrame(
+                    {"lags": [0, 150, 250], "score_mean": [0.65, 0.75, 0.85]}
+                ),
+            }
+        },
+    }
+    metrics = {"task": MetricConfig("score_mean", True, "Score")}
+
+    filtered_summary = best_lag_rows(
+        loaded["super_subject"],
+        metrics,
+        valid_lags=valid_best_lags({"plotting": {"valid_best_lags": [0, 150]}}),
+    )
+    comparison_summary = baseline_condition_comparison_rows(loaded, metrics)
+
+    assert filtered_summary.loc[
+        filtered_summary["model"] == "baseline", "lag"
+    ].iloc[0] == 150
+    assert comparison_summary["model"].unique().tolist() == ["baseline"]
+    assert dict(zip(comparison_summary["condition"], comparison_summary["lag"])) == {
+        "super_subject": 250,
+        "per_subject": 250,
+    }
+
+
 def test_missing_valid_best_lags_preserves_existing_selection_behavior():
     assert valid_best_lags({}) is None
     df = pd.DataFrame({"lags": [0, 150, 250], "score": [0.20, 0.50, 0.99]})
@@ -1192,6 +1237,59 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
     plot_per_region_lag_curves(per_region_results, config, tmp_path, formats=["png"])
 
     assert (tmp_path / "per_region_lags_baseline.png").exists()
+
+
+def test_plot_atlas_region_electrodes_uses_left_sagittal_view(
+    tmp_path, monkeypatch
+):
+    from nilearn import plotting
+    import matplotlib.pyplot as plt
+
+    electrodes = pd.DataFrame(
+        [
+            {"x": -42.0, "y": -20.0, "z": 18.0, "region_group": "EAC"},
+            {"x": 42.0, "y": -18.0, "z": 24.0, "region_group": "RIGHT"},
+            {"x": 44.0, "y": -16.0, "z": 26.0, "region_group": "RIGHT"},
+            {"x": 0.0, "y": 0.0, "z": 0.0, "region_group": "unassigned"},
+        ]
+    )
+    display_modes = []
+    bar_labels = []
+    saved = []
+
+    class FakeDisplay:
+        def add_markers(self, *args, **kwargs):
+            pass
+
+    def fake_plot_glass_brain(*args, **kwargs):
+        display_modes.append(kwargs["display_mode"])
+        return FakeDisplay()
+
+    def capture_figure(fig, output_base, formats):
+        bar_labels.extend(
+            label.get_text() for label in fig.axes[-1].get_xticklabels()
+        )
+        saved.append((output_base, tuple(formats)))
+        plt.close(fig)
+
+    monkeypatch.setattr(
+        "scripts.generate_paper_results._load_region_electrodes",
+        lambda *args: electrodes,
+    )
+    monkeypatch.setattr(plotting, "plot_glass_brain", fake_plot_glass_brain)
+    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
+
+    plot_atlas_region_electrodes(
+        tmp_path,
+        formats=["png", "pdf"],
+        data_root=tmp_path,
+        nilearn_data_dir=tmp_path / "nilearn",
+        include_bad=False,
+    )
+
+    assert display_modes == ["l", "r"]
+    assert bar_labels == ["RIGHT", "STG"]
+    assert saved == [(tmp_path / "atlas_region_electrodes", ("png", "pdf"))]
 
 
 def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeypatch):
@@ -1701,8 +1799,27 @@ def test_summary_tables_bold_best_model_for_markdown_and_latex():
     markdown = summary_wide(summary, bold=True)
     latex = summary_wide(summary, bold=True, latex=True)
 
+    assert markdown.loc[0, "baseline"] == "0.500 (0 ms; -29%)"
     assert markdown.loc[0, "diver"] == "**0.700 (250 ms)**"
     assert latex.loc[0, "diver"] == "\\textbf{0.700 (250 ms)}"
+
+
+def test_best_lag_latex_table_includes_relative_percent_for_non_max_values():
+    summary = best_lag_rows(
+        {
+            "task": {
+                "baseline": pd.DataFrame({"lags": [0], "score": [0.5]}),
+                "diver": pd.DataFrame({"lags": [250], "score": [0.7]}),
+            }
+        },
+        {"task": MetricConfig("score", True, "Score")},
+    )
+    summary.insert(0, "condition", "super_subject")
+
+    table = best_lag_latex_table(summary, {})
+
+    assert r"0.500 (-29\%)" in table
+    assert r"\textbf{0.700}" in table
 
 
 def test_fm_dry_run_migration_mapping_into_current_style_run_dirs(tmp_path):

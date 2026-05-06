@@ -2,7 +2,7 @@
 # Visit https://bit.ly/cffinit to generate yours today!
 
 cff-version: 1.2.0
-title: ECoG Podcast Benchmark
+title: 'NeuroCast: Neural Decoding Benchmarks for Naturalistic Speech in Human ECoG'
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
@@ -16,7 +16,7 @@ authors:
   - given-names: Shamus
     family-names: Sim
     email: shamussim@gmail.com
-  - given-names: Arna
+  - given-names: Arnab
     family-names: Bhattacharjee
     email: arnab@princeton.edu
     affiliation: Princeton University

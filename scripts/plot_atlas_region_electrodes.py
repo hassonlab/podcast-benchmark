@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import to_hex
-from matplotlib.lines import Line2D
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -36,6 +35,17 @@ from utils.atlas_utils import (  # noqa: E402
 )
 
 OPENNEURO_BASE_URL = "https://s3.amazonaws.com/openneuro.org/ds005574"
+REGION_LEVEL_ORDER = (
+    "EAC",
+    "PC",
+    "PRC",
+    "IFG",
+    "MTG",
+    "ITG",
+    "TPJ",
+    "TP",
+    "RIGHT",
+)
 LOCALIZATION_PATTERNS = (
     r"sub-\d+/ieeg/sub-\d+_space-MNI152NLin2009aSym_electrodes\.tsv$",
     r"sub-\d+/ieeg/sub-\d+_space-MNI152NLin2009aSym_coordsystem\.json$",
@@ -230,45 +240,49 @@ def write_summaries(electrodes: pd.DataFrame, output_dir: Path) -> tuple[Path, P
     return assignments_path, counts_path
 
 
-def plot_electrodes(electrodes: pd.DataFrame, output_path: Path, dpi: int) -> None:
+def region_sort_key(region: str) -> tuple[int, str]:
+    if region in REGION_LEVEL_ORDER:
+        return (REGION_LEVEL_ORDER.index(region), region)
+    return (len(REGION_LEVEL_ORDER), region)
+
+
+def display_region_name(region: str) -> str:
+    return "STG" if region == "EAC" else region
+
+
+def create_electrode_region_figure(electrodes: pd.DataFrame) -> plt.Figure:
     from nilearn import plotting
 
-    groups = sorted(
-        electrodes["region_group"].unique(),
-        key=lambda name: (name == "unassigned", str(name).lower()),
+    electrodes = electrodes[electrodes["region_group"] != "unassigned"].copy()
+    counts = (
+        electrodes["region_group"]
+        .value_counts()
+        .sort_values(ascending=False, kind="mergesort")
     )
+    groups = list(counts.index)
     cmap = plt.get_cmap("tab20", max(len(groups), 1))
-    colors = {
-        group: ("#b8b8b8" if group == "unassigned" else to_hex(cmap(i)))
-        for i, group in enumerate(groups)
-    }
+    colors = {group: to_hex(cmap(i)) for i, group in enumerate(groups)}
 
-    assigned = electrodes[electrodes["region_group"] != "unassigned"]
-    counts = assigned["region_group"].value_counts().sort_values(ascending=True)
-
-    fig = plt.figure(figsize=(15, 10), constrained_layout=False)
+    fig = plt.figure(figsize=(13, 5.5), constrained_layout=False)
     grid = fig.add_gridspec(
-        2,
+        1,
         3,
-        height_ratios=[1.05, 0.95],
-        left=0.06,
-        right=0.98,
-        bottom=0.08,
-        top=0.82,
-        hspace=0.34,
-        wspace=0.14,
+        width_ratios=[1.15, 1.15, 0.95],
+        left=0.04,
+        right=0.985,
+        bottom=0.18,
+        top=0.86,
+        wspace=0.18,
     )
     axes = [
         fig.add_subplot(grid[0, 0]),
         fig.add_subplot(grid[0, 1]),
-        fig.add_subplot(grid[0, 2]),
     ]
-    bar_ax = fig.add_subplot(grid[1, :])
+    bar_ax = fig.add_subplot(grid[0, 2])
 
     views = [
-        ("Axial", "z"),
-        ("Coronal", "y"),
-        ("Sagittal", "x"),
+        ("Left", "l"),
+        ("Right", "r"),
     ]
 
     marker_coords = electrodes[["x", "y", "z"]].to_numpy(float)
@@ -285,34 +299,12 @@ def plot_electrodes(electrodes: pd.DataFrame, output_path: Path, dpi: int) -> No
         )
         for group in groups:
             mask = electrodes["region_group"] == group
-            size = 18 if group == "unassigned" else 34
             display.add_markers(
                 marker_coords[mask],
                 marker_color=colors[group],
-                marker_size=size,
-                alpha=0.45 if group == "unassigned" else 0.9,
+                marker_size=34,
+                alpha=0.9,
             )
-
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            linestyle="none",
-            markerfacecolor=colors[group],
-            markeredgecolor="none",
-            markersize=7,
-            label=f"{group} ({int((electrodes['region_group'] == group).sum())})",
-        )
-        for group in groups
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.925),
-        ncols=min(5, max(1, len(handles))),
-        frameon=False,
-    )
 
     if counts.empty:
         bar_ax.text(
@@ -327,14 +319,32 @@ def plot_electrodes(electrodes: pd.DataFrame, output_path: Path, dpi: int) -> No
         bar_ax.set_axis_off()
     else:
         bar_colors = [colors[group] for group in counts.index]
-        bar_ax.barh(counts.index, counts.values, color=bar_colors)
-        bar_ax.set_xlabel("Electrodes")
-        bar_ax.set_ylabel("Region group")
-        bar_ax.set_title("Assigned electrodes per region group")
+        x = np.arange(len(counts))
+        bar_ax.bar(x, counts.values, color=bar_colors)
+        bar_ax.set_xticks(x)
+        bar_ax.set_xticklabels(
+            [display_region_name(str(group)) for group in counts.index],
+            rotation=45,
+            ha="right",
+        )
+        bar_ax.set_ylabel("Electrodes")
+        bar_ax.set_title("Electrodes per region")
+        bar_ax.spines["top"].set_visible(False)
+        bar_ax.spines["right"].set_visible(False)
         for idx, value in enumerate(counts.values):
-            bar_ax.text(value + max(counts.max() * 0.01, 0.2), idx, str(value), va="center")
+            bar_ax.text(
+                idx,
+                value + max(counts.max() * 0.02, 0.2),
+                str(int(value)),
+                ha="center",
+            )
 
-    fig.suptitle("Destrieux Atlas Region Groups", fontsize=16, y=0.985)
+    fig.suptitle("Destrieux Atlas Region Electrodes", fontsize=16, y=0.97)
+    return fig
+
+
+def plot_electrodes(electrodes: pd.DataFrame, output_path: Path, dpi: int) -> None:
+    fig = create_electrode_region_figure(electrodes)
     fig.savefig(output_path, dpi=dpi)
     plt.close(fig)
 

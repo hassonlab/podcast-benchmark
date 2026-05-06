@@ -20,6 +20,8 @@ from matplotlib import patheffects
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize, to_hex, to_rgba
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter
 
 CONDITIONS = ("super_subject", "per_subject")
 PER_REGION_CONDITION = "per_region"
@@ -65,11 +67,20 @@ DEFAULT_COLORS = {
 BEST_COLOR = "#F58518"
 PLOT_TITLE_FONTSIZE = 18
 GROUP_TITLE_FONTSIZE = 20
+GROUP_TITLE_VERTICAL_PAD = 0.095
+GROUP_TITLE_TOP_INSET = 0.005
 BRAIN_MAP_COLORBAR_LABEL_FONTSIZE = 14
 BRAIN_MAP_COLORBAR_TICK_FONTSIZE = 12
+LAG_PLOT_AXIS_LABEL_FONTSIZE = 14
+LAG_PLOT_TICK_LABEL_FONTSIZE = 12
+BEST_LAG_AXIS_LABEL_FONTSIZE = 14
+BEST_LAG_TICK_LABEL_FONTSIZE = 12
 
 plt.rcParams["axes.titlesize"] = PLOT_TITLE_FONTSIZE
 plt.rcParams["figure.titlesize"] = PLOT_TITLE_FONTSIZE
+plt.rcParams["svg.fonttype"] = "none"
+plt.rcParams["pdf.fonttype"] = 42
+plt.rcParams["ps.fonttype"] = 42
 
 
 @dataclass(frozen=True)
@@ -604,6 +615,33 @@ def best_lag_rows(
     return pd.DataFrame(rows)
 
 
+def baseline_condition_comparison_rows(
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    metrics: Mapping[str, MetricConfig],
+    *,
+    baseline_model: str = "baseline",
+) -> pd.DataFrame:
+    summaries = []
+    for condition in CONDITIONS:
+        condition_results = {
+            task: {baseline_model: model_results[baseline_model]}
+            for task, model_results in loaded.get(condition, {}).items()
+            if baseline_model in model_results
+        }
+        if not condition_results:
+            continue
+
+        summary = best_lag_rows(condition_results, metrics)
+        if summary.empty:
+            continue
+        summary.insert(0, "condition", condition)
+        summaries.append(summary)
+
+    if not summaries:
+        return pd.DataFrame()
+    return pd.concat(summaries, ignore_index=True)
+
+
 def best_region_lag_rows(
     region_results: Mapping[str, pd.DataFrame],
     metric: MetricConfig,
@@ -680,8 +718,190 @@ def best_model_by_task(summary: pd.DataFrame) -> Dict[tuple, str]:
     return winners
 
 
-def format_value(value: float, lag) -> str:
-    return f"{value:.3f} ({lag:g} ms)"
+def percent_decrease_from_max(value: float, max_value: float) -> float:
+    if not np.isfinite(value) or not np.isfinite(max_value) or max_value == 0:
+        return float("nan")
+    return 100.0 * (max_value - value) / max_value
+
+
+def format_percent_decrease(percent_decrease: float) -> str:
+    if not np.isfinite(percent_decrease) or np.isclose(percent_decrease, 0.0):
+        return ""
+    return f"-{percent_decrease:.0f}%"
+
+
+def format_value(value: float, lag, percent_decrease: float | None = None) -> str:
+    if percent_decrease is None:
+        return f"{value:.3f} ({lag:g} ms)"
+    decrease = format_percent_decrease(percent_decrease)
+    if not decrease:
+        return f"{value:.3f} ({lag:g} ms)"
+    return f"{value:.3f} ({lag:g} ms; {decrease})"
+
+
+def relative_decrease_by_model(group: pd.DataFrame) -> dict[str, float]:
+    values = pd.to_numeric(group["value"], errors="coerce")
+    max_value = float(values.max())
+    return {
+        str(item["model"]): percent_decrease_from_max(float(item["value"]), max_value)
+        for item in group.to_dict("records")
+    }
+
+
+def latex_escape_text(text: object) -> str:
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    return "".join(replacements.get(char, char) for char in str(text))
+
+
+def best_lag_latex_condition_name(condition: str) -> str:
+    names = {
+        "super_subject": "Multi-Subject",
+        "per_subject": "Single-Subject",
+    }
+    return names.get(condition, condition.replace("_", " ").title())
+
+
+def best_lag_latex_rowcolor(group: str) -> str:
+    colors = {
+        "Representations": "mixed",
+        "Mixed": "mixed",
+        "Semantic": "semantic",
+        "Syntactic": "syntactic",
+        "Acoustic": "acoustic",
+        "Auditory": "acoustic",
+    }
+    return colors.get(group, str(group).casefold().replace(" ", "_"))
+
+
+def best_lag_latex_table(summary: pd.DataFrame, config: Mapping) -> str:
+    models = configured_model_order(summary["model"].unique(), config)
+    winners = best_model_by_task(summary)
+    records = {
+        (str(item["condition"]), str(item["task"]), str(item["model"])): item
+        for item in summary.to_dict("records")
+    }
+    tasks = list(dict.fromkeys(str(task) for task in summary["task"]))
+    task_groups = grouped_tasks_for_summary(config, tasks)
+    conditions = [
+        condition
+        for condition in CONDITIONS
+        if condition in set(str(item) for item in summary["condition"])
+    ]
+    extra_conditions = sorted(
+        set(str(item) for item in summary["condition"]) - set(conditions)
+    )
+    conditions.extend(extra_conditions)
+
+    header_columns = [
+        "Task",
+        "Condition",
+        *[display_model_name(config, model) for model in models],
+    ]
+    lines = [
+        r"\begin{table}[ht]",
+        r"\centering",
+        (
+            r"\caption{Best performance by each model on every task, grouped by task "
+            r"and condition.}"
+        ),
+        r"\setlength{\aboverulesep}{0pt}",
+        r"\setlength{\belowrulesep}{0pt}",
+        r"\resizebox{\textwidth}{!}{%",
+        r"\begin{tabular}{" + "l" * len(header_columns) + "}",
+        r"\toprule",
+        " & ".join(
+            rf"\textbf{{{latex_escape_text(column)}}}" for column in header_columns
+        )
+        + r" \\",
+        r"\midrule",
+        "",
+    ]
+
+    first_task = True
+    for group, group_tasks in task_groups:
+        rowcolor = best_lag_latex_rowcolor(group)
+        for task in group_tasks:
+            task_conditions = [
+                condition
+                for condition in conditions
+                if not summary[
+                    (summary["task"].astype(str) == task)
+                    & (summary["condition"].astype(str) == condition)
+                ].empty
+            ]
+            if not task_conditions:
+                continue
+
+            if not first_task:
+                lines.append(r"\midrule")
+                lines.append("")
+            first_task = False
+
+            lines.append(
+                f"% --- {latex_escape_text(display_task_name(config, task))} ---"
+            )
+            task_row_count = len(task_conditions)
+            for condition_idx, condition in enumerate(task_conditions):
+                task_cell = ""
+                if task_row_count == 1:
+                    task_cell = latex_escape_text(display_task_name(config, task))
+                elif condition_idx == task_row_count - 1:
+                    task_cell = (
+                        rf"\multirow{{-{task_row_count}}}{{*}}"
+                        rf"{{{latex_escape_text(display_task_name(config, task))}}}"
+                    )
+
+                cells = [
+                    task_cell,
+                    latex_escape_text(best_lag_latex_condition_name(condition)),
+                ]
+                task_condition_summary = summary[
+                    (summary["task"].astype(str) == task)
+                    & (summary["condition"].astype(str) == condition)
+                ]
+                percent_decreases = relative_decrease_by_model(
+                    task_condition_summary
+                )
+                for model in models:
+                    item = records.get((condition, task, model))
+                    if item is None:
+                        cells.append("")
+                        continue
+                    percent_decrease = percent_decreases.get(model, float("nan"))
+                    percent_text = format_percent_decrease(percent_decrease)
+                    value_text = f"{float(item['value']):.3f}"
+                    if percent_text:
+                        value_text = f"{value_text} ({percent_text})"
+                    value = latex_escape_text(value_text)
+                    if winners.get((condition, task)) == model:
+                        value = rf"\textbf{{{value}}}"
+                    cells.append(value)
+                lines.append(rf"\rowcolor{{{rowcolor}}}")
+                lines.append(" & ".join(cells) + r" \\")
+            lines.append("")
+
+    lines.extend(
+        [
+            r"\bottomrule",
+            r"\end{tabular}",
+            r"}",
+            r"\label{time_analysis_FM}",
+            r"\end{table}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def summary_wide(
@@ -702,13 +922,20 @@ def summary_wide(
             keys = (keys,)
         row = dict(zip(group_columns, keys))
         by_model = {item["model"]: item for item in group.to_dict("records")}
+        percent_decreases = relative_decrease_by_model(group)
         for model in models:
             column = display_model_name(config, model)
             if model not in by_model:
                 row[column] = ""
                 continue
             item = by_model[model]
-            text = format_value(item["value"], item["lag"])
+            text = format_value(
+                item["value"],
+                item["lag"],
+                percent_decreases.get(model),
+            )
+            if latex:
+                text = text.replace("%", r"\%")
             if bold and winners.get(keys) == model:
                 text = f"\\textbf{{{text}}}" if latex else f"**{text}**"
             row[column] = text
@@ -728,7 +955,6 @@ def write_summary_tables(
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_table = summary_wide(summary, config, bold=False)
     display_table = summary_wide(summary, config, bold=True)
-    latex_table = summary_wide(summary, config, bold=True, latex=True)
 
     if "csv" in formats:
         csv_table.to_csv(output_dir / "best_lag_summary.csv", index=False)
@@ -738,7 +964,7 @@ def write_summary_tables(
         )
     if "latex" in formats or "tex" in formats:
         (output_dir / "best_lag_summary.tex").write_text(
-            latex_table.to_latex(index=False, escape=False)
+            best_lag_latex_table(summary, config)
         )
 
 
@@ -837,10 +1063,80 @@ def configured_model_order(models: Iterable[str], config: Mapping) -> list[str]:
     return ordered
 
 
+def rasterized_hatch_artists(fig: plt.Figure) -> dict[Patch, bool | None]:
+    """Rasterize hatched patches so SVG textures survive Illustrator import."""
+    original_states = {}
+    for patch in fig.findobj(match=Patch):
+        if patch.get_hatch():
+            original_states[patch] = patch.get_rasterized()
+            patch.set_rasterized(True)
+    return original_states
+
+
+def restore_rasterized_states(states: Mapping[Patch, bool | None]) -> None:
+    for artist, rasterized in states.items():
+        artist.set_rasterized(rasterized)
+
+
+def trimmed_tick_decimal_count(value: float) -> int:
+    if abs(value) < 0.005:
+        value = 0.0
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return len(text.rsplit(".", 1)[1]) if "." in text else 0
+
+
+def y_tick_decimal_count(ax: plt.Axes) -> int:
+    lower, upper = sorted(ax.get_ylim())
+    span = upper - lower
+    tolerance = span * 1e-6 if span else 1e-6
+    visible_ticks = [
+        tick
+        for tick in ax.get_yticks()
+        if np.isfinite(tick) and lower - tolerance <= tick <= upper + tolerance
+    ]
+    if not visible_ticks:
+        return 0
+    return max(trimmed_tick_decimal_count(float(tick)) for tick in visible_ticks)
+
+
+def format_tick_with_decimals(value: float, decimals: int) -> str:
+    if abs(value) < 0.5 * 10 ** (-max(decimals, 0)):
+        value = 0.0
+    return f"{value:.{decimals}f}"
+
+
+def apply_y_tick_formatting(fig: plt.Figure) -> None:
+    fig.canvas.draw()
+    for ax in fig.axes:
+        decimals = y_tick_decimal_count(ax)
+        ax.yaxis.set_major_formatter(
+            FuncFormatter(
+                lambda value, _position, decimals=decimals: format_tick_with_decimals(
+                    value,
+                    decimals,
+                )
+            )
+        )
+
+
 def save_figure(fig: plt.Figure, output_base: Path, formats: Sequence[str]) -> None:
     output_base.parent.mkdir(parents=True, exist_ok=True)
+    apply_y_tick_formatting(fig)
     for fmt in formats:
-        fig.savefig(output_base.with_suffix(f".{fmt}"), bbox_inches="tight", dpi=300)
+        normalized_fmt = fmt.lower().lstrip(".")
+        rasterized_states = (
+            rasterized_hatch_artists(fig)
+            if normalized_fmt in {"svg", "svgz"}
+            else {}
+        )
+        try:
+            fig.savefig(
+                output_base.with_suffix(f".{fmt}"),
+                bbox_inches="tight",
+                dpi=300,
+            )
+        finally:
+            restore_rasterized_states(rasterized_states)
     plt.close(fig)
 
 
@@ -1089,6 +1385,58 @@ def lag_curve_models(config: Mapping) -> tuple[str, ...]:
     return models
 
 
+def lag_plot_xlim(config: Mapping) -> tuple[float, float] | None:
+    plot_config = plotting_config(config)
+    configured = plot_config.get(
+        "lag_plot_xlim",
+        plot_config.get(
+            "lag_curve_xlim",
+            plot_config.get(
+                "lag_xlim",
+                config.get(
+                    "lag_plot_xlim",
+                    config.get("lag_curve_xlim", config.get("lag_xlim")),
+                ),
+            ),
+        ),
+    )
+    if configured is None:
+        return None
+    if isinstance(configured, str) or not isinstance(configured, Sequence):
+        raise ValueError(
+            "Lag plot x-limits must be configured as a two-item list: [min_ms, max_ms]"
+        )
+    if len(configured) != 2:
+        raise ValueError(
+            "Lag plot x-limits must be configured as a two-item list: [min_ms, max_ms]"
+        )
+
+    limits = pd.to_numeric(pd.Series(list(configured)), errors="coerce")
+    if limits.isna().any():
+        raise ValueError("Lag plot x-limits must contain only numeric values")
+    lower, upper = (float(limits.iloc[0]), float(limits.iloc[1]))
+    if lower >= upper:
+        raise ValueError("Lag plot x-limits must satisfy min_ms < max_ms")
+    return lower, upper
+
+
+def apply_lag_plot_xlim(ax: plt.Axes, config: Mapping) -> None:
+    limits = lag_plot_xlim(config)
+    if limits is not None:
+        ax.set_xlim(*limits)
+
+
+def apply_axis_text_sizes(
+    ax: plt.Axes,
+    *,
+    label_fontsize: float,
+    tick_fontsize: float,
+) -> None:
+    ax.xaxis.label.set_size(label_fontsize)
+    ax.yaxis.label.set_size(label_fontsize)
+    ax.tick_params(axis="both", which="both", labelsize=tick_fontsize)
+
+
 def check_best_lag_significance(config: Mapping) -> bool:
     plot_config = plotting_config(config)
     if "check_best_lag_significance" in plot_config:
@@ -1137,7 +1485,7 @@ def display_model_name(config: Mapping, model: str) -> str:
 
 def display_condition_name(condition: str) -> str:
     names = {
-        "super_subject": "Super Subject",
+        "super_subject": "Multi-Subject",
         "per_subject": "Single Subject",
     }
     return names.get(condition, condition.replace("_", " ").title())
@@ -1811,7 +2159,7 @@ def draw_grouped_task_backgrounds(
         col_bounds[col] = (col_left, col_right)
 
     outer_pad_x = 0.04
-    outer_pad_y = 0.075
+    outer_pad_y = GROUP_TITLE_VERTICAL_PAD
     col_edges = {}
     for idx, col in enumerate(cols):
         left, right = col_bounds[col]
@@ -1887,7 +2235,7 @@ def draw_grouped_task_backgrounds(
             right = max(col_edges[col][1] for _row, col in top_slots)
         layout.fig.text(
             (left + right) / 2,
-            min(1.0, top - 0.01),
+            min(1.0, top - GROUP_TITLE_TOP_INSET),
             group,
             ha="center",
             va="top",
@@ -2165,7 +2513,7 @@ def plot_best_lag_summary(
     layout = create_grouped_task_figure(
         config,
         tasks,
-        figsize=(18, 10) if include_overall_scores(config) else (18, 8),
+        figsize=(18, 10.8) if include_overall_scores(config) else (18, 8.8),
         hspace=0.75 if check_best_lag_significance(config) else 0.5,
         include_score_axes=include_overall_scores(config),
     )
@@ -2304,6 +2652,11 @@ def plot_best_lag_summary(
             rotation=35,
             ha="right",
         )
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=BEST_LAG_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=BEST_LAG_TICK_LABEL_FONTSIZE,
+        )
         ax.grid(axis="y", alpha=0.25)
         plot_chance_level(ax, metric)
         if plot_style == "bar":
@@ -2400,7 +2753,7 @@ def plot_combined_best_lag_summary(
     layout = create_grouped_task_figure(
         config,
         tasks,
-        figsize=(19, 10) if include_overall_scores(config) else (19, 8),
+        figsize=(19, 10.8) if include_overall_scores(config) else (19, 8.8),
         hspace=0.5,
         include_score_axes=include_overall_scores(config),
     )
@@ -2551,6 +2904,11 @@ def plot_combined_best_lag_summary(
             rotation=35,
             ha="right",
         )
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=BEST_LAG_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=BEST_LAG_TICK_LABEL_FONTSIZE,
+        )
         ax.grid(axis="y", alpha=0.25)
         plot_chance_level(ax, metric)
         if plot_style == "bar":
@@ -2685,13 +3043,13 @@ def plot_baseline_condition_comparison(
     layout = create_grouped_task_figure(
         config,
         tasks,
-        figsize=(18, 8),
+        figsize=(18, 8.8),
         hspace=0.5,
     )
     fig = layout.fig
     x_positions = np.arange(2, dtype=float)
     condition_labels = {
-        "super_subject": "Super",
+        "super_subject": "Multi-Subject",
         "per_subject": "Single",
     }
     loser_color = "#9A9A9A"
@@ -2763,6 +3121,11 @@ def plot_baseline_condition_comparison(
                 for condition in ("super_subject", "per_subject")
             ]
         )
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=BEST_LAG_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=BEST_LAG_TICK_LABEL_FONTSIZE,
+        )
         ax.grid(axis="y", alpha=0.25)
         plot_chance_level(ax, metric)
         ax.axhline(bar_start, color="#333333", linewidth=0.8, alpha=0.75)
@@ -2772,7 +3135,7 @@ def plot_baseline_condition_comparison(
     fig.text(
         0.01,
         0.985,
-        f"{model_name} Single- vs Super-Subject",
+        f"{model_name} Single- vs Multi-Subject",
         ha="left",
         va="top",
         fontsize=plt.rcParams["axes.titlesize"],
@@ -2828,7 +3191,7 @@ def plot_lag_curves(
     if not lag_tasks:
         return
 
-    layout = create_grouped_task_figure(config, lag_tasks)
+    layout = create_grouped_task_figure(config, lag_tasks, figsize=(18, 8.8))
     fig = layout.fig
     condition_styles = {
         "super_subject": "-",
@@ -2894,9 +3257,15 @@ def plot_lag_curves(
         ax.set_title(display_task_name(config, task))
         ax.set_xlabel("Lag relative to word onset (ms)")
         ax.set_ylabel(metric.label)
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=LAG_PLOT_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=LAG_PLOT_TICK_LABEL_FONTSIZE,
+        )
         ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
         plot_chance_level(ax, metric)
         ax.grid(alpha=0.25)
+        apply_lag_plot_xlim(ax, config)
         apply_metric_ylim(ax, metric)
 
     handles = []
@@ -3240,31 +3609,13 @@ def plot_peak_profile_pyramid(
     output_dir: Path,
     formats: Sequence[str],
 ) -> None:
-    import matplotlib.gridspec as gridspec
-
-    # 1. Filter for super_subject only
     profile = profile[profile["condition"] == "super_subject"].copy()
     if profile.empty:
         return
 
-    numeric_cols = [
-        "peak_lag",
-        "half_peak_width",
-        "ramp_duration",
-        "decay_duration",
-        "ramp_slope",
-        "decay_slope",
-    ]
+    numeric_cols = ["peak_lag", "decay_duration"]
     for col in numeric_cols:
         profile[col] = pd.to_numeric(profile[col], errors="coerce")
-
-    metric_grid = [
-        [
-            ("ramp_duration", "Ramp Duration (ms)"),
-            ("decay_duration", "Decay Duration (ms)"),
-        ],
-        [("ramp_slope", "Ramp Slope"), ("decay_slope", "Decay Slope")],
-    ]
 
     tasks = profile["task"].unique()
     group_by_task = task_group_lookup(config, tasks)
@@ -3272,146 +3623,65 @@ def plot_peak_profile_pyramid(
     fallback_color = "#E8E8E8"
     profile["group"] = profile["task"].map(lambda t: group_by_task.get(str(t), "Other"))
 
-    fig = plt.figure(figsize=(14, 14))
-    gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1], hspace=0.4, wspace=0.25)
+    metrics = [
+        ("peak_lag", "Mean Peak Lag", "Time (ms)"),
+        ("decay_duration", "Decay Half-Width", "Time (ms)"),
+    ]
 
-    # --- TOP OF PYRAMID: Mean Peak Lag ---
-    ax_top = fig.add_subplot(gs[0, :])
-    peak_sort_order = (
-        profile.groupby("group")["peak_lag"].mean().sort_values().index.tolist()
-    )
-
-    for i, group in enumerate(peak_sort_order):
-        group_data = profile[profile["group"] == group].dropna(subset=["peak_lag"])
-        if group_data.empty:
-            continue
-
-        ax_top.bar(
-            i,
-            group_data["peak_lag"].mean(),
-            color=background_colors.get(group, fallback_color),
-            alpha=0.7,
-            edgecolor="#333333",
-            linewidth=0.8,
-            zorder=2,
-        )
-
-        rng = np.random.default_rng(i)
-        ax_top.scatter(
-            np.full(len(group_data), i) + rng.uniform(-0.15, 0.15, len(group_data)),
-            group_data["peak_lag"],
-            color="white",
-            edgecolor="#333333",
-            linewidth=0.6,
-            s=35,
-            zorder=3,
-        )
-
-    ax_top.set_title(
-        "Mean Peak Lag", fontweight="bold", fontsize=PLOT_TITLE_FONTSIZE, pad=10
-    )
-    ax_top.set_ylabel("Time (ms)", fontweight="bold")
-    ax_top.set_xticks(range(len(peak_sort_order)))
-    ax_top.set_xticklabels(peak_sort_order, rotation=25, ha="right", fontsize=9)
-    ax_top.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
-
-    # --- BOTTOM 2x2 GRID ---
-    axes_map = {}  # To store axes for limit adjustments
-    sort_metric_col = ["ramp_duration", "decay_duration"]
-
-    for col_idx in range(2):
-        duration_col = metric_grid[0][col_idx][0]
-        column_sort_order = (
-            profile[profile[duration_col].notna()]
-            .groupby("group")[sort_metric_col[col_idx]]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharex=False)
+    for metric_idx, (value_column, title, ylabel) in enumerate(metrics):
+        ax = axes[metric_idx]
+        sort_order = (
+            profile[profile[value_column].notna()]
+            .groupby("group")[value_column]
             .mean()
             .sort_values()
             .index.tolist()
         )
 
-        for row_idx in range(2):
-            ax = fig.add_subplot(gs[row_idx + 1, col_idx])
-            axes_map[(row_idx, col_idx)] = ax
-            value_column, ylabel = metric_grid[row_idx][col_idx]
+        for i, group in enumerate(sort_order):
+            group_data = profile[profile["group"] == group].dropna(
+                subset=[value_column]
+            )
+            if group_data.empty:
+                continue
 
-            for i, group in enumerate(column_sort_order):
-                group_data = profile[profile["group"] == group].dropna(
-                    subset=[value_column]
-                )
-                if group_data.empty:
-                    continue
+            ax.bar(
+                i,
+                group_data[value_column].mean(),
+                color=background_colors.get(group, fallback_color),
+                alpha=0.7,
+                edgecolor="#333333",
+                linewidth=0.8,
+                zorder=2,
+            )
 
-                ax.bar(
-                    i,
-                    group_data[value_column].mean(),
-                    color=background_colors.get(group, fallback_color),
-                    alpha=0.7,
-                    edgecolor="#333333",
-                    linewidth=0.8,
-                    zorder=2,
-                )
+            rng = np.random.default_rng(metric_idx * 100 + i)
+            ax.scatter(
+                np.full(len(group_data), i) + rng.uniform(-0.15, 0.15, len(group_data)),
+                group_data[value_column],
+                color="white",
+                edgecolor="#333333",
+                linewidth=0.6,
+                s=35,
+                zorder=3,
+            )
 
-                rng = np.random.default_rng(i + 100)
-                ax.scatter(
-                    np.full(len(group_data), i)
-                    + rng.uniform(-0.15, 0.15, len(group_data)),
-                    group_data[value_column],
-                    color="white",
-                    edgecolor="#333333",
-                    linewidth=0.6,
-                    s=35,
-                    zorder=3,
-                )
+        ax.set_title(title, fontweight="bold", fontsize=PLOT_TITLE_FONTSIZE, pad=10)
+        ax.set_ylabel(ylabel, fontweight="bold")
+        ax.set_xticks(range(len(sort_order)))
+        ax.set_xticklabels(sort_order, rotation=25, ha="right", fontsize=9)
+        ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
 
-            ax.set_ylabel(ylabel, fontweight="bold", fontsize=10)
-            ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
-            ax.set_xticks(range(len(column_sort_order)))
-
-            if row_idx == 1:
-                ax.set_xticklabels(
-                    column_sort_order, rotation=25, ha="right", fontsize=9
-                )
-            else:
-                ax.set_xticklabels([])
-                side = "Ramp" if col_idx == 0 else "Decay"
-                ax.set_title(
-                    f"{side} Metrics",
-                    fontweight="bold",
-                    fontsize=PLOT_TITLE_FONTSIZE,
-                    pad=10,
-                )
-
-    # --- AXIS SYNCHRONIZATION ---
-
-    # 1. Share Y-axis for Duration row (Row 1)
-    duration_max = (
-        max(profile["ramp_duration"].max(), profile["decay_duration"].max()) * 1.1
-    )
-    axes_map[(0, 0)].set_ylim(0, duration_max)
-    axes_map[(0, 1)].set_ylim(0, duration_max)
-
-    # 2. Symmetric magnitude for Slope row (Row 2)
-    # We find the absolute max magnitude across both ramp and decay slopes
-    slope_mag = (
-        max(profile["ramp_slope"].abs().max(), profile["decay_slope"].abs().max()) * 1.1
-    )
-    if not np.isnan(slope_mag):
-        axes_map[(1, 0)].set_ylim(-slope_mag, slope_mag)
-        axes_map[(1, 1)].set_ylim(-slope_mag, slope_mag)
-        # Add a zero line for reference on the slope plots
-        axes_map[(1, 0)].axhline(0, color="black", linewidth=0.8, zorder=1)
-        axes_map[(1, 1)].axhline(0, color="black", linewidth=0.8, zorder=1)
-
-    # Final Titles and Save
     model = str(profile["model"].iloc[0])
     fig.suptitle(
-        f"{display_model_name(config, model)}: Peak & Ramp/Decay Profile",
+        f"{display_model_name(config, model)}: Peak Timing Summary",
         fontsize=PLOT_TITLE_FONTSIZE,
         fontweight="bold",
-        y=0.98,
+        y=1.02,
     )
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.tight_layout()
     save_figure(fig, output_dir / "peak_pyramid_summary", formats)
 
 
@@ -3753,7 +4023,7 @@ def plot_half_peak_profile(
 
     model = str(profile["model"].iloc[0])
     tasks = sorted(profile["task"].unique())
-    layout = create_grouped_task_figure(config, tasks, figsize=(18, 8), hspace=0.6)
+    layout = create_grouped_task_figure(config, tasks, figsize=(18, 8.8), hspace=0.6)
     fig = layout.fig
     condition_colors = {
         "super_subject": "#1F4E79",
@@ -3859,9 +4129,15 @@ def plot_half_peak_profile(
         ax.set_title(display_task_name(config, task))
         ax.set_xlabel("Lag relative to word onset (ms)")
         ax.set_ylabel(metric.label)
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=LAG_PLOT_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=LAG_PLOT_TICK_LABEL_FONTSIZE,
+        )
         ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
         plot_chance_level(ax, metric)
         ax.grid(alpha=0.25)
+        apply_lag_plot_xlim(ax, config)
         apply_metric_ylim(ax, metric)
 
     handles = [
@@ -3976,7 +4252,11 @@ def plot_per_region_lag_curves(
             key=region_sort_key,
         )
         colors = region_gradient_colors(all_regions)
-        layout = create_grouped_task_figure(config, [task for task, _ in task_items])
+        layout = create_grouped_task_figure(
+            config,
+            [task for task, _ in task_items],
+            figsize=(18, 8.8),
+        )
         fig = layout.fig
 
         for task, region_results in task_items:
@@ -3996,9 +4276,15 @@ def plot_per_region_lag_curves(
             ax.set_title(display_task_name(config, task))
             ax.set_xlabel("Lag relative to word onset (ms)")
             ax.set_ylabel(metric.label)
+            apply_axis_text_sizes(
+                ax,
+                label_fontsize=LAG_PLOT_AXIS_LABEL_FONTSIZE,
+                tick_fontsize=LAG_PLOT_TICK_LABEL_FONTSIZE,
+            )
             ax.axvline(0, color="#777777", linewidth=0.8, alpha=0.6)
             plot_chance_level(ax, metric)
             ax.grid(alpha=0.25)
+            apply_lag_plot_xlim(ax, config)
             apply_metric_ylim(ax, metric)
 
         handles = [
@@ -4057,6 +4343,23 @@ def _load_region_electrodes(
         load_region_groups(None),
         nilearn_data_dir=nilearn_data_dir,
     )
+
+
+def plot_atlas_region_electrodes(
+    output_dir: Path,
+    formats: Sequence[str],
+    data_root: Path,
+    nilearn_data_dir: Path | None,
+    include_bad: bool,
+) -> None:
+    try:
+        from scripts.plot_atlas_region_electrodes import create_electrode_region_figure
+    except ModuleNotFoundError:
+        from plot_atlas_region_electrodes import create_electrode_region_figure
+
+    electrodes = _load_region_electrodes(data_root, nilearn_data_dir, include_bad)
+    fig = create_electrode_region_figure(electrodes)
+    save_figure(fig, output_dir / "atlas_region_electrodes", formats)
 
 
 def _bids_subject_label(subject_id: int) -> str:
@@ -4292,7 +4595,7 @@ def plot_selected_electrode_glass_brains(
         _plot_electrode_glass_brain(
             selected_electrodes,
             subject_colors,
-            title="Super-Subject Selected Electrodes",
+            title="Multi-Subject Selected Electrodes",
             output_base=electrode_output_dir / "super_subject_electrodes",
             formats=formats,
             marker_size=26,
@@ -4837,7 +5140,7 @@ def generate_paper_results(
             config,
         )
         plot_baseline_condition_comparison(
-            combined_summary,
+            baseline_condition_comparison_rows(loaded, metrics),
             loaded,
             output_dir,
             formats,
@@ -4885,6 +5188,13 @@ def generate_paper_results(
         )
     plot_lag_curves(loaded, config, output_dir, formats, colors)
     plot_per_region_lag_curves(per_region_results, config, output_dir, formats)
+    plot_atlas_region_electrodes(
+        output_dir,
+        formats,
+        data_root,
+        nilearn_data_dir,
+        include_bad,
+    )
     plot_selected_electrode_glass_brains(
         output_dir,
         formats,
