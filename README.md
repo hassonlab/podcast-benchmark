@@ -2,8 +2,6 @@
 
 A benchmarking framework for neural decoding from podcast listening data.
 
-Comparing brain → word decoding performance to [previously published results](https://www.nature.com/articles/s41593-022-01026-4).
-
 ## Documentation
 
 **📚 Full documentation available at: https://hassonlab.github.io/podcast-benchmark/**
@@ -14,11 +12,8 @@ Comparing brain → word decoding performance to [previously published results](
 # Setup environment and download data
 ./setup.sh
 
-# Train word embedding decoding task
-make train-all TASKS=word_embedding_decoding_task
-
-# Train all tasks over all models
-make train-all
+# Train all tasks using the CNN baseline.
+make train-all MODEL=baselines/neural_conv_decoder
 ```
 
 ## Features

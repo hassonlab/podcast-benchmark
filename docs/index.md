@@ -5,7 +5,7 @@ A benchmarking framework for neural decoding from podcast listening data.
 ## Decoding Tasks
 
 1. **Brain --> perceived word decoding** Translate brain signals to perceived words, comparing performance to [previously published results](https://www.nature.com/articles/s41593-022-01026-4).
-2. **Audio Reconstruction** Reconstruct podcast audio envelope from brain signal (Regression)
+2. **Audio Intensity** Reconstruct podcast audio intensity from brain signal (Regression)
 3. **Sentence Onset Detection** Classify (binary) segments of brain data as containing the beginning of a sentence or not
 4. **Content/Non-Content Words Classification** (Binary classification)
 5. **Part of Speech Classification** (Multiclass classification)

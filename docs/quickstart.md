@@ -37,7 +37,7 @@ The framework comes with several pre-configured models you can train immediately
 
 ### 1. Neural Convolutional Decoder
 
-This recreates the decoder from [Tang et al. 2022](https://www.nature.com/articles/s41593-022-01026-4), which decodes word embeddings directly from neural data:
+This recreates the decoder from [Goldstein et al. 2022](https://www.nature.com/articles/s41593-022-01026-4), which decodes word embeddings directly from neural data:
 
 ```bash
 make neural-conv
@@ -51,13 +51,34 @@ This trains a decoder from a foundation model's latent representations to word e
 make foundation-model
 ```
 
-### 3. POPT Foundation Model
+### 3. Foundation Models
 
-Evaluate the POPT foundation model on word embedding decoding:
+Evaluate one of the pre-configured foundation models on word embedding
+decoding:
 
 ```bash
 python main.py --config configs/foundation_models/popt/word_embedding/supersubject.yml
 ```
+
+Available production foundation model configs include:
+
+- **BrainBERT**: `configs/foundation_models/brainbert/<task>/<variant>.yml`
+- **DIVER**: `configs/foundation_models/diver/<task>/<variant>.yml`
+- **POPT**: `configs/foundation_models/popt/<task>/<variant>.yml`
+
+For example:
+
+```bash
+python main.py --config configs/foundation_models/brainbert/word_embedding/supersubject.yml
+python main.py --config configs/foundation_models/diver/word_embedding/supersubject.yml
+python main.py --config configs/foundation_models/popt/word_embedding/supersubject.yml
+```
+
+Each foundation model currently follows the same task layout, including
+`word_embedding`, `whisper_embedding`, `llm_embedding_pretraining`,
+`llm_decoding`, `sentence_onset`, `gpt_surprise`,
+`gpt_surprise_multiclass`, `content_noncontent`, `pos`, `iu_boundary`, and
+`volume_level`.
 
 ## Results
 

@@ -8,9 +8,9 @@ PREFIX = decoder-training
 JOB_NAME ?= "$(PREFIX)-$(USR)-$(DT)"
 
 # To run locally
-# CMD = python
+CMD = python
 # To batch on slurm
-CMD = sbatch --job-name=$(JOB_NAME) submit.sh
+# CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
 SUBJECTS ?= 1 3 4 5 6 7 8 9
 REGIONS ?= EAC MTG ITG TP IFG TPJ PRC PC RIGHT
