@@ -40,7 +40,6 @@ from scripts.generate_paper_results import (
     ordered_tasks_by_group_average,
     significance_label,
     normalize_region_name,
-    plot_atlas_region_electrodes,
     plot_best_lag_summary,
     plot_lag_curves,
     plot_per_region_brains,
@@ -55,7 +54,6 @@ from scripts.generate_paper_results import (
     valid_best_lags,
     write_baseline_region_peak_tables,
 )
-from scripts.migrate_fm_results import migrate
 
 
 def write_lag_csv(path: Path, rows):
@@ -617,10 +615,8 @@ def test_grouped_task_figure_interleaves_mixed_and_semantic_l_shapes():
     assert slots == {
         "mixed_a": (0, 0),
         "mixed_b": (1, 0),
-        "mixed_c": (0, 1),
-        "semantic_a": (1, 1),
-        "semantic_b": (0, 2),
-        "semantic_c": (1, 2),
+        "semantic_a": (0, 2),
+        "semantic_b": (1, 2),
     }
 
 
@@ -653,9 +649,9 @@ def test_grouped_task_backgrounds_color_whitespace_behind_axes():
         to_rgba("white"),
     )
     background_artists = layout.fig.artists
-    assert len(background_artists) == 6
+    assert len(background_artists) == 4
     assert any(
-        np.allclose(artist.get_facecolor(), to_rgba("#ddeeff", 0.5))
+        np.allclose(artist.get_facecolor(), to_rgba("#C9DDF2", 0.5))
         for artist in background_artists
     )
     assert any(
@@ -663,7 +659,10 @@ def test_grouped_task_backgrounds_color_whitespace_behind_axes():
         for artist in background_artists
     )
     assert all(artist.get_edgecolor()[3] == 0 for artist in background_artists)
-    assert {text.get_text() for text in layout.fig.texts} == {"Mixed", "Semantic"}
+    assert {text.get_text() for text in layout.fig.texts} == {
+        "Representations",
+        "Semantic",
+    }
     assert all(text.get_fontweight() == "bold" for text in layout.fig.texts)
 
 
@@ -1141,7 +1140,7 @@ def test_plot_lag_curves_only_plots_baseline_conditions(tmp_path, monkeypatch):
         line for line in captured["fig"].axes[0].lines if line.get_label()[0] != "_"
     ]
     assert [line.get_label() for line in plotted_lines] == [
-        "Super Subject",
+        "Multi-Subject",
         "Single Subject",
     ]
     assert [line.get_color() for line in plotted_lines] == ["#1F4E79", "#2CA7A0"]
@@ -1192,8 +1191,8 @@ def test_plot_lag_curves_includes_configured_models(tmp_path, monkeypatch):
         line for line in captured["fig"].axes[0].lines if line.get_label()[0] != "_"
     ]
     assert [line.get_label() for line in plotted_lines] == [
-        "CNN Super Subject",
-        "Linear Super Subject",
+        "CNN Multi-Subject",
+        "Linear Multi-Subject",
         "CNN Single Subject",
         "Linear Single Subject",
     ]
@@ -1237,59 +1236,6 @@ def test_plot_per_region_lag_curves_writes_one_task_grid_per_model(tmp_path):
     plot_per_region_lag_curves(per_region_results, config, tmp_path, formats=["png"])
 
     assert (tmp_path / "per_region_lags_baseline.png").exists()
-
-
-def test_plot_atlas_region_electrodes_uses_left_sagittal_view(
-    tmp_path, monkeypatch
-):
-    from nilearn import plotting
-    import matplotlib.pyplot as plt
-
-    electrodes = pd.DataFrame(
-        [
-            {"x": -42.0, "y": -20.0, "z": 18.0, "region_group": "EAC"},
-            {"x": 42.0, "y": -18.0, "z": 24.0, "region_group": "RIGHT"},
-            {"x": 44.0, "y": -16.0, "z": 26.0, "region_group": "RIGHT"},
-            {"x": 0.0, "y": 0.0, "z": 0.0, "region_group": "unassigned"},
-        ]
-    )
-    display_modes = []
-    bar_labels = []
-    saved = []
-
-    class FakeDisplay:
-        def add_markers(self, *args, **kwargs):
-            pass
-
-    def fake_plot_glass_brain(*args, **kwargs):
-        display_modes.append(kwargs["display_mode"])
-        return FakeDisplay()
-
-    def capture_figure(fig, output_base, formats):
-        bar_labels.extend(
-            label.get_text() for label in fig.axes[-1].get_xticklabels()
-        )
-        saved.append((output_base, tuple(formats)))
-        plt.close(fig)
-
-    monkeypatch.setattr(
-        "scripts.generate_paper_results._load_region_electrodes",
-        lambda *args: electrodes,
-    )
-    monkeypatch.setattr(plotting, "plot_glass_brain", fake_plot_glass_brain)
-    monkeypatch.setattr("scripts.generate_paper_results.save_figure", capture_figure)
-
-    plot_atlas_region_electrodes(
-        tmp_path,
-        formats=["png", "pdf"],
-        data_root=tmp_path,
-        nilearn_data_dir=tmp_path / "nilearn",
-        include_bad=False,
-    )
-
-    assert display_modes == ["l", "r"]
-    assert bar_labels == ["RIGHT", "STG"]
-    assert saved == [(tmp_path / "atlas_region_electrodes", ("png", "pdf"))]
 
 
 def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeypatch):
@@ -1412,12 +1358,8 @@ def test_plot_per_region_brains_writes_one_task_grid_per_model(tmp_path, monkeyp
     assert all(vmax == 0.75 for _hemi, _stat_map, _vmin, vmax, _cmap in plotted_maps)
     assert all(cmap.name == "plasma" for _hemi, _stat_map, _vmin, _vmax, cmap in plotted_maps)
     assert plotted_axes
-    expected_facecolor = composite_rgba_over_background(
-        to_rgba("#ffeecc", 0.5),
-        plotted_axes[0].figure.get_facecolor(),
-    )
     assert all(
-        np.allclose(ax.get_facecolor(), expected_facecolor)
+        np.allclose(ax.get_facecolor(), plotted_axes[0].figure.get_facecolor())
         for ax in plotted_axes
     )
     assert any(
@@ -1820,50 +1762,3 @@ def test_best_lag_latex_table_includes_relative_percent_for_non_max_values():
 
     assert r"0.500 (-29\%)" in table
     assert r"\textbf{0.700}" in table
-
-
-def test_fm_dry_run_migration_mapping_into_current_style_run_dirs(tmp_path):
-    source = tmp_path / "results-fm" / "foundation_models"
-    dest = tmp_path / "results-fm-normalized"
-
-    old_super = source / "diver" / "content_noncontent" / "persubject_concat"
-    write_lag_csv(
-        old_super / "diver_persubject_concat_content_noncontent_2026-04-22-20-41-33" / "lag_performance.csv",
-        [{"lags": 0, "score": 0.5}],
-    )
-    write_lag_csv(
-        old_super / "diver_persubject_concat_content_noncontent_2026-04-22-21-56-26" / "lag_performance.csv",
-        [{"lags": 0, "score": 0.6}],
-    )
-
-    old_subject = source / "diver" / "content_noncontent" / "subject_full"
-    write_lag_csv(
-        old_subject / "subject1_full" / "diver_subject1_full_content_noncontent_2026-04-23-07-41-18" / "lag_performance.csv",
-        [{"lags": 0, "score": 0.6}],
-    )
-    write_lag_csv(
-        old_subject / "subject1_full" / "diver_subject1_full_content_noncontent_2026-04-22-20-41-18" / "lag_performance.csv",
-        [{"lags": 0, "score": 0.4}],
-    )
-    write_lag_csv(
-        old_subject / "subject2_full" / "diver_subject2_full_content_noncontent_2026-04-23-07-41-20" / "lag_performance.csv",
-        [{"lags": 0, "score": 0.7}],
-    )
-
-    report = migrate(source, dest, dry_run=True)
-
-    selected = report[report["selected"]]
-    assert (
-        str(dest / "diver_content_noncontent_super_subject_2026-04-22-21-56-26")
-        in selected["dest"].tolist()
-    )
-    assert (
-        str(dest / "diver_content_noncontent_per_subject_2026-04-23-07-41-18" / "subject_1")
-        in selected["dest"].tolist()
-    )
-    assert (
-        str(dest / "diver_content_noncontent_per_subject_2026-04-23-07-41-18" / "subject_2")
-        in selected["dest"].tolist()
-    )
-    assert (dest / "migration_report.csv").exists()
-    assert not (dest / "diver_content_noncontent_super_subject_2026-04-22-21-56-26" / "lag_performance.csv").exists()

@@ -53,14 +53,6 @@ baselines/neural_conv_decoder:
   - configs/baselines/iu_boundary_task/neural_conv_decoder/supersubject.yml
   - configs/baselines/iu_boundary_task/neural_conv_decoder/per_subject.yml
   - configs/baselines/iu_boundary_task/neural_conv_decoder/per_region.yml
-baselines/time_pooling_model:
-  volume_level_decoding_task:
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_simple_supersubject.yml
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_simple_per_subject.yml
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_simple_per_region.yml
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_supersubject.yml
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_per_subject.yml
-  - configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_per_region.yml
 baselines/simple_models:
   word_embedding_decoding_task:
   - configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml
