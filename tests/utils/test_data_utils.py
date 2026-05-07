@@ -19,6 +19,7 @@ from utils.data_utils import (
     read_subject_mapping,
     df_columns_to_tensors,
 )
+from utils.dataset import RawNeuralDataset
 from core.config import DataParams
 
 
