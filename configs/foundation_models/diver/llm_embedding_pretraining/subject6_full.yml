@@ -5,7 +5,7 @@ model_spec:
     d_model: 256
     deepspeed_pth_format: true
     e_layer: 12
-    foundation_dir: models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
     freeze_foundation: false
     ft_config: flatten_linear
     ft_mup: false
@@ -60,7 +60,4 @@ training_params:
   normalize_targets: false
   smaller_is_better: true
   weight_decay: 1.0e-05
-  fold_ids:
-  - 1
-  - 5
 trial_name: diver_subject6_full_llm_embedding_pretraining

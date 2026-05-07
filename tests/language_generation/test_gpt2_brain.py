@@ -40,12 +40,36 @@ class MockEncoderMultiEmbed(nn.Module):
         )  # [batch, num_tokens, output_dim]
 
 
+class MockCachedFeatureEncoder(nn.Module):
+    """Mock encoder with cacheable upstream features and a projector."""
+
+    def __init__(self, input_channels=64, feature_dim=32, output_dim=256):
+        super().__init__()
+        self.output_dim = output_dim
+        self.upstream = nn.Linear(input_channels, feature_dim)
+        self.projector = nn.Linear(feature_dim, output_dim)
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
+            return features
+        return self.forward_from_features(features, **kwargs)
+
+    def encode_features(self, x, **kwargs):
+        x_avg = x.mean(dim=2)
+        return self.upstream(x_avg)
+
+    def forward_from_features(self, features, **kwargs):
+        return self.projector(features)
+
+
 class MockTransformer(nn.Module):
     """Mock transformer for proper parameter handling"""
 
     def __init__(self, vocab_size, hidden_size):
         super().__init__()
         self.wte = nn.Embedding(vocab_size, hidden_size)
+        self.dropout = nn.Dropout(p=0.1)
 
 
 class MockGPT2LMHeadModel(nn.Module):
@@ -187,6 +211,12 @@ def mock_encoder_single():
 def mock_encoder_multi():
     """Fixture providing a mock encoder with multiple embedding outputs"""
     return MockEncoderMultiEmbed(input_channels=64, output_dim=256, num_tokens=3)
+
+
+@pytest.fixture
+def mock_cached_feature_encoder():
+    """Fixture providing an encoder with explicit cached feature behavior."""
+    return MockCachedFeatureEncoder(input_channels=64, feature_dim=32, output_dim=256)
 
 
 @pytest.fixture
@@ -338,6 +368,56 @@ class TestGPT2BrainConstruction:
                     torch.zeros_like(embedding_grad[token_id]),
                 ), f"Token {token_id} should have zero gradient but has non-zero values"
 
+    def test_train_keeps_frozen_lm_in_eval_mode(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Frozen LM should stay in eval mode when the wrapper is set to train."""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=True,
+        )
+
+        model.train()
+
+        assert model.training
+        assert not model.lm_model.training
+        assert model.lm_model.transformer.wte.weight.requires_grad
+
+        non_embedding_params = [
+            param
+            for name, param in model.lm_model.named_parameters()
+            if name != "transformer.wte.weight"
+        ]
+        assert non_embedding_params
+        assert all(not param.requires_grad for param in non_embedding_params)
+
+    def test_train_and_eval_toggle_unfrozen_lm_mode(
+        self, mock_encoder_single, mock_gpt2_model, mock_tokenizer
+    ):
+        """Unfrozen LM should follow the wrapper's train/eval mode."""
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_encoder_single,
+            freeze_lm=False,
+        )
+
+        model.train()
+        assert model.training
+        assert model.lm_model.training
+        assert all(param.requires_grad for param in model.lm_model.parameters())
+
+        model.eval()
+        assert not model.training
+        assert not model.lm_model.training
+        assert all(param.requires_grad for param in model.lm_model.parameters())
+
 
 class TestGPT2BrainForwardSingleEmbed:
     """Test GPT2Brain forward pass with single embedding encoder"""
@@ -474,6 +554,46 @@ class TestGPT2BrainForwardMultiEmbed:
         # Original attention pattern should be preserved after brain prompt
         assert torch.allclose(
             updated_attention_mask[:, brain_prompt_len:], attention_mask
+        )
+
+
+class TestGPT2BrainFeatureCache:
+    """Test GPT2Brain feature-cache behavior."""
+
+    def test_feature_cache_extracts_features_then_reuses_them_for_forward(
+        self, mock_cached_feature_encoder, mock_gpt2_model, mock_tokenizer, sample_batch
+    ):
+        from language_generation.gpt2_brain import GPT2Brain
+
+        model = GPT2Brain(
+            lm_model=mock_gpt2_model,
+            tokenizer=mock_tokenizer,
+            encoder_model=mock_cached_feature_encoder,
+            freeze_lm=True,
+            feature_cache=True,
+        )
+
+        cached_features = model(
+            neural_data=sample_batch["neural_data"],
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            return_feature_emb_instead_of_projection=True,
+        )
+
+        assert cached_features.shape == (sample_batch["neural_data"].shape[0], 32)
+
+        target_attention_mask = torch.ones(sample_batch["input_ids"].shape[0], 3)
+        target_logits = model(
+            neural_data=cached_features,
+            all_input_ids=sample_batch["input_ids"],
+            all_attention_mask=sample_batch["attention_mask"],
+            target_attention_mask=target_attention_mask,
+        )
+
+        assert target_logits.shape == (
+            sample_batch["input_ids"].shape[0],
+            3,
+            len(model.tokenizer),
         )
 
 

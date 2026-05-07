@@ -4,31 +4,455 @@
 
 controls/llm_decoding:
   llm_decoding_task:
-    - no_brain_data.yml
+  - configs/controls/llm_decoding/no_brain_data.yml
 baselines/neural_conv_decoder:
   word_embedding_decoding_task:
-    - gpt2.yml
-    - glove.yml
-    - arbitrary.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_supersubject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_per_subject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_per_region.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_supersubject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_per_subject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/glove_per_region.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_supersubject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_per_subject.yml
+  - configs/baselines/word_embedding_decoding_task/neural_conv_decoder/arbitrary_per_region.yml
   sentence_onset_task:
-    - sentence_onset.yml
+  - configs/baselines/sentence_onset_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/sentence_onset_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/sentence_onset_task/neural_conv_decoder/per_region.yml
   gpt_surprise_task:
-    - gpt_surprise.yml
+  - configs/baselines/gpt_surprise_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/gpt_surprise_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/gpt_surprise_task/neural_conv_decoder/per_region.yml
   gpt_surprise_multiclass_task:
-    - gpt_surprise_multiclass.yml
+  - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/neural_conv_decoder/per_region.yml
   content_noncontent_task:
-    - content_noncontent.yml
+  - configs/baselines/content_noncontent_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/content_noncontent_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/content_noncontent_task/neural_conv_decoder/per_region.yml
   pos_task:
-    - pos.yml
+  - configs/baselines/pos_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/pos_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/pos_task/neural_conv_decoder/per_region.yml
   llm_decoding_task:
-    - llm_two_stage_multi.yml
-baselines/time_pooling_model:
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch0.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch1.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/per_subject_batch2.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/per_region.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_supersubject.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_per_subject.yml
+  - configs/baselines/llm_decoding_task/neural_conv_decoder/two_stage_multi_per_region.yml
+  whisper_embedding_decoding_task:
+  - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/whisper_embedding_decoding_task/neural_conv_decoder/per_region.yml
+  iu_boundary_task:
+  - configs/baselines/iu_boundary_task/neural_conv_decoder/supersubject.yml
+  - configs/baselines/iu_boundary_task/neural_conv_decoder/per_subject.yml
+  - configs/baselines/iu_boundary_task/neural_conv_decoder/per_region.yml
+baselines/simple_models:
+  word_embedding_decoding_task:
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/word_embedding_decoding_task/ridge_regression/per_region.yml
+  whisper_embedding_decoding_task:
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_region.yml
+  gpt_surprise_task:
+  - configs/baselines/gpt_surprise_task/ridge_regression/supersubject.yml
+  - configs/baselines/gpt_surprise_task/ridge_regression/per_subject.yml
+  - configs/baselines/gpt_surprise_task/ridge_regression/per_region.yml
   volume_level_decoding_task:
-    - simple_model.yml
-    - torch_ridge.yml
-
-# Add more model/task combinations as needed
-# Example:
-# your_new_model:
-#   your_new_task:
-#     - your_config_file.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/supersubject.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/per_subject.yml
+  - configs/baselines/volume_level_decoding_task/ridge_regression/per_region.yml
+  sentence_onset_task:
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/sentence_onset_task/ridge_logistic_regression/per_region.yml
+  content_noncontent_task:
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/content_noncontent_task/ridge_logistic_regression/per_region.yml
+  gpt_surprise_multiclass_task:
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/gpt_surprise_multiclass_task/ridge_logistic_regression/per_region.yml
+  pos_task:
+  - configs/baselines/pos_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/pos_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/pos_task/ridge_logistic_regression/per_region.yml
+  iu_boundary_task:
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/supersubject.yml
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/per_subject.yml
+  - configs/baselines/iu_boundary_task/ridge_logistic_regression/per_region.yml
+foundation_models/brainbert:
+  word_embedding_decoding_task:
+  - configs/foundation_models/brainbert/word_embedding/persubject_concat.yml
+  - configs/foundation_models/brainbert/word_embedding/subject1_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject2_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject3_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject4_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject5_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject6_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject7_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject8_full.yml
+  - configs/foundation_models/brainbert/word_embedding/subject9_full.yml
+  whisper_embedding_decoding_task:
+  - configs/foundation_models/brainbert/whisper_embedding/persubject_concat.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject1_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject2_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject3_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject4_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject5_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject6_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject7_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject8_full.yml
+  - configs/foundation_models/brainbert/whisper_embedding/subject9_full.yml
+  llm_embedding_pretraining_task:
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/persubject_concat.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject1_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject2_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject3_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject4_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject5_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject6_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject7_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject8_full.yml
+  - configs/foundation_models/brainbert/llm_embedding_pretraining/subject9_full.yml
+  llm_decoding_task:
+  - configs/foundation_models/brainbert/llm_decoding/persubject_concat.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject1_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject2_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject3_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject4_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject5_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject6_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject7_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject8_full.yml
+  - configs/foundation_models/brainbert/llm_decoding/subject9_full.yml
+  sentence_onset_task:
+  - configs/foundation_models/brainbert/sentence_onset/persubject_concat.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject1_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject2_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject3_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject4_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject5_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject6_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject7_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject8_full.yml
+  - configs/foundation_models/brainbert/sentence_onset/subject9_full.yml
+  gpt_surprise_task:
+  - configs/foundation_models/brainbert/gpt_surprise/persubject_concat.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject1_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject2_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject3_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject4_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject5_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject6_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject7_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject8_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise/subject9_full.yml
+  gpt_surprise_multiclass_task:
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/persubject_concat.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject1_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject2_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject3_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject4_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject5_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject6_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject7_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject8_full.yml
+  - configs/foundation_models/brainbert/gpt_surprise_multiclass/subject9_full.yml
+  content_noncontent_task:
+  - configs/foundation_models/brainbert/content_noncontent/persubject_concat.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject1_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject2_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject3_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject4_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject5_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject6_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject7_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject8_full.yml
+  - configs/foundation_models/brainbert/content_noncontent/subject9_full.yml
+  pos_task:
+  - configs/foundation_models/brainbert/pos/persubject_concat.yml
+  - configs/foundation_models/brainbert/pos/subject1_full.yml
+  - configs/foundation_models/brainbert/pos/subject2_full.yml
+  - configs/foundation_models/brainbert/pos/subject3_full.yml
+  - configs/foundation_models/brainbert/pos/subject4_full.yml
+  - configs/foundation_models/brainbert/pos/subject5_full.yml
+  - configs/foundation_models/brainbert/pos/subject6_full.yml
+  - configs/foundation_models/brainbert/pos/subject7_full.yml
+  - configs/foundation_models/brainbert/pos/subject8_full.yml
+  - configs/foundation_models/brainbert/pos/subject9_full.yml
+  iu_boundary_task:
+  - configs/foundation_models/brainbert/iu_boundary/persubject_concat.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject1_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject2_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject3_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject4_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject5_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject6_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject7_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject8_full.yml
+  - configs/foundation_models/brainbert/iu_boundary/subject9_full.yml
+  volume_level_decoding_task:
+  - configs/foundation_models/brainbert/volume_level/persubject_concat.yml
+  - configs/foundation_models/brainbert/volume_level/subject1_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject2_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject3_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject4_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject5_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject6_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject7_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject8_full.yml
+  - configs/foundation_models/brainbert/volume_level/subject9_full.yml
+foundation_models/diver:
+  word_embedding_decoding_task:
+  - configs/foundation_models/diver/word_embedding/persubject_concat.yml
+  - configs/foundation_models/diver/word_embedding/subject1_full.yml
+  - configs/foundation_models/diver/word_embedding/subject2_full.yml
+  - configs/foundation_models/diver/word_embedding/subject3_full.yml
+  - configs/foundation_models/diver/word_embedding/subject4_full.yml
+  - configs/foundation_models/diver/word_embedding/subject5_full.yml
+  - configs/foundation_models/diver/word_embedding/subject6_full.yml
+  - configs/foundation_models/diver/word_embedding/subject7_full.yml
+  - configs/foundation_models/diver/word_embedding/subject8_full.yml
+  - configs/foundation_models/diver/word_embedding/subject9_full.yml
+  whisper_embedding_decoding_task:
+  - configs/foundation_models/diver/whisper_embedding/persubject_concat.yml
+  - configs/foundation_models/diver/whisper_embedding/subject1_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject2_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject3_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject4_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject5_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject6_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject7_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject8_full.yml
+  - configs/foundation_models/diver/whisper_embedding/subject9_full.yml
+  llm_embedding_pretraining_task:
+  - configs/foundation_models/diver/llm_embedding_pretraining/persubject_concat.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject1_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject2_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject3_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject4_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject5_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject6_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject7_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject8_full.yml
+  - configs/foundation_models/diver/llm_embedding_pretraining/subject9_full.yml
+  llm_decoding_task:
+  - configs/foundation_models/diver/llm_decoding/persubject_concat.yml
+  - configs/foundation_models/diver/llm_decoding/subject1_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject2_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject3_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject4_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject5_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject6_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject7_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject8_full.yml
+  - configs/foundation_models/diver/llm_decoding/subject9_full.yml
+  sentence_onset_task:
+  - configs/foundation_models/diver/sentence_onset/persubject_concat.yml
+  - configs/foundation_models/diver/sentence_onset/subject1_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject2_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject3_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject4_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject5_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject6_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject7_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject8_full.yml
+  - configs/foundation_models/diver/sentence_onset/subject9_full.yml
+  gpt_surprise_task:
+  - configs/foundation_models/diver/gpt_surprise/persubject_concat.yml
+  - configs/foundation_models/diver/gpt_surprise/subject1_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject2_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject3_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject4_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject5_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject6_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject7_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject8_full.yml
+  - configs/foundation_models/diver/gpt_surprise/subject9_full.yml
+  gpt_surprise_multiclass_task:
+  - configs/foundation_models/diver/gpt_surprise_multiclass/persubject_concat.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject1_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject2_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject3_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject4_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject5_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject6_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject7_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject8_full.yml
+  - configs/foundation_models/diver/gpt_surprise_multiclass/subject9_full.yml
+  content_noncontent_task:
+  - configs/foundation_models/diver/content_noncontent/persubject_concat.yml
+  - configs/foundation_models/diver/content_noncontent/subject1_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject2_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject3_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject4_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject5_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject6_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject7_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject8_full.yml
+  - configs/foundation_models/diver/content_noncontent/subject9_full.yml
+  pos_task:
+  - configs/foundation_models/diver/pos/persubject_concat.yml
+  - configs/foundation_models/diver/pos/subject1_full.yml
+  - configs/foundation_models/diver/pos/subject2_full.yml
+  - configs/foundation_models/diver/pos/subject3_full.yml
+  - configs/foundation_models/diver/pos/subject4_full.yml
+  - configs/foundation_models/diver/pos/subject5_full.yml
+  - configs/foundation_models/diver/pos/subject6_full.yml
+  - configs/foundation_models/diver/pos/subject7_full.yml
+  - configs/foundation_models/diver/pos/subject8_full.yml
+  - configs/foundation_models/diver/pos/subject9_full.yml
+  iu_boundary_task:
+  - configs/foundation_models/diver/iu_boundary/persubject_concat.yml
+  - configs/foundation_models/diver/iu_boundary/subject1_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject2_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject3_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject4_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject5_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject6_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject7_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject8_full.yml
+  - configs/foundation_models/diver/iu_boundary/subject9_full.yml
+  volume_level_decoding_task:
+  - configs/foundation_models/diver/volume_level/persubject_concat.yml
+  - configs/foundation_models/diver/volume_level/subject1_full.yml
+  - configs/foundation_models/diver/volume_level/subject2_full.yml
+  - configs/foundation_models/diver/volume_level/subject3_full.yml
+  - configs/foundation_models/diver/volume_level/subject4_full.yml
+  - configs/foundation_models/diver/volume_level/subject5_full.yml
+  - configs/foundation_models/diver/volume_level/subject6_full.yml
+  - configs/foundation_models/diver/volume_level/subject7_full.yml
+  - configs/foundation_models/diver/volume_level/subject8_full.yml
+  - configs/foundation_models/diver/volume_level/subject9_full.yml
+foundation_models/popt:
+  word_embedding_decoding_task:
+  - configs/foundation_models/popt/word_embedding/persubject_concat.yml
+  - configs/foundation_models/popt/word_embedding/subject1_full.yml
+  - configs/foundation_models/popt/word_embedding/subject2_full.yml
+  - configs/foundation_models/popt/word_embedding/subject3_full.yml
+  - configs/foundation_models/popt/word_embedding/subject4_full.yml
+  - configs/foundation_models/popt/word_embedding/subject5_full.yml
+  - configs/foundation_models/popt/word_embedding/subject6_full.yml
+  - configs/foundation_models/popt/word_embedding/subject7_full.yml
+  - configs/foundation_models/popt/word_embedding/subject8_full.yml
+  - configs/foundation_models/popt/word_embedding/subject9_full.yml
+  whisper_embedding_decoding_task:
+  - configs/foundation_models/popt/whisper_embedding/persubject_concat.yml
+  - configs/foundation_models/popt/whisper_embedding/subject1_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject2_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject3_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject4_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject5_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject6_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject7_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject8_full.yml
+  - configs/foundation_models/popt/whisper_embedding/subject9_full.yml
+  llm_embedding_pretraining_task:
+  - configs/foundation_models/popt/llm_embedding_pretraining/persubject_concat.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject1_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject2_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject3_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject4_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject5_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject6_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject7_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject8_full.yml
+  - configs/foundation_models/popt/llm_embedding_pretraining/subject9_full.yml
+  llm_decoding_task:
+  - configs/foundation_models/popt/llm_decoding/persubject_concat.yml
+  - configs/foundation_models/popt/llm_decoding/subject1_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject2_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject3_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject4_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject5_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject6_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject7_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject8_full.yml
+  - configs/foundation_models/popt/llm_decoding/subject9_full.yml
+  sentence_onset_task:
+  - configs/foundation_models/popt/sentence_onset/persubject_concat.yml
+  - configs/foundation_models/popt/sentence_onset/subject1_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject2_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject3_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject4_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject5_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject6_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject7_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject8_full.yml
+  - configs/foundation_models/popt/sentence_onset/subject9_full.yml
+  gpt_surprise_task:
+  - configs/foundation_models/popt/gpt_surprise/persubject_concat.yml
+  - configs/foundation_models/popt/gpt_surprise/subject1_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject2_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject3_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject4_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject5_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject6_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject7_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject8_full.yml
+  - configs/foundation_models/popt/gpt_surprise/subject9_full.yml
+  gpt_surprise_multiclass_task:
+  - configs/foundation_models/popt/gpt_surprise_multiclass/persubject_concat.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject1_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject2_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject3_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject4_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject5_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject6_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject7_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject8_full.yml
+  - configs/foundation_models/popt/gpt_surprise_multiclass/subject9_full.yml
+  content_noncontent_task:
+  - configs/foundation_models/popt/content_noncontent/persubject_concat.yml
+  - configs/foundation_models/popt/content_noncontent/subject1_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject2_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject3_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject4_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject5_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject6_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject7_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject8_full.yml
+  - configs/foundation_models/popt/content_noncontent/subject9_full.yml
+  pos_task:
+  - configs/foundation_models/popt/pos/persubject_concat.yml
+  - configs/foundation_models/popt/pos/subject1_full.yml
+  - configs/foundation_models/popt/pos/subject2_full.yml
+  - configs/foundation_models/popt/pos/subject3_full.yml
+  - configs/foundation_models/popt/pos/subject4_full.yml
+  - configs/foundation_models/popt/pos/subject5_full.yml
+  - configs/foundation_models/popt/pos/subject6_full.yml
+  - configs/foundation_models/popt/pos/subject7_full.yml
+  - configs/foundation_models/popt/pos/subject8_full.yml
+  - configs/foundation_models/popt/pos/subject9_full.yml
+  iu_boundary_task:
+  - configs/foundation_models/popt/iu_boundary/persubject_concat.yml
+  - configs/foundation_models/popt/iu_boundary/subject1_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject2_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject3_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject4_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject5_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject6_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject7_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject8_full.yml
+  - configs/foundation_models/popt/iu_boundary/subject9_full.yml
+  volume_level_decoding_task:
+  - configs/foundation_models/popt/volume_level/persubject_concat.yml
+  - configs/foundation_models/popt/volume_level/subject1_full.yml
+  - configs/foundation_models/popt/volume_level/subject2_full.yml
+  - configs/foundation_models/popt/volume_level/subject3_full.yml
+  - configs/foundation_models/popt/volume_level/subject4_full.yml
+  - configs/foundation_models/popt/volume_level/subject5_full.yml
+  - configs/foundation_models/popt/volume_level/subject6_full.yml
+  - configs/foundation_models/popt/volume_level/subject7_full.yml
+  - configs/foundation_models/popt/volume_level/subject8_full.yml
+  - configs/foundation_models/popt/volume_level/subject9_full.yml

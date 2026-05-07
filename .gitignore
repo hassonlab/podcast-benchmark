@@ -227,3 +227,8 @@ exp/
 *.ckpt
 # Downloaded models
 model_cache/
+
+**/.DS_Store
+**/.ipynb_checkpoints
+paper-results/
+__marimo__/

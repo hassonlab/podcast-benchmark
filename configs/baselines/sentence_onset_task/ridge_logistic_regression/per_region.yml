@@ -1,0 +1,35 @@
+task_config:
+  task_name: sentence_onset_task
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    use_high_gamma: true
+    window_width: 1.0
+  task_specific_config:
+    sentence_csv_path: processed_data/all_sentences_podcast.csv
+training_params:
+  batch_size: 512
+  n_folds: 5
+  min_lag: -1000
+  max_lag: 1500
+  lag_step_size: 500
+  losses:
+  - cross_entropy
+  loss_weights:
+  - 1.0
+  metrics:
+  - roc_auc
+  early_stopping_metric: roc_auc
+  smaller_is_better: false
+  ridge_logistic_regression_baseline: true
+  tensorboard_logging: false
+  weight_decay: 0.001
+  learning_rate: 0.05
+model_spec:
+  constructor_name: 'torch_linear_model'
+  params:
+    output_dim: 1
+    bias: true
+    activation: sigmoid
+trial_name: ridge_logistic_regression_sentence_onset_per_region
+run_mode: per_region

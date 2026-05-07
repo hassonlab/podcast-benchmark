@@ -400,30 +400,6 @@ def get_mni_coordinates(
     return xyz_id
 
 
-def _apply_preprocessing(data, preprocessing_fns, preprocessor_params):
-    """Apply a list of preprocessing functions to data.
-
-    Args:
-        data: numpy array to preprocess
-        preprocessing_fns: list of preprocessing functions to apply in order
-        preprocessor_params: parameters to pass to preprocessing functions (dict or list of dicts)
-
-    Returns:
-        Preprocessed data array
-    """
-    if not preprocessing_fns:
-        return data
-
-    for i, preprocessing_fn in enumerate(preprocessing_fns):
-        if preprocessor_params and isinstance(preprocessor_params, list):
-            params = preprocessor_params[i] if i < len(preprocessor_params) else None
-        else:
-            params = preprocessor_params
-        data = preprocessing_fn(data, params)
-
-    return data
-
-
 def df_columns_to_tensors(
     df: pd.DataFrame,
     column_names: Optional[list[str]],

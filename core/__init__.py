@@ -1,6 +1,6 @@
 """Core framework components for the podcast benchmark."""
 
-from .config import DataParams, TrainingParams, ExperimentConfig, dict_to_config
+from .config import DataParams, TrainingParams, ExperimentConfig, RunMode, dict_to_config
 from .registry import (
     register_model_constructor,
     register_data_preprocessor,
@@ -19,6 +19,7 @@ __all__ = [
     "DataParams",
     "TrainingParams",
     "ExperimentConfig",
+    "RunMode",
     "dict_to_config",
     # Registry decorators
     "register_model_constructor",

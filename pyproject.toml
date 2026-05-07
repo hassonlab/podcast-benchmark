@@ -19,12 +19,12 @@ dependencies = [
     "pandas>=2.0.0",
     "scipy>=1.12.0",
     "scikit-learn>=1.5.0",
+    "himalaya>=0.4.0",
 
     # Deep learning (PyTorch)
     "torch>=2.0.0",
     "transformers==4.57.1",
     "mup>=1.0.0",
-    "peft>=0.17.0",
 
     # Neuroscience data handling
     "mne==1.9.0",
@@ -33,13 +33,11 @@ dependencies = [
     "jaxtyping>=0.3.0",
 
     # NLP and embeddings
-    "datasets>=3.0.0",
     "gensim==4.3.3",
     "nltk==3.9.1",
 
     # Data I/O
     "h5py==3.13.0",
-    "omegaconf>=2.3.0",
     "PyYAML==6.0.2",
 
     # Visualization
@@ -55,6 +53,40 @@ dependencies = [
 test = [
     "pytest==8.3.4",
     "pytest-mock==3.12.0",
+    "podcast-benchmark[paper]",
+]
+
+# Documentation site
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+    "pymdown-extensions>=10.0",
+]
+
+# Paper result generation and atlas visualization
+paper = [
+    "nilearn>=0.10.0",
+]
+
+# Audio/prosody transcription notebooks and scripts
+audio = [
+    "marimo>=0.19.2",
+    "librosa>=0.10.0",
+]
+
+# Dataset preprocessing scripts under data/code
+data = [
+    "accelerate>=0.26.0",
+    "spacy>=3.7.0",
+    "whisperx>=3.1.0",
+]
+
+# Vendored DIVER data loading and preprocessing paths
+diver-full = [
+    "lmdb>=1.4.1",
+    "moabb>=1.0.0",
+    "neuroprobe>=0.1.7",
+    "torcheeg>=1.1.0",
 ]
 
 # GPU support for PyTorch
@@ -82,7 +114,7 @@ dev = [
 
 # Full installation with all optional features
 all = [
-    "podcast-benchmark[test,gpu]",
+    "podcast-benchmark[test,gpu,docs,paper,audio,data,diver-full]",
 ]
 
 [tool.setuptools.packages.find]

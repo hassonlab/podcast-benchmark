@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,7 +11,10 @@ from core import registry
 class SentenceOnsetConfig(BaseTaskConfig):
     """Configuration for sentence_onset_task."""
     sentence_csv_path: str = "processed_data/all_sentences_podcast.csv"
+    word_csv_path: str = "processed_data/df_word_onset_with_pos_class.csv"
     negatives_per_positive: int = 1
+    # Legacy field accepted for older configs. Word-onset controlled sampling
+    # does not use this value.
     negative_margin_s: float = 2.0
 
 
@@ -23,51 +25,72 @@ def sentence_onset_task(task_config: TaskConfig):
 
     Returns a DataFrame with columns:
       - start: time (in seconds) to center the neural window
-      - target: 1.0 for sentence onset, 0.0 for negatives sampled away from onsets
+      - target: 1.0 for sentence-onset word onsets, 0.0 for other word onsets
 
     Notes:
-      - Uses config.sentence_csv_path if provided; else defaults to
-        `<data_root>/all_sentences_podcast.csv`.
-      - Negative examples are sampled within each sentence, at least
-        `negative_margin_s` seconds after onset and at least one window width
-        before the sentence end.
+      - Positive examples are word onsets matching sentence onsets.
+      - Negative examples are sampled from word onsets that do not match any
+        sentence onset.
+      - `negative_margin_s` remains accepted for config compatibility but is
+        intentionally unused.
     """
     # Get typed task-specific config
     config: SentenceOnsetConfig = task_config.task_specific_config
-    data_params = task_config.data_params
-    csv_path = config.sentence_csv_path
 
-    df = pd.read_csv(csv_path, index_col=0)
+    df_sentence = pd.read_csv(config.sentence_csv_path)
+    df_word = pd.read_csv(config.word_csv_path)
 
-    # Expect columns: sentence_onset, sentence_offset
-    if not {"sentence_onset", "sentence_offset"}.issubset(df.columns):
-        raise ValueError(
-            "Expected columns 'sentence_onset' and 'sentence_offset' in sentence CSV"
+    if "sentence_onset" not in df_sentence.columns:
+        raise ValueError("Expected column 'sentence_onset' in sentence CSV")
+
+    if "onset" not in df_word.columns:
+        raise ValueError("Expected column 'onset' in word CSV")
+
+    sentence_onsets = df_sentence["sentence_onset"].to_numpy(dtype=float)
+    word_onsets = df_word["onset"].to_numpy(dtype=float)
+
+    if len(sentence_onsets) == 0 or len(word_onsets) == 0:
+        word_matches_sentence = np.zeros(len(word_onsets), dtype=bool)
+        sentence_matches_word = np.zeros(len(sentence_onsets), dtype=bool)
+    else:
+        matches = np.isclose(
+            word_onsets[:, None],
+            sentence_onsets[None, :],
+            atol=1e-6,
+            rtol=0.0,
         )
+        word_matches_sentence = matches.any(axis=1)
+        sentence_matches_word = matches.any(axis=0)
 
-    onsets = df["sentence_onset"].to_numpy()
-    offsets = df["sentence_offset"].to_numpy()
+    pos = pd.DataFrame(
+        {
+            "start": word_onsets[word_matches_sentence],
+            "target": 1.0,
+        }
+    )
 
-    # Positives
-    pos = pd.DataFrame({"start": onsets, "target": 1.0})
-
-    # Negatives: sample away from onsets within the same sentence when possible
-    window = data_params.window_width if data_params.window_width > 0 else 0.625
+    negative_candidates = word_onsets[~word_matches_sentence]
     negatives_per_positive = config.negatives_per_positive
-    negative_margin_s = config.negative_margin_s
+    requested_negatives = len(pos) * negatives_per_positive
+    replacement_needed = requested_negatives > len(negative_candidates)
 
     rng = np.random.default_rng(0)
-    neg_starts = []
-    for onset, offset in zip(onsets, offsets):
-        # Start sampling after a margin to avoid including the onset in the window
-        left = onset + negative_margin_s
-        # Ensure we can still place a full window without touching sentence end
-        right = max(left, offset - window - 1e-3)
-        if right > left:
-            samples = rng.uniform(left, right, size=max(0, negatives_per_positive))
-            neg_starts.extend(samples.tolist())
+    if requested_negatives == 0:
+        neg_starts = np.array([], dtype=float)
+    elif len(negative_candidates) == 0:
+        raise ValueError(
+            "Cannot sample sentence onset negatives: no non-sentence word onsets found"
+        )
+    else:
+        neg_starts = rng.choice(
+            negative_candidates,
+            size=requested_negatives,
+            replace=replacement_needed,
+        )
 
     neg = pd.DataFrame({"start": neg_starts, "target": 0.0})
+
+    unmatched_sentence_onsets = int((~sentence_matches_word).sum())
 
     df_out = (
         pd.concat([pos, neg], ignore_index=True)
@@ -78,9 +101,13 @@ def sentence_onset_task(task_config: TaskConfig):
     # Print dataset summary for inspection
     print(f"\n=== SENTENCE ONSET DATASET ===")
     print(f"Total examples: {len(df_out)}")
-    print(f"Positives: {len(pos)} ({len(pos)/len(df_out)*100:.1f}%)")
-    print(f"Negatives: {len(neg)} ({len(neg)/len(df_out)*100:.1f}%)")
-    print(f"Time range: {df_out['start'].min():.2f}s - {df_out['start'].max():.2f}s")
+    print(f"Positives: {len(pos)}")
+    print(f"Negatives: {len(neg)}")
+    print(f"Requested negative ratio: {negatives_per_positive}")
+    print(f"Unmatched sentence onsets dropped: {unmatched_sentence_onsets}")
+    print(f"Replacement sampling needed: {replacement_needed}")
+    if len(df_out) > 0:
+        print(f"Time range: {df_out['start'].min():.2f}s - {df_out['start'].max():.2f}s")
     print(f"First 10 examples:")
     print(df_out.head(10))
     print("=" * 50)

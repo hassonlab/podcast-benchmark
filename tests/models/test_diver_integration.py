@@ -8,18 +8,52 @@ import torch.nn as nn
 from models.diver.integration import DIVERDecoder, create_data_info_list
 
 
-class MockDiverModel(nn.Module):
-    """Mock DIVER model that captures data_info_list for inspection."""
+class MockDiverBackbone(nn.Module):
+    def __init__(self, feature_dim):
+        super().__init__()
+        self.projection = nn.Linear(1, feature_dim)
 
-    def __init__(self, output_dim: int = 5):
+    def forward(self, x, **kwargs):
+        return self.projection(x.mean(dim=-1, keepdim=True))
+
+
+class MockDiverModel(nn.Module):
+    """Mock DIVER model with explicit feature/readout modules."""
+
+    def __init__(self, feature_dim=7, output_dim=5):
         super().__init__()
         self.output_dim = output_dim
         self.last_data_info_list = None
+        self.backbone = MockDiverBackbone(feature_dim)
+        self.ft_core_model = nn.Linear(feature_dim, feature_dim)
+        self.ft_model_output_adapter = nn.Linear(feature_dim, output_dim)
+
+    def feature_extraction_func(self, x, data_info_list=None):
+        self.last_data_info_list = data_info_list
+        return x
+
+    def ft_model_input_adapter(self, x, data_info_list=None):
+        self.last_data_info_list = data_info_list
+        return x.mean(dim=1)
 
     def forward(self, x, data_info_list=None):
-        self.last_data_info_list = data_info_list
-        batch_size = x.shape[0]
-        return torch.randn(batch_size, self.output_dim)
+        features = self.ft_model_input_adapter(
+            self.feature_extraction_func(
+                self.backbone(
+                    x,
+                    data_info_list=data_info_list,
+                    use_mask=False,
+                    return_encoder_output=True,
+                ),
+                data_info_list=data_info_list,
+            ),
+            data_info_list=data_info_list,
+        )
+        return self.ft_model_output_adapter(self.ft_core_model(features))
+
+
+class MockSplitDiverModel(MockDiverModel):
+    """Named alias for tests that assert the feature/readout split directly."""
 
 
 class TestDIVERDecoderForwardWithXyzId:
@@ -189,6 +223,22 @@ class TestDIVERDecoderOutputActivation:
 
         # Linear output can be any value
         assert output.shape == (4, 5)
+
+
+class TestDIVERDecoderFeatureCache:
+    """Test DIVERDecoder cacheable feature contract."""
+
+    def test_forward_matches_encode_then_forward_from_features(self):
+        mock_model = MockSplitDiverModel(feature_dim=7, output_dim=3)
+        decoder = DIVERDecoder(mock_model, output_activation="linear", output_dim=3)
+        decoder.eval()
+
+        x = torch.randn(4, 10, 100)
+        with torch.no_grad():
+            direct = decoder(x)
+            split = decoder.forward_from_features(decoder.encode_features(x))
+
+        torch.testing.assert_close(direct, split)
 
 
 class TestCreateDataInfoList:

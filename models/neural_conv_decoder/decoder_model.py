@@ -4,6 +4,7 @@ from torch.nn import functional as F
 
 
 from core import registry
+from models.shared_model_helpers import apply_activation
 
 
 class PitomModel(nn.Module):
@@ -82,7 +83,6 @@ class PitomModel(nn.Module):
         # Output layer
         self.dense = nn.Linear(conv_filters, output_dim)
         self.layer_norm = nn.LayerNorm(output_dim)
-        self.tanh = nn.Tanh()
 
     def forward(self, x):
         # Apply layers
@@ -102,15 +102,7 @@ class PitomModel(nn.Module):
         # LayerNorm collapses to zero when normalized_shape=1; skip for scalar output
         if self.output_dim > 1:
             x = self.layer_norm(x)
-        # Apply configurable output activation.
-        if self.output_activation == "tanh":
-            x = self.tanh(x)
-        elif self.output_activation == "sigmoid":
-            x = torch.sigmoid(x)
-        elif self.output_activation == "softmax":
-            x = torch.softmax(x, dim=-1)
-        elif self.output_activation == "linear":
-            pass  # No activation applied, x remains unchanged
+        x = apply_activation(x, self.output_activation)
 
         # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
         if x.shape[1] == 1:

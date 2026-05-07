@@ -18,12 +18,18 @@ def pearson_correlation(pred: torch.Tensor, true: torch.Tensor) -> float:
     """
     Pearson correlation coefficient between predictions and ground truth.
     """
+    pred = pred.to(dtype=torch.float32).reshape(-1)
+    true = true.to(dtype=torch.float32).reshape(-1)
+
+    if pred.numel() < 2 or true.numel() < 2:
+        return 0.0
+
     pred_mean = pred.mean()
     true_mean = true.mean()
 
     cov = ((pred - pred_mean) * (true - true_mean)).mean()
-    pred_std = pred.std()
-    true_std = true.std()
+    pred_std = pred.std(unbiased=False)
+    true_std = true.std(unbiased=False)
 
     if pred_std.item() == 0 or true_std.item() == 0:
         return 0.0
@@ -31,6 +37,9 @@ def pearson_correlation(pred: torch.Tensor, true: torch.Tensor) -> float:
     corr = cov / (pred_std * true_std)
 
     # corr=torch.corrcoef(true.unsqueeze(0), pred.unsqueeze(0))[0,1]
+
+    if not torch.isfinite(corr):
+        return 0.0
 
     return corr.item()
 

@@ -28,7 +28,6 @@ from .simple_transformer import (
     SimpleTransformer,
 )
 
-
 # =============================================================================
 # PATTERN 1: FEATURE EXTRACTION (FROZEN MODEL)
 # =============================================================================
@@ -499,12 +498,14 @@ def _normalize_upstream_cfg(
         or model_params.get("popt_num_layers")
         or model_params.get("num_layers")
         or 6,
-        "input_dim": BRAINBERT_OUTPUT_DIM
-        if use_brainbert
-        else _cfg_lookup(upstream_cfg, "input_dim", "input_channels")
-        or config_dict.get("input_channels")
-        or model_params.get("input_channels")
-        or 40,
+        "input_dim": (
+            BRAINBERT_OUTPUT_DIM
+            if use_brainbert
+            else _cfg_lookup(upstream_cfg, "input_dim", "input_channels")
+            or config_dict.get("input_channels")
+            or model_params.get("input_channels")
+            or 40
+        ),
     }
 
     position_encoding = "multi_subj_position_encoding" if use_lip_coords else None
@@ -558,8 +559,10 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 
     original_modules = {}
     for name in list(sys.modules.keys()):
-        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
-            "utils."
+        if (
+            name in ("models", "utils")
+            or name.startswith("models.")
+            or name.startswith("utils.")
         ):
             original_modules[name] = sys.modules[name]
             del sys.modules[name]
@@ -571,7 +574,9 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
         try:
             upstream.load_state_dict(states, strict=True)
         except Exception:
-            upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
+            upstream.load_state_dict(
+                _remap_state_dict_to_reference(states), strict=False
+            )
         upstream.to(device)
         return upstream
     finally:
@@ -604,6 +609,7 @@ class ReferencePOPTDecoder(nn.Module):
         self,
         upstream,
         output_dim=1,
+        num_electrodes=None,
         hidden_dim=768,
         mlp_layer_sizes=None,
         dropout=0.0,
@@ -620,10 +626,22 @@ class ReferencePOPTDecoder(nn.Module):
         self.brainbert_electrode_sequence = brainbert_electrode_sequence
         self.output_dim = output_dim
         self.output_activation = output_activation
-        self.cls_dim = BRAINBERT_OUTPUT_DIM if brainbert_upstream is not None else input_dim
+        self.num_electrodes = num_electrodes
+        self.flatten_electrode_sequence = (
+            brainbert_upstream is not None
+            and brainbert_electrode_sequence
+            and num_electrodes is not None
+        )
+        self.cls_dim = (
+            BRAINBERT_OUTPUT_DIM if brainbert_upstream is not None else input_dim
+        )
         self.classifier_norm = nn.LayerNorm(hidden_dim)
         self.head = MLPDecoder(
-            input_dim=hidden_dim,
+            input_dim=(
+                (num_electrodes + 1) * hidden_dim
+                if self.flatten_electrode_sequence
+                else hidden_dim
+            ),
             layer_sizes=(mlp_layer_sizes or []) + [output_dim],
             dropout=dropout,
             use_layer_norm=True,
@@ -643,12 +661,10 @@ class ReferencePOPTDecoder(nn.Module):
             raise ValueError(
                 f"Expected lip_coords shape [batch, {num_channels}, 3], got {tuple(lip_coords.shape)}"
             )
-        seq_ids = torch.zeros(
-            batch_size, num_channels, dtype=torch.long, device=device
-        )
+        seq_ids = torch.zeros(batch_size, num_channels, dtype=torch.long, device=device)
         return lip_coords, seq_ids
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         if x.ndim != 4:
             raise ValueError(
                 "PopT finetuning expects STFT input with shape [batch, channels, time, freq]."
@@ -656,13 +672,17 @@ class ReferencePOPTDecoder(nn.Module):
 
         lip_coords = kwargs.get("lip_coords")
         batch_size, num_channels, time_steps, freq_channels = x.shape
-        inputs = x.contiguous().view(batch_size * num_channels, time_steps, freq_channels)
+        inputs = x.contiguous().view(
+            batch_size * num_channels, time_steps, freq_channels
+        )
         pad_mask = None
 
         if self.brainbert_upstream is not None:
             self.brainbert_upstream.eval()
             with torch.no_grad():
-                features = self.brainbert_upstream(inputs, pad_mask, intermediate_rep=True)
+                features = self.brainbert_upstream(
+                    inputs, pad_mask, intermediate_rep=True
+                )
 
             if self.brainbert_electrode_sequence:
                 middle = features.shape[1] // 2
@@ -678,6 +698,9 @@ class ReferencePOPTDecoder(nn.Module):
                 encoded = self.upstream(
                     seq, pad_mask, intermediate_rep=True, positions=positions
                 )
+                if self.flatten_electrode_sequence:
+                    features = self.classifier_norm(encoded)
+                    return features.reshape(batch_size, -1)
                 cls_repr = encoded[:, 0, :]
             else:
                 if self.use_lip_coords:
@@ -689,10 +712,14 @@ class ReferencePOPTDecoder(nn.Module):
                 )
                 seq = torch.cat([cls, features], dim=1)
                 encoded = self.upstream(seq, pad_mask, intermediate_rep=True)
-                cls_repr = encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
+                cls_repr = (
+                    encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
+                )
         else:
             if self.use_lip_coords:
-                raise ValueError("use_lip_coords requires use_brainbert=True in this port.")
+                raise ValueError(
+                    "use_lip_coords requires use_brainbert=True in this port."
+                )
             cls = self._make_cls_token(
                 batch_size * num_channels, inputs.device, inputs.dtype
             )
@@ -700,12 +727,16 @@ class ReferencePOPTDecoder(nn.Module):
             encoded = self.upstream(seq, pad_mask, intermediate_rep=True)
             cls_repr = encoded[:, 0, :].view(batch_size, num_channels, -1).mean(dim=1)
 
-        cls_repr = self.classifier_norm(cls_repr)
-        if kwargs.get('return_feature_emb_instead_of_projection', False):
-            #* used for feature caching
-            assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-            return cls_repr
-        return self.head(cls_repr)
+        return self.classifier_norm(cls_repr)
+
+    def forward_from_features(self, features, **kwargs):
+        return self.head(features)
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("population_transformer_mlp")
@@ -905,9 +936,9 @@ class PopulationTransformerDecoder(nn.Module):
             output_activation=output_activation,
         )
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         """
-        Forward pass through STFT → BrainBERT (if enabled) → PopT foundation model.
+        Compute PopT foundation features before the decoder head.
 
         Matches original DIVER_CLIP PopT implementation:
         - Supports data_info_list (original approach)
@@ -1041,10 +1072,32 @@ class PopulationTransformerDecoder(nn.Module):
             else:
                 features = self.foundation_model(x, return_sequence=False)
 
-        # Pass through decoder head
-        output = self.decoder_head(features)
+        return features
 
-        return output
+    def forward_from_features(self, features, **kwargs):
+        return self.decoder_head(features)
+
+    def forward(self, x, **kwargs):
+        """
+        Forward pass through STFT → BrainBERT (if enabled) → PopT foundation model.
+
+        Matches original DIVER_CLIP PopT implementation:
+        - Supports data_info_list (original approach)
+        - Also supports lip_coords directly (backward compatibility)
+
+        Args:
+            x: Input tensor [batch_size, num_channels, seq_len] - raw neural signals
+            data_info_list: List of dicts with 'LIP_id' key (original DIVER_CLIP approach)
+            lip_coords: Optional LIP coordinates [batch_size, num_channels, 3] LongTensor (backward compatibility)
+            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
+
+        Returns:
+            Output tensor [batch_size, output_dim]
+        """
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_data_getter("popt_lip_coords")
@@ -1139,9 +1192,11 @@ def create_finetuning_decoder(model_params):
     brainbert_electrode_sequence = model_params.get(
         "brainbert_electrode_sequence", True
     )
-    brainbert_foundation_dir = model_params.get("brainbert_foundation_dir") or model_params.get(
-        "brainbert_model_dir"
-    ) or "models/brainbert/pretrained_model"
+    brainbert_foundation_dir = (
+        model_params.get("brainbert_foundation_dir")
+        or model_params.get("brainbert_model_dir")
+        or "models/brainbert/pretrained_model"
+    )
     brainbert_upstream = None
     if use_brainbert:
         brainbert_upstream = _load_brainbert_upstream(brainbert_foundation_dir)
@@ -1166,11 +1221,18 @@ def create_finetuning_decoder(model_params):
         if upstream_cfg is None:
             if any(
                 model_params.get(k) is not None
-                for k in ("popt_model_dim", "model_dim", "popt_num_layers", "num_layers")
+                for k in (
+                    "popt_model_dim",
+                    "model_dim",
+                    "popt_num_layers",
+                    "num_layers",
+                )
             ):
                 upstream_cfg = _model_params_to_upstream_cfg(model_params)
             elif config_dir:
-                upstream_cfg = _config_dict_to_upstream_cfg(_load_config_yaml(config_dir))
+                upstream_cfg = _config_dict_to_upstream_cfg(
+                    _load_config_yaml(config_dir)
+                )
             else:
                 raise ValueError(
                     "POPT checkpoint has no model_cfg and no config.yaml/model_params were provided."
@@ -1186,8 +1248,10 @@ def create_finetuning_decoder(model_params):
 
     original_modules = {}
     for name in list(sys.modules.keys()):
-        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
-            "utils."
+        if (
+            name in ("models", "utils")
+            or name.startswith("models.")
+            or name.startswith("utils.")
         ):
             original_modules[name] = sys.modules[name]
             del sys.modules[name]
@@ -1202,9 +1266,7 @@ def create_finetuning_decoder(model_params):
                 drop_position_encoding=drop_position_encoding,
             )
             try:
-                upstream.load_state_dict(
-                    states, strict=not drop_position_encoding
-                )
+                upstream.load_state_dict(states, strict=not drop_position_encoding)
             except Exception:
                 remapped = _prepare_upstream_state_dict(
                     _remap_state_dict_to_reference(states),
@@ -1219,6 +1281,7 @@ def create_finetuning_decoder(model_params):
         decoder = ReferencePOPTDecoder(
             upstream=upstream,
             output_dim=output_dim,
+            num_electrodes=model_params.get("num_electrodes"),
             hidden_dim=getattr(upstream_cfg, "hidden_dim", 768),
             mlp_layer_sizes=mlp_layer_sizes,
             dropout=dropout,
@@ -1339,7 +1402,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         }
     )
     stft_config.setdefault("fs", int(sample_rate))
-    stft_config.setdefault("batch_size", experiment_config.training_params.batch_size or 4)
+    stft_config.setdefault(
+        "batch_size", experiment_config.training_params.batch_size or 4
+    )
 
     _append_preprocessor(data_params, "stft_preprocessing", stft_config)
     data_params.use_stft_preprocessing = True
@@ -1387,7 +1452,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
     if use_lip_coords:
-        model_params.setdefault("popt_position_encoding", "multi_subj_position_encoding")
+        model_params.setdefault(
+            "popt_position_encoding", "multi_subj_position_encoding"
+        )
     if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 

@@ -4,6 +4,8 @@ import pytest
 import torch
 import torch.nn as nn
 
+from models.popt.integration import ReferencePOPTDecoder
+
 
 class TestPopTLipCoordsHandling:
     """Test PopT forward method correctly handles lip_coords kwarg.
@@ -132,3 +134,65 @@ class TestLipCoordsDataGetterOutput:
         for i in range(num_samples):
             assert isinstance(df.iloc[i]["lip_coords"], torch.Tensor)
             assert df.iloc[i]["lip_coords"].shape == (num_channels, 3)
+
+
+class StubBrainBERTUpstream(nn.Module):
+    def forward(self, inputs, pad_mask, intermediate_rep=False):
+        assert intermediate_rep is True
+        return torch.ones(inputs.shape[0], 10, 768, device=inputs.device)
+
+
+class StubPOPTUpstream(nn.Module):
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+
+    def forward(self, seq, pad_mask, intermediate_rep=False, positions=None):
+        assert intermediate_rep is True
+        assert positions is None
+        batch_size, seq_len, _ = seq.shape
+        encoded = torch.arange(
+            batch_size * seq_len * self.hidden_dim,
+            dtype=seq.dtype,
+            device=seq.device,
+        ).view(batch_size, seq_len, self.hidden_dim)
+        return encoded
+
+
+def test_reference_popt_decoder_flattens_cls_plus_electrode_sequence():
+    batch_size = 2
+    num_electrodes = 4
+    hidden_dim = 3
+    decoder = ReferencePOPTDecoder(
+        upstream=StubPOPTUpstream(hidden_dim=hidden_dim),
+        brainbert_upstream=StubBrainBERTUpstream(),
+        num_electrodes=num_electrodes,
+        hidden_dim=hidden_dim,
+    )
+    decoder.classifier_norm = nn.Identity()
+    x = torch.zeros(batch_size, num_electrodes, 6, 7)
+
+    features = decoder(x, return_feature_emb_instead_of_projection=True)
+
+    assert features.shape == (batch_size, (num_electrodes + 1) * hidden_dim)
+    expected_first_cls = torch.tensor([0.0, 1.0, 2.0])
+    torch.testing.assert_close(features[0, :hidden_dim], expected_first_cls)
+
+
+def test_reference_popt_feature_extraction_accepts_subject_channel_chunk():
+    batch_size = 2
+    actual_electrodes = 4
+    configured_electrodes = 183
+    hidden_dim = 3
+    decoder = ReferencePOPTDecoder(
+        upstream=StubPOPTUpstream(hidden_dim=hidden_dim),
+        brainbert_upstream=StubBrainBERTUpstream(),
+        num_electrodes=configured_electrodes,
+        hidden_dim=hidden_dim,
+    )
+    decoder.classifier_norm = nn.Identity()
+    x = torch.zeros(batch_size, actual_electrodes, 6, 7)
+
+    features = decoder(x, return_feature_emb_instead_of_projection=True)
+
+    assert features.shape == (batch_size, (actual_electrodes + 1) * hidden_dim)

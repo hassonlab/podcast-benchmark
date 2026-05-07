@@ -12,15 +12,24 @@ To download data and set up your local virtual environment:
 
 This will:
 - Create a Python virtual environment (conda or venv)
-- Install all required dependencies
+- Install the core benchmark runtime dependencies
 - Download the necessary podcast listening data
 
 **Setup options**:
 ```bash
-./setup.sh --gpu           # Install GPU dependencies (CUDA packages)
-./setup.sh --dev           # Install dev dependencies (testing), skip data download
+./setup.sh --gpu         # Install GPU dependencies (CUDA packages)
+./setup.sh --dev         # Install dev dependencies (testing), skip data download
+./setup.sh --docs        # Install documentation site dependencies
+./setup.sh --paper       # Install paper result and atlas visualization dependencies
+./setup.sh --audio       # Install audio/prosody transcription dependencies
+./setup.sh --data        # Install dataset preprocessing dependencies
+./setup.sh --diver-full  # Install vendored DIVER data loading dependencies
+./setup.sh --all         # Install all optional dependencies
 ./setup.sh --env-name NAME # Custom environment name (default: decoding_env)
 ```
+
+You can combine options, for example `./setup.sh --dev --paper`, to install
+only the optional workflows you need.
 
 ## Training Your First Model
 
@@ -64,8 +73,7 @@ See [Baseline Results](baseline-results.md) for performance benchmarks across al
 To modify data, behavior, or hyperparameters:
 
 Edit the relevant configuration file in `configs/`:
-- `configs/baselines/neural_conv_decoder/` - Neural convolutional decoder baselines
-- `configs/baselines/time_pooling_model/` - Time-pooling regression baselines
+- `configs/baselines/<task_name>/<baseline_family>/` - Task-grouped baseline configs, including supersubject, per-subject, and per-region variants
 - `configs/examples/example_foundation_model/` - Example foundation-model configs
 - `configs/foundation_models/` - Production foundation-model configs
 - `configs/controls/llm_decoding/` - Control runs for LLM decoding

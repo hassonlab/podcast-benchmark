@@ -13,14 +13,24 @@ from core import registry
 
 @pytest.fixture(autouse=True)
 def reset_registries():
-    """Reset all registries after each test to prevent state pollution."""
-    yield  # Run the test
-    # Clean up after the test
-    registry.model_constructor_registry.clear()
-    registry.data_preprocessor_registry.clear()
-    registry.config_setter_registry.clear()
-    registry.metric_registry.clear()
-    registry.model_data_getter_registry.clear()
+    """Run registry tests in isolation without deleting existing registrations."""
+    registries = [
+        registry.model_constructor_registry,
+        registry.data_preprocessor_registry,
+        registry.config_setter_registry,
+        registry.metric_registry,
+        registry.model_data_getter_registry,
+    ]
+    snapshots = [registered.copy() for registered in registries]
+
+    for registered in registries:
+        registered.clear()
+
+    yield
+
+    for registered, snapshot in zip(registries, snapshots):
+        registered.clear()
+        registered.update(snapshot)
 
 
 @pytest.fixture

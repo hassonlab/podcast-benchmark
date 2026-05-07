@@ -4,6 +4,8 @@ task_config:
     data_root: data
     window_width: 0.625
     electrode_file_path: processed_data/all_subject_sig.csv
+  task_specific_config:
+    no_brain_encoder: true
 training_params:
   batch_size: 16
   epochs: 50
@@ -20,10 +22,3 @@ training_params:
   early_stopping_metric: cross_entropy
   smaller_is_better: true
 trial_name: llm_decoding
-model_spec:
-  constructor_name: gpt2_brain
-  params:
-    freeze_lm: true
-    no_brain_encoder: true
-    encoder_forward_kwargs:
-      preserve_ensemble: true

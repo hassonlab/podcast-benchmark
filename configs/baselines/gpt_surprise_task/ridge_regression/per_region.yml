@@ -1,0 +1,37 @@
+task_config:
+  task_name: gpt_surprise_task
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    use_high_gamma: true
+    window_width: 1.0
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 512
+  n_folds: 5
+  min_lag: -1000
+  max_lag: 1500
+  lag_step_size: 500
+  losses:
+  - mse
+  loss_weights:
+  - 1.0
+  metrics:
+  - mse
+  - corr
+  - r2
+  early_stopping_metric: mse
+  smaller_is_better: true
+  ridge_regression_baseline: true
+  tensorboard_logging: false
+  weight_decay: 0.001
+  learning_rate: 0.05
+model_spec:
+  constructor_name: 'torch_linear_model'
+  params:
+    output_dim: 1
+    bias: true
+    activation: linear
+trial_name: ridge_regression_gpt_surprise_per_region
+run_mode: per_region

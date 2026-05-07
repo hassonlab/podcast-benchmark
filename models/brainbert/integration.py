@@ -416,6 +416,18 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 load_pretrained_model = load_reference_pretrained_model
 
 
+def _adaptive_avg_pool_temporal_patches(features, temporal_patches_to_keep):
+    if temporal_patches_to_keep < 1:
+        raise ValueError(
+            "BrainBERT temporal_patches_to_keep must be at least 1: "
+            f"got {temporal_patches_to_keep}."
+        )
+
+    features = features.transpose(1, 2).contiguous()
+    features = F.adaptive_avg_pool1d(features, temporal_patches_to_keep)
+    return features.transpose(1, 2)
+
+
 class ReferenceBrainBERTDecoder(nn.Module):
     def __init__(
         self,
@@ -423,6 +435,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
         output_dim=1,
         num_electrodes=None,
         hidden_dim=768,
+        temporal_patches_to_keep=10,
         mlp_layer_sizes=None,
         dropout=0.0,
         output_activation="linear",
@@ -432,10 +445,15 @@ class ReferenceBrainBERTDecoder(nn.Module):
         self.output_dim = output_dim
         self.num_electrodes = num_electrodes
         self.hidden_dim = hidden_dim
+        self.temporal_patches_to_keep = temporal_patches_to_keep
         self.output_activation = output_activation
 
         if self.num_electrodes is not None and self.hidden_dim is not None:
-            input_dim = self.num_electrodes * self.hidden_dim
+            input_dim = (
+                self.num_electrodes
+                * self.temporal_patches_to_keep
+                * self.hidden_dim
+            )
             if mlp_layer_sizes:
                 layers = []
                 curr_dim = input_dim
@@ -454,7 +472,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
         else:
             self.projector = None
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         if x.ndim != 4:
             raise ValueError(
                 "BrainBERT finetuning expects STFT input with shape [batch, channels, time, freq]."
@@ -477,27 +495,28 @@ class ReferenceBrainBERTDecoder(nn.Module):
                 )
 
             if features.shape[0] == batch_size * num_channels:
-                seq_len = features.shape[1]
-                middle = seq_len // 2
-                start = max(0, middle - 5)
-                end = min(seq_len, middle + 5)
-                if end <= start:
-                    pooled = features.mean(dim=1)
-                else:
-                    pooled = features[:, start:end, :].mean(dim=1)
+                features = _adaptive_avg_pool_temporal_patches(
+                    features, self.temporal_patches_to_keep
+                )
             else:
-                pooled = features.mean(dim=0)
+                raise ValueError(
+                    "BrainBERT upstream returned an unexpected batch dimension: "
+                    f"got {features.shape[0]}, expected {batch_size * num_channels}."
+                )
 
-            pooled = pooled.view(batch_size, num_channels, -1)
-            flattened = pooled.reshape(batch_size, -1)
-            if kwargs.get('return_feature_emb_instead_of_projection', False):
-                assert self.output_activation not in ['sigmoid','softmax', 'tanh'], "Output activation not impelmented since it needs to do the finetune model then that thing, which we currently don't implement in the decoding_utils.py"
-                #* used for feature caching
-                return flattened
-            out = self.projector(flattened)
-        else:
-            out = self.finetune_model(inputs, pad_mask)
-            out = out.view(batch_size, num_channels, -1).mean(dim=1)
+            features = features.view(
+                batch_size,
+                num_channels,
+                self.temporal_patches_to_keep,
+                -1,
+            )
+            return features.reshape(batch_size, -1)
+
+        out = self.finetune_model(inputs, pad_mask)
+        return out.view(batch_size, num_channels, -1).mean(dim=1)
+
+    def forward_from_features(self, features, **kwargs):
+        out = self.projector(features) if self.projector is not None else features
 
         if self.output_activation == "sigmoid":
             out = torch.sigmoid(out)
@@ -507,6 +526,12 @@ class ReferenceBrainBERTDecoder(nn.Module):
         if self.output_dim == 1 and out.shape[-1] == 1:
             out = out.squeeze(-1)
         return out
+
+    def forward(self, x, **kwargs):
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("brainbert_mlp")
@@ -603,12 +628,12 @@ class BrainBERTDecoder(nn.Module):
             output_activation=output_activation,
         )
 
-    def forward(self, x, **kwargs):
+    def encode_features(self, x, **kwargs):
         """
-        Forward pass through foundation model and decoder head.
+        Compute foundation features before the decoder head.
 
         Args:
-            x: Input tensor 
+            x: Input tensor
                 - [batch_size, num_channels, seq_len] for raw signals
                 - [batch_size, num_channels, time_stft, freq_channels] for STFT preprocessed data
             **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
@@ -644,10 +669,28 @@ class BrainBERTDecoder(nn.Module):
             # Get features from foundation model
             features = self.foundation_model(x, return_sequence=False)
 
-        # Pass through decoder head
-        output = self.decoder_head(features)
+        return features
 
-        return output
+    def forward_from_features(self, features, **kwargs):
+        return self.decoder_head(features)
+
+    def forward(self, x, **kwargs):
+        """
+        Forward pass through foundation model and decoder head.
+
+        Args:
+            x: Input tensor
+                - [batch_size, num_channels, seq_len] for raw signals
+                - [batch_size, num_channels, time_stft, freq_channels] for STFT preprocessed data
+            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
+
+        Returns:
+            Output tensor [batch_size, output_dim]
+        """
+        features = self.encode_features(x, **kwargs)
+        if kwargs.get('return_feature_emb_instead_of_projection', False):
+            return features
+        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_constructor("brainbert_finetune")
@@ -674,6 +717,7 @@ def create_finetuning_decoder(model_params):
     mlp_layer_sizes = model_params.get("mlp_layer_sizes", [])
     dropout = model_params.get("dropout", 0.0)
     num_electrodes = model_params.get("num_electrodes")
+    temporal_patches_to_keep = model_params.get("temporal_patches_to_keep", 10)
 
     ckpt_path, config_dir = _resolve_checkpoint_and_config_dir(model_params)
     random_init = ckpt_path is None
@@ -749,6 +793,7 @@ def create_finetuning_decoder(model_params):
             output_dim=output_dim,
             num_electrodes=num_electrodes,
             hidden_dim=hidden_dim,
+            temporal_patches_to_keep=temporal_patches_to_keep,
             mlp_layer_sizes=mlp_layer_sizes,
             dropout=dropout,
             output_activation=_resolve_output_activation(model_params, output_dim),
@@ -877,6 +922,7 @@ def set_finetuning_config(experiment_config, raws, _df_word):
 
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
+    model_params.setdefault("temporal_patches_to_keep", 10)
     if model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 

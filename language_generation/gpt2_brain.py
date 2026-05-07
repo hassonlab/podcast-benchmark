@@ -6,21 +6,34 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 from core import registry
 
 
+def load_gpt2_tokenizer(
+    cache_dir: str,
+    model_name: str = "gpt2",
+):
+    """Load a GPT-2 tokenizer without instantiating the language model."""
+    tokenizer = GPT2TokenizerFast.from_pretrained(
+        model_name,
+        cache_dir=cache_dir,
+        local_files_only=True,  # *on school server set this to True, and False if elsewhere
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
 def load_gpt2_model_and_tokenizer(
     cache_dir: str,
     model_name: str = "gpt2",
 ):
     """Load GPT-2 model and tokenizer."""
-    tokenizer = GPT2TokenizerFast.from_pretrained(
-        model_name, cache_dir=cache_dir, local_files_only=True
-    )
+    tokenizer = load_gpt2_tokenizer(cache_dir=cache_dir, model_name=model_name)
     model = GPT2LMHeadModel.from_pretrained(
-        model_name, cache_dir=cache_dir, local_files_only=True
+        model_name,
+        cache_dir=cache_dir,
+        local_files_only=True,  # *on school server set this to True, and False if elsewhere
     )
 
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        model.config.pad_token_id = tokenizer.eos_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
     return model, tokenizer
 
 
@@ -46,6 +59,7 @@ class GPT2Brain(nn.Module):
         encoder_forward_kwargs={},
         no_brain_encoder=False,
         no_brain_token_injection=False,
+        feature_cache=False,
     ):
         """
         Initialize GPT2Brain model.
@@ -65,6 +79,8 @@ class GPT2Brain(nn.Module):
 
         self.no_brain_encoder = no_brain_encoder
         self.no_brain_token_injection = no_brain_token_injection
+        self.freeze_lm = freeze_lm
+        self.feature_cache = feature_cache
 
         self.lm_model = lm_model
         self.tokenizer = tokenizer
@@ -90,30 +106,46 @@ class GPT2Brain(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.lm_model.config.pad_token_id = self.tokenizer.eos_token_id
 
-        # Freeze language model if requested
-        if freeze_lm:
-            for param in self.lm_model.parameters():
-                param.requires_grad = False
+        if self.freeze_lm and not self.no_brain_token_injection:
+            self._register_brain_token_gradient_hook()
 
-            # Enable gradients for the entire embedding layer
-            # (we can't set requires_grad on a view/subset of embeddings)
+        self._apply_train_eval_policy(training=self.training)
+
+    def _register_brain_token_gradient_hook(self):
+        """Mask embedding gradients so only brain separator tokens are updated."""
+
+        def zero_non_brain_gradients(grad):
+            """Zero out gradients for all embeddings except brain tokens."""
+            mask = torch.zeros_like(grad)
+            for token_id in self.brain_token_ids:
+                mask[token_id] = 1.0
+            return grad * mask
+
+        self.lm_model.transformer.wte.weight.register_hook(zero_non_brain_gradients)
+
+    def _set_lm_requires_grad(self, requires_grad):
+        for param in self.lm_model.parameters():
+            param.requires_grad = requires_grad
+
+    def _apply_train_eval_policy(self, training):
+        if self.freeze_lm:
+            self.lm_model.eval()
+            self._set_lm_requires_grad(False)
+
+            # We still train the brain separator embeddings even when the LM is frozen.
             if not self.no_brain_token_injection:
                 self.lm_model.transformer.wte.weight.requires_grad = True
+        else:
+            self.lm_model.train(training)
+            self._set_lm_requires_grad(True)
 
-                # Register backward hook to zero gradients for all embeddings
-                # except brain token embeddings
-                def zero_non_brain_gradients(grad):
-                    """Zero out gradients for all embeddings except brain tokens."""
-                    # Create a mask that's 1 for brain tokens, 0 for everything else
-                    mask = torch.zeros_like(grad)
-                    for token_id in self.brain_token_ids:
-                        mask[token_id] = 1.0
-                    # Zero gradients for non-brain tokens
-                    return grad * mask
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self._apply_train_eval_policy(training=mode)
+        return self
 
-                self.lm_model.transformer.wte.weight.register_hook(
-                    zero_non_brain_gradients
-                )
+    def eval(self):
+        return self.train(False)
 
     def _get_brain_separator_embeddings(self, batch_size, device):
         """Get embeddings for brain separator tokens."""
@@ -180,6 +212,91 @@ class GPT2Brain(nn.Module):
 
         return target_logits
 
+    def encode_features(self, neural_data, **encoder_inputs):
+        """Compute cacheable encoder features before the encoder readout."""
+        if self.no_brain_encoder:
+            return None
+
+        encoder_kwargs = dict(self.encoder_forward_kwargs)
+        encoder_kwargs.update(self._filter_encoder_cache_kwargs(encoder_inputs))
+        if hasattr(self.encoder_model, "encode_features"):
+            return self.encoder_model.encode_features(neural_data, **encoder_kwargs)
+
+        encoder_kwargs["return_feature_emb_instead_of_projection"] = True
+        return self.encoder_model(neural_data, **encoder_kwargs)
+
+    def forward_from_features(
+        self,
+        features,
+        all_input_ids,
+        all_attention_mask,
+        target_attention_mask=None,
+        return_all_preds=False,
+        **encoder_inputs,
+    ):
+        neural_embedding = self._get_neural_embedding_from_features(
+            features, **encoder_inputs
+        )
+        prompt_embeddings, prompt_attention_mask = self._build_prompt_embeddings(
+            neural_embedding, all_input_ids, all_attention_mask, **encoder_inputs
+        )
+        output = self.lm_model(
+            inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
+        )
+
+        if return_all_preds:
+            return output, prompt_attention_mask
+
+        if target_attention_mask is None:
+            raise ValueError(
+                "target_attention_mask must be provided when return_all_preds=False"
+            )
+        return self._get_target_predictions(
+            output, prompt_attention_mask, target_attention_mask
+        )
+
+    def _filter_encoder_cache_kwargs(self, encoder_inputs):
+        return {
+            k: v
+            for k, v in encoder_inputs.items()
+            if k
+            not in {
+                "all_input_ids",
+                "all_attention_mask",
+                "target_attention_mask",
+                "return_all_preds",
+                "return_feature_emb_instead_of_projection",
+            }
+        }
+
+    def _get_neural_embedding_from_features(self, features, **encoder_inputs):
+        if self.no_brain_encoder:
+            return None
+        if hasattr(self.encoder_model, "forward_from_features"):
+            return self.encoder_model.forward_from_features(features, **encoder_inputs)
+        return features
+
+    def _get_neural_embedding(
+        self,
+        neural_data,
+        return_feature_emb_instead_of_projection=False,
+        **encoder_inputs,
+    ):
+        if self.no_brain_encoder:
+            return None
+
+        if self.feature_cache and not return_feature_emb_instead_of_projection:
+            return self._get_neural_embedding_from_features(
+                neural_data, **encoder_inputs
+            )
+
+        if return_feature_emb_instead_of_projection:
+            return self.encode_features(neural_data, **encoder_inputs)
+
+        encoder_kwargs = dict(self.encoder_forward_kwargs)
+        encoder_kwargs.update(encoder_inputs)
+        return self.encoder_model(neural_data, **encoder_kwargs)
+
     def _convert_to_embeddings(
         self, neural_data, input_ids, attention_mask, **encoder_inputs
     ):
@@ -195,19 +312,35 @@ class GPT2Brain(nn.Module):
             prompt_embeddings: [batch_size, brain_prompt_len + seq_len, hidden_size]
             prompt_attention_mask: [batch_size, brain_prompt_len + seq_len]
         """
+        return_features = encoder_inputs.pop(
+            "return_feature_emb_instead_of_projection", False
+        )
+        neural_embedding = self._get_neural_embedding(
+            neural_data,
+            return_feature_emb_instead_of_projection=return_features,
+            **encoder_inputs,
+        )
+        if return_features:
+            return neural_embedding, None
+
+        return self._build_prompt_embeddings(
+            neural_embedding, input_ids, attention_mask, **encoder_inputs
+        )
+
+    def _build_prompt_embeddings(
+        self, neural_embedding, input_ids, attention_mask, **encoder_inputs
+    ):
+
         device = input_ids.device
-        batch_size = neural_data.shape[0]
+        batch_size = (
+            neural_embedding.shape[0]
+            if neural_embedding is not None
+            else input_ids.shape[0]
+        )
 
         all_tokens = []
         num_neural_tokens = 0
-
         if not self.no_brain_encoder:
-            encoder_kwargs = dict(self.encoder_forward_kwargs)
-            encoder_kwargs.update(encoder_inputs)
-            neural_embedding = self.encoder_model(
-                neural_data, **encoder_kwargs
-            )  # [batch, embed_dim] or [batch, num_tokens, embed_dim]
-
             if neural_embedding.ndim == 2:
                 # Single embedding: [batch, embed_dim] -> [batch, 1, embed_dim]
                 neural_embedding = neural_embedding.unsqueeze(1)
@@ -281,7 +414,21 @@ class GPT2Brain(nn.Module):
             If return_all_preds=False:
                 target_logits: Predictions for target tokens [batch_size, max_target_tokens, vocab_size]
         """
-        if not return_all_preds and target_attention_mask is None:
+        if encoder_inputs.get("return_feature_emb_instead_of_projection", False):
+            assert (
+                self.encoder_model is not None
+            ), "Encoder model must be provided if using return_feature_emb_instead_of_projection"
+            self.return_features_instead_of_projection = encoder_inputs[
+                "return_feature_emb_instead_of_projection"
+            ]  # *no popping! used later
+        else:
+            self.return_features_instead_of_projection = False
+
+        if (
+            not self.return_features_instead_of_projection
+            and not return_all_preds
+            and target_attention_mask is None
+        ):
             raise ValueError(
                 "target_attention_mask must be provided when return_all_preds=False"
             )
@@ -289,6 +436,8 @@ class GPT2Brain(nn.Module):
         prompt_embeddings, prompt_attention_mask = self._convert_to_embeddings(
             neural_data, all_input_ids, all_attention_mask, **encoder_inputs
         )
+        if self.return_features_instead_of_projection:
+            return prompt_embeddings
 
         output = self.lm_model(
             inputs_embeds=prompt_embeddings, attention_mask=prompt_attention_mask
@@ -490,7 +639,8 @@ class GPT2Brain(nn.Module):
 def gpt2_brain_model_constructor(model_params):
     """Construct GPT2Brain model from model_spec."""
     lm_model, tokenizer = load_gpt2_model_and_tokenizer(
-        cache_dir=model_params.get("cache_dir", None)
+        cache_dir=model_params.get("cache_dir", None),
+        model_name=model_params.get("model_name", "gpt2"),
     )
     encoder_model = model_params.get("encoder_model", None)
     freeze_lm = model_params.get("freeze_lm", True)
@@ -503,6 +653,7 @@ def gpt2_brain_model_constructor(model_params):
         encoder_forward_kwargs=model_params.get("encoder_forward_kwargs", {}),
         no_brain_encoder=model_params.get("no_brain_encoder", False),
         no_brain_token_injection=model_params.get("no_brain_token_injection", False),
+        feature_cache=model_params.get("feature_cache", False),
     )
 
     return model
