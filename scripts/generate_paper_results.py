@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Sequence
+from typing import Any, Dict, Iterable, Mapping, Sequence
 
 import matplotlib
 
@@ -29,6 +29,13 @@ DEFAULT_NILEARN_DATA_DIR = (
     Path("processed_data") / "atlas_region_visualization" / "nilearn_data"
 )
 DEFAULT_SELECTED_ELECTRODE_PATH = Path("processed_data") / "all_subject_sig.csv"
+DEFAULT_NEURAL_CONV_SUMMARY_CONFIG = (
+    Path("configs")
+    / "baselines"
+    / "content_noncontent_task"
+    / "neural_conv_decoder"
+    / "supersubject.yml"
+)
 REGION_LEVEL_ORDER = ("EAC", "PC", "PRC", "IFG", "MTG", "ITG", "TPJ", "TP", "RIGHT")
 DEFAULT_TASK_GROUP_ORDER = ("Representations", "Semantic", "Syntactic", "Acoustic")
 COMPACT_EXCLUDED_TASKS = ("llm_decoding", "gpt_surprise")
@@ -150,6 +157,41 @@ def read_config(path: Path) -> Mapping:
     if not isinstance(config, Mapping):
         raise ValueError(f"Config must be a mapping: {path}")
     return config
+
+
+def resolve_config_path(config_path: Path, value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    path = Path(value)
+    if path.is_absolute() or path.exists():
+        return path
+    return config_path.parent / path
+
+
+def destrieux_atlas_path(config: Mapping, config_path: Path) -> Path | None:
+    """Return the configured Destrieux atlas path, if one is present.
+
+    The plotting config historically used Nilearn's fetchers implicitly. Accept
+    a few explicit key names so existing paper-result configs can add the path
+    either at the plotting level or directly under per-region brain settings.
+    """
+
+    plot_config = plotting_config(config)
+    brain_config = per_region_brain_plot_config(config)
+    candidate_containers = (brain_config, plot_config, config)
+    candidate_keys = (
+        "destrieux_atlas_path",
+        "destrieux_2009_atlas_path",
+        "atlas_path",
+    )
+    for container in candidate_containers:
+        if not isinstance(container, Mapping):
+            continue
+        for key in candidate_keys:
+            value = container.get(key)
+            if value:
+                return resolve_config_path(config_path, value)
+    return None
 
 
 def load_current_style_run(run_dir: Path) -> pd.DataFrame:
@@ -870,9 +912,7 @@ def best_lag_latex_table(summary: pd.DataFrame, config: Mapping) -> str:
                     (summary["task"].astype(str) == task)
                     & (summary["condition"].astype(str) == condition)
                 ]
-                percent_decreases = relative_decrease_by_model(
-                    task_condition_summary
-                )
+                percent_decreases = relative_decrease_by_model(task_condition_summary)
                 for model in models:
                     item = records.get((condition, task, model))
                     if item is None:
@@ -902,6 +942,226 @@ def best_lag_latex_table(summary: pd.DataFrame, config: Mapping) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def neural_conv_summary_options(config: Mapping) -> Mapping:
+    model_summary_config = config.get("model_summary", {})
+    if not isinstance(model_summary_config, Mapping):
+        return {}
+    options = model_summary_config.get("neural_conv_decoder", model_summary_config)
+    return options if isinstance(options, Mapping) else {}
+
+
+def neural_conv_summary_enabled(config: Mapping) -> bool:
+    options = neural_conv_summary_options(config)
+    return bool(options.get("enabled", True))
+
+
+def neural_conv_summary_config_path(config: Mapping) -> Path:
+    options = neural_conv_summary_options(config)
+    return Path(options.get("config", DEFAULT_NEURAL_CONV_SUMMARY_CONFIG))
+
+
+def neural_conv_summary_output_name(config: Mapping) -> str:
+    options = neural_conv_summary_options(config)
+    return str(options.get("output_name", "neural_conv_decoder_summary"))
+
+
+def _iter_config_setter_names(config_setter_name) -> list[str]:
+    if not config_setter_name:
+        return []
+    if isinstance(config_setter_name, str):
+        return [config_setter_name]
+    return list(config_setter_name)
+
+
+def _load_configured_neural_conv_model(config_path: Path):
+    from types import SimpleNamespace
+
+    import torch
+
+    from core import registry
+    from core.config import MultiTaskConfig
+    from utils.config_utils import load_config
+    from utils.model_utils import build_model_from_spec
+    from utils.module_loader_utils import import_all_from_package
+
+    import_all_from_package("models", recursive=True)
+    import_all_from_package("tasks", recursive=True)
+    import_all_from_package("metrics", recursive=True)
+
+    loaded_config = load_config(str(config_path), {})
+    experiment_config = (
+        loaded_config.tasks[0]
+        if isinstance(loaded_config, MultiTaskConfig)
+        else loaded_config
+    )
+
+    data_params = experiment_config.task_config.data_params
+    per_subject_electrodes = data_params.per_subject_electrodes or {}
+    if not per_subject_electrodes:
+        raise ValueError(
+            f"Config {config_path} did not resolve any per-subject electrodes"
+        )
+
+    raws = [
+        SimpleNamespace(ch_names=list(per_subject_electrodes[subject_id]))
+        for subject_id in data_params.subject_ids
+    ]
+    for config_setter_name in _iter_config_setter_names(
+        experiment_config.config_setter_name
+    ):
+        setter = registry.config_setter_registry[config_setter_name]
+        experiment_config = setter(experiment_config, raws, pd.DataFrame())
+
+    model = build_model_from_spec(experiment_config.model_spec)
+    model.eval()
+
+    model_params = experiment_config.model_spec.params
+    input_channels = int(model_params["input_channels"])
+    input_timesteps = int(model_params.get("input_timesteps", 1))
+    dummy_input = torch.zeros(2, input_channels, input_timesteps)
+    return model, dummy_input, experiment_config
+
+
+def _format_model_summary_shape(value: Any) -> str:
+    try:
+        import torch
+    except ImportError:
+        torch = None
+
+    if torch is not None and isinstance(value, torch.Tensor):
+        return "(" + ", ".join(str(dim) for dim in value.shape) + ")"
+    if isinstance(value, (list, tuple)):
+        return (
+            "[" + ", ".join(_format_model_summary_shape(item) for item in value) + "]"
+        )
+    if isinstance(value, Mapping):
+        return (
+            "{"
+            + ", ".join(
+                f"{key}: {_format_model_summary_shape(item)}"
+                for key, item in value.items()
+            )
+            + "}"
+        )
+    return str(type(value).__name__)
+
+
+def neural_conv_model_summary_rows(model, example_input) -> pd.DataFrame:
+    import torch
+
+    rows: list[dict[str, Any]] = []
+    hooks = []
+
+    def register_hook(name: str, module):
+        if list(module.children()):
+            return
+
+        def hook(_module, _inputs, output):
+            params = sum(param.numel() for param in _module.parameters(recurse=False))
+            trainable = sum(
+                param.numel()
+                for param in _module.parameters(recurse=False)
+                if param.requires_grad
+            )
+            rows.append(
+                {
+                    "layer": name,
+                    "type": _module.__class__.__name__,
+                    "output_shape": _format_model_summary_shape(output),
+                    "parameters": params,
+                    "trainable_parameters": trainable,
+                }
+            )
+
+        hooks.append(module.register_forward_hook(hook))
+
+    for name, module in model.named_modules():
+        if name:
+            register_hook(name, module)
+
+    try:
+        with torch.no_grad():
+            model(example_input)
+    finally:
+        for hook in hooks:
+            hook.remove()
+
+    return pd.DataFrame(rows)
+
+
+def neural_conv_model_summary_latex_table(
+    summary: pd.DataFrame,
+    model,
+    config_path: Path,
+) -> str:
+    total_params = sum(param.numel() for param in model.parameters())
+    trainable_params = sum(
+        param.numel() for param in model.parameters() if param.requires_grad
+    )
+    lines = [
+        r"\begin{table}[ht]",
+        r"\centering",
+        (
+            r"\caption{Neural convolution decoder model summary. "
+            rf"Configuration: \texttt{{{latex_escape_text(config_path)}}}.}}"
+        ),
+        r"\resizebox{\textwidth}{!}{%",
+        r"\begin{tabular}{lllr}",
+        r"\toprule",
+        r"\textbf{Layer} & \textbf{Type} & \textbf{Output shape} & \textbf{Parameters} \\",
+        r"\midrule",
+    ]
+    for row in summary.to_dict("records"):
+        lines.append(
+            " & ".join(
+                [
+                    latex_escape_text(row["layer"]),
+                    latex_escape_text(row["type"]),
+                    latex_escape_text(row["output_shape"]),
+                    f"{int(row['parameters']):,}",
+                ]
+            )
+            + r" \\"
+        )
+    lines.extend(
+        [
+            r"\midrule",
+            r"\textbf{Total} &  &  & " + f"{total_params:,}" + r" \\",
+            r"\textbf{Trainable} &  &  & " + f"{trainable_params:,}" + r" \\",
+            r"\bottomrule",
+            r"\end{tabular}",
+            r"}",
+            r"\label{tab:neural_conv_decoder_summary}",
+            r"\end{table}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_neural_conv_model_summary_table(
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+) -> None:
+    if not neural_conv_summary_enabled(config):
+        return
+    if "latex" not in formats and "tex" not in formats:
+        return
+
+    config_path = neural_conv_summary_config_path(config)
+    model, example_input, _experiment_config = _load_configured_neural_conv_model(
+        config_path
+    )
+    summary = neural_conv_model_summary_rows(model, example_input)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_name = neural_conv_summary_output_name(config)
+    (output_dir / f"{output_name}.tex").write_text(
+        neural_conv_model_summary_latex_table(summary, model, config_path)
+    )
 
 
 def summary_wide(
@@ -1125,9 +1385,7 @@ def save_figure(fig: plt.Figure, output_base: Path, formats: Sequence[str]) -> N
     for fmt in formats:
         normalized_fmt = fmt.lower().lstrip(".")
         rasterized_states = (
-            rasterized_hatch_artists(fig)
-            if normalized_fmt in {"svg", "svgz"}
-            else {}
+            rasterized_hatch_artists(fig) if normalized_fmt in {"svg", "svgz"} else {}
         )
         try:
             fig.savefig(
@@ -1383,6 +1641,19 @@ def lag_curve_models(config: Mapping) -> tuple[str, ...]:
     if not models:
         raise ValueError("Lag curve models must contain at least one model name")
     return models
+
+
+def lag_curve_conditions(config: Mapping) -> tuple[str, ...]:
+    configured = plotting_config(config).get("lag_curve_conditions", CONDITIONS)
+    if isinstance(configured, str):
+        return (configured,)
+    if not isinstance(configured, Sequence):
+        raise ValueError("Lag curve conditions must be configured as a list")
+
+    conditions = tuple(str(condition) for condition in configured)
+    if not conditions:
+        raise ValueError("Lag curve conditions must contain at least one condition")
+    return conditions
 
 
 def lag_plot_xlim(config: Mapping) -> tuple[float, float] | None:
@@ -2354,6 +2625,99 @@ def plot_score_axis(
     ax.grid(axis="y", alpha=0.25)
 
 
+def create_electrode_region_figure(electrodes: pd.DataFrame) -> plt.Figure:
+    from nilearn import plotting
+
+    electrodes = electrodes[electrodes["region_group"] != "unassigned"].copy()
+    counts = (
+        electrodes["region_group"]
+        .value_counts()
+        .sort_values(ascending=False, kind="mergesort")
+    )
+    groups = list(counts.index)
+    cmap = plt.get_cmap("tab20", max(len(groups), 1))
+    colors = {group: to_hex(cmap(i)) for i, group in enumerate(groups)}
+
+    fig = plt.figure(figsize=(13, 5.5), constrained_layout=False)
+    grid = fig.add_gridspec(
+        1,
+        3,
+        width_ratios=[1.15, 1.15, 0.95],
+        left=0.04,
+        right=0.985,
+        bottom=0.18,
+        top=0.86,
+        wspace=0.18,
+    )
+    axes = [
+        fig.add_subplot(grid[0, 0]),
+        fig.add_subplot(grid[0, 1]),
+    ]
+    bar_ax = fig.add_subplot(grid[0, 2])
+
+    views = [
+        ("Left", "l"),
+        ("Right", "r"),
+    ]
+
+    marker_coords = electrodes[["x", "y", "z"]].to_numpy(float)
+    for ax, (title, display_mode) in zip(axes, views):
+        display = plotting.plot_glass_brain(
+            None,
+            display_mode=display_mode,
+            colorbar=False,
+            figure=fig,
+            axes=ax,
+            title=title,
+            black_bg=False,
+            annotate=True,
+        )
+        for group in groups:
+            mask = electrodes["region_group"] == group
+            display.add_markers(
+                marker_coords[mask],
+                marker_color=colors[group],
+                marker_size=34,
+                alpha=0.9,
+            )
+
+    if counts.empty:
+        bar_ax.text(
+            0.5,
+            0.5,
+            "No electrodes matched REGION_GROUPS",
+            ha="center",
+            va="center",
+            transform=bar_ax.transAxes,
+            fontsize=13,
+        )
+        bar_ax.set_axis_off()
+    else:
+        bar_colors = [colors[group] for group in counts.index]
+        x = np.arange(len(counts))
+        bar_ax.bar(x, counts.values, color=bar_colors)
+        bar_ax.set_xticks(x)
+        bar_ax.set_xticklabels(
+            [display_region_name(str(group)) for group in counts.index],
+            rotation=45,
+            ha="right",
+        )
+        bar_ax.set_ylabel("Electrodes")
+        bar_ax.set_title("Electrodes per region")
+        bar_ax.spines["top"].set_visible(False)
+        bar_ax.spines["right"].set_visible(False)
+        for idx, value in enumerate(counts.values):
+            bar_ax.text(
+                idx,
+                value + max(counts.max() * 0.02, 0.2),
+                str(int(value)),
+                ha="center",
+            )
+
+    fig.suptitle("Destrieux Atlas Region Electrodes", fontsize=16, y=0.97)
+    return fig
+
+
 def plot_condition_score_axis(
     ax: plt.Axes,
     score_summary: pd.DataFrame,
@@ -3180,11 +3544,12 @@ def plot_lag_curves(
 ) -> None:
     selected_models = lag_curve_models(config)
     selected_model_set = set(selected_models)
+    selected_conditions = lag_curve_conditions(config)
     lag_tasks = sorted(
         {
             task
-            for condition_results in loaded.values()
-            for task, model_results in condition_results.items()
+            for condition in selected_conditions
+            for task, model_results in loaded.get(condition, {}).items()
             if selected_model_set.intersection(model_results)
         }
     )
@@ -3208,9 +3573,7 @@ def plot_lag_curves(
 
     for task, ax in layout.task_axes.items():
         metric = get_metric_config(config, task)
-        for condition in config.get("plotting", {}).get(
-            "lag_curve_conditions", CONDITIONS
-        ):
+        for condition in selected_conditions:
             for model in selected_models:
                 df = loaded.get(condition, {}).get(task, {}).get(model)
                 if df is None or metric.column not in df.columns:
@@ -3269,7 +3632,7 @@ def plot_lag_curves(
         apply_metric_ylim(ax, metric)
 
     handles = []
-    for condition in CONDITIONS:
+    for condition in selected_conditions:
         for model in selected_models:
             if not any(
                 model in loaded.get(condition, {}).get(task, {}) for task in lag_tasks
@@ -3313,13 +3676,197 @@ def plot_lag_curves(
         handles=handles,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.995),
-        ncol=len(handles),
+        ncol=max(1, len(handles)),
         frameon=False,
     )
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
     draw_grouped_task_backgrounds(layout, config)
     remove_legacy_lag_curve_outputs(output_dir, loaded, formats)
     save_figure(fig, output_dir / "lag_curves", formats)
+
+
+def plot_lag_curves_with_best_lags(
+    loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    config: Mapping,
+    output_dir: Path,
+    formats: Sequence[str],
+    colors: Mapping[str, str],
+) -> None:
+    selected_models = lag_curve_models(config)
+    selected_model_set = set(selected_models)
+    selected_conditions = lag_curve_conditions(config)
+    lag_tasks = sorted(
+        {
+            task
+            for condition in selected_conditions
+            for task, model_results in loaded.get(condition, {}).items()
+            if selected_model_set.intersection(model_results)
+        }
+    )
+    if not lag_tasks:
+        return
+
+    layout = create_grouped_task_figure(config, lag_tasks, figsize=(18, 8.8))
+    fig = layout.fig
+    condition_styles = {
+        "super_subject": "-",
+        "per_subject": "-",
+    }
+    multi_model_condition_styles = {
+        "super_subject": "-",
+        "per_subject": "--",
+    }
+    condition_colors = {
+        "super_subject": "#1F4E79",
+        "per_subject": "#2CA7A0",
+    }
+
+    for task, ax in layout.task_axes.items():
+        metric = get_metric_config(config, task)
+        for condition in selected_conditions:
+            for model in selected_models:
+                df = loaded.get(condition, {}).get(task, {}).get(model)
+                if df is None or metric.column not in df.columns:
+                    continue
+                curve = curve_for_metric(df, metric)
+                if curve.empty:
+                    continue
+                if len(selected_models) == 1:
+                    line_color = condition_colors.get(
+                        condition,
+                        colors.get(model, DEFAULT_COLORS.get(model, "#333333")),
+                    )
+                    line_label = display_condition_name(condition)
+                else:
+                    line_color = colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+                    line_label = (
+                        f"{display_model_name(config, model)} "
+                        f"{display_condition_name(condition)}"
+                    )
+                line_style = (
+                    multi_model_condition_styles
+                    if len(selected_models) > 1
+                    else condition_styles
+                ).get(condition, "-")
+                ax.plot(
+                    curve["lags"],
+                    curve[metric.column],
+                    linestyle=line_style,
+                    linewidth=1.8,
+                    label=line_label,
+                    color=line_color,
+                )
+                errors = lag_curve_error_values(df.loc[curve.index], metric)
+                if errors is not None:
+                    y_values = curve[metric.column].to_numpy(dtype=float)
+                    error_values = errors.to_numpy(dtype=float)
+                    ax.fill_between(
+                        curve["lags"],
+                        y_values - error_values,
+                        y_values + error_values,
+                        color=line_color,
+                        alpha=0.16,
+                        linewidth=0,
+                        zorder=1,
+                    )
+
+                best = select_best_lag(
+                    df.loc[curve.index],
+                    metric,
+                    task=task,
+                    model=model,
+                )
+                best_lag = float(best["lags"])
+                best_value = float(best[metric.column])
+                ax.axvline(
+                    best_lag,
+                    color=line_color,
+                    linestyle="--",
+                    linewidth=1.1,
+                    alpha=0.85,
+                    zorder=2,
+                )
+                ax.text(
+                    best_lag,
+                    best_value,
+                    f"{best_lag:g} ms",
+                    color=line_color,
+                    fontsize=8.5,
+                    ha="center",
+                    va="bottom",
+                    rotation=90,
+                    rotation_mode="anchor",
+                    path_effects=[
+                        patheffects.withStroke(linewidth=2.5, foreground="white")
+                    ],
+                    zorder=4,
+                )
+
+        ax.set_title(display_task_name(config, task))
+        ax.set_xlabel("Lag relative to word onset (ms)")
+        ax.set_ylabel(metric.label)
+        apply_axis_text_sizes(
+            ax,
+            label_fontsize=LAG_PLOT_AXIS_LABEL_FONTSIZE,
+            tick_fontsize=LAG_PLOT_TICK_LABEL_FONTSIZE,
+        )
+        ax.axvline(0, color="#333333", linewidth=0.8, alpha=0.5)
+        plot_chance_level(ax, metric)
+        ax.grid(alpha=0.25)
+        apply_lag_plot_xlim(ax, config)
+        apply_metric_ylim(ax, metric)
+
+    handles = []
+    for condition in selected_conditions:
+        for model in selected_models:
+            if not any(
+                model in loaded.get(condition, {}).get(task, {}) for task in lag_tasks
+            ):
+                continue
+            if len(selected_models) == 1:
+                color = condition_colors.get(
+                    condition,
+                    colors.get(model, DEFAULT_COLORS.get(model, "#333333")),
+                )
+                label = display_condition_name(condition)
+            else:
+                color = colors.get(model, DEFAULT_COLORS.get(model, "#333333"))
+                label = (
+                    f"{display_model_name(config, model)} "
+                    f"{display_condition_name(condition)}"
+                )
+            handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color=color,
+                    linestyle=(
+                        multi_model_condition_styles
+                        if len(selected_models) > 1
+                        else condition_styles
+                    ).get(condition, "-"),
+                    linewidth=1.8,
+                    label=label,
+                )
+            )
+    fig.text(
+        0.01,
+        0.985,
+        "Lag Curves with Best Lags",
+        ha="left",
+        va="top",
+        fontsize=plt.rcParams["axes.titlesize"],
+    )
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=max(1, len(handles)),
+        frameon=False,
+    )
+    fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
+    draw_grouped_task_backgrounds(layout, config)
+    save_figure(fig, output_dir / "lag_curves_best_lags", formats)
 
 
 def remove_legacy_lag_curve_outputs(
@@ -4319,45 +4866,149 @@ def plot_per_region_lag_curves(
         save_figure(fig, output_dir / f"per_region_lags_{model}", formats)
 
 
+def assign_region_groups(
+    electrodes: pd.DataFrame,
+    region_groups: dict[str, list[str]],
+    atlas_path: Path | None = None,
+    nilearn_data_dir: Path | None = None,
+) -> pd.DataFrame:
+    from utils.atlas_utils import DESTRIEUX_2009_LABELS, _lookup_atlas_labels
+
+    electrodes = electrodes.copy()
+    if not region_groups:
+        electrodes["atlas_label"] = "unassigned"
+        electrodes["region_group"] = "unassigned"
+        return electrodes
+
+    atlas_image, affine = load_atlas(
+        atlas_path=str(atlas_path) if atlas_path is not None else None,
+        nilearn_data_dir=nilearn_data_dir,
+    )
+    coords = electrodes[["x", "y", "z"]].to_numpy(float)
+    electrodes["atlas_label"] = _lookup_atlas_labels(
+        coords, atlas_image, affine, DESTRIEUX_2009_LABELS
+    )
+
+    label_to_group = {
+        label: region_name
+        for region_name, labels in region_groups.items()
+        for label in labels
+    }
+    electrodes["region_group"] = (
+        electrodes["atlas_label"].map(label_to_group).fillna("unassigned")
+    )
+    return electrodes
+
+
+def load_region_groups(path: Path | None) -> dict[str, list[str]]:
+    from utils.atlas_utils import REGION_GROUPS
+    import json
+
+    if path is None:
+        return REGION_GROUPS
+
+    with path.open() as f:
+        region_groups = json.load(f)
+
+    if not isinstance(region_groups, dict):
+        raise ValueError(
+            "--region-groups-json must contain an object mapping names to labels"
+        )
+
+    return {str(name): list(labels) for name, labels in region_groups.items()}
+
+
+def load_atlas(
+    atlas_path: str | None = None,
+    nilearn_data_dir: Path | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    from nilearn import datasets, image as nli_image
+
+    if atlas_path is None:
+        fetch_kwargs = {}
+        if nilearn_data_dir is not None:
+            nilearn_data_dir.mkdir(parents=True, exist_ok=True)
+            fetch_kwargs["data_dir"] = str(nilearn_data_dir)
+        atlas_path = datasets.fetch_atlas_destrieux_2009(**fetch_kwargs)["maps"]
+
+    img = nli_image.load_img(atlas_path)
+    return img.get_fdata().astype(int), img.affine
+
+
 def _load_region_electrodes(
     data_root: Path,
+    atlas_path: Path | None,
     nilearn_data_dir: Path | None,
     include_bad: bool,
 ) -> pd.DataFrame:
-    try:
-        from scripts.plot_atlas_region_electrodes import (
-            assign_region_groups,
-            load_electrodes,
-            load_region_groups,
-        )
-    except ModuleNotFoundError:
-        from plot_atlas_region_electrodes import (
-            assign_region_groups,
-            load_electrodes,
-            load_region_groups,
-        )
-
     electrodes = load_electrodes(data_root, include_bad=include_bad)
     return assign_region_groups(
         electrodes,
         load_region_groups(None),
+        atlas_path=atlas_path,
         nilearn_data_dir=nilearn_data_dir,
     )
+
+
+def read_good_channel_names(channels_path: Path) -> set[str] | None:
+    if not channels_path.exists():
+        return None
+
+    channels = pd.read_csv(channels_path, sep="\t")
+    if "status" not in channels or "name" not in channels:
+        return None
+
+    return set(
+        channels.loc[channels["status"].fillna("").str.lower() == "good", "name"]
+    )
+
+
+def load_electrodes(data_root: Path, include_bad: bool) -> pd.DataFrame:
+    rows: list[pd.DataFrame] = []
+    for electrodes_path in sorted(
+        data_root.glob("sub-*/ieeg/*_space-MNI152NLin2009aSym_electrodes.tsv")
+    ):
+        subject = electrodes_path.parts[-3]
+        elecs = pd.read_csv(electrodes_path, sep="\t")
+        required = {"name", "x", "y", "z"}
+        missing = required - set(elecs.columns)
+        if missing:
+            raise ValueError(f"{electrodes_path} is missing columns: {sorted(missing)}")
+
+        elecs = elecs.copy()
+        elecs["subject"] = subject
+        for axis in ("x", "y", "z"):
+            elecs[axis] = pd.to_numeric(elecs[axis], errors="coerce")
+        elecs = elecs.dropna(subset=["x", "y", "z"])
+
+        if not include_bad:
+            channels_path = electrodes_path.with_name(
+                f"{subject}_task-podcast_channels.tsv"
+            )
+            good_names = read_good_channel_names(channels_path)
+            if good_names is not None:
+                elecs = elecs[elecs["name"].isin(good_names)]
+
+        rows.append(elecs[["subject", "name", "x", "y", "z"]])
+
+    if not rows:
+        raise FileNotFoundError(f"No MNI electrode TSV files found under {data_root}")
+
+    return pd.concat(rows, ignore_index=True)
 
 
 def plot_atlas_region_electrodes(
     output_dir: Path,
     formats: Sequence[str],
     data_root: Path,
+    atlas_path: Path,
     nilearn_data_dir: Path | None,
     include_bad: bool,
 ) -> None:
-    try:
-        from scripts.plot_atlas_region_electrodes import create_electrode_region_figure
-    except ModuleNotFoundError:
-        from plot_atlas_region_electrodes import create_electrode_region_figure
 
-    electrodes = _load_region_electrodes(data_root, nilearn_data_dir, include_bad)
+    electrodes = _load_region_electrodes(
+        data_root, atlas_path, nilearn_data_dir, include_bad
+    )
     fig = create_electrode_region_figure(electrodes)
     save_figure(fig, output_dir / "atlas_region_electrodes", formats)
 
@@ -4379,10 +5030,6 @@ def _load_selected_electrode_coordinates(
     include_bad: bool,
     selected_electrode_path: Path = DEFAULT_SELECTED_ELECTRODE_PATH,
 ) -> pd.DataFrame:
-    try:
-        from scripts.plot_atlas_region_electrodes import load_electrodes
-    except ModuleNotFoundError:
-        from plot_atlas_region_electrodes import load_electrodes
     from utils.data_utils import read_electrode_file, read_subject_mapping
 
     participant_mapping_path = data_root / "participants.tsv"
@@ -4445,10 +5092,6 @@ def _load_selected_electrode_coordinates(
 
 
 def _load_all_electrode_coordinates(data_root: Path) -> pd.DataFrame:
-    try:
-        from scripts.plot_atlas_region_electrodes import load_electrodes
-    except ModuleNotFoundError:
-        from plot_atlas_region_electrodes import load_electrodes
 
     electrodes = load_electrodes(data_root, include_bad=True).copy()
     electrodes["subject_id"] = electrodes["subject"].map(_bids_subject_id)
@@ -4894,8 +5537,9 @@ def plot_per_region_brains(
     output_dir: Path,
     formats: Sequence[str],
     data_root: Path,
-    nilearn_data_dir: Path | None,
-    include_bad: bool,
+    atlas_path: Path | None = None,
+    nilearn_data_dir: Path | None = None,
+    include_bad: bool = False,
 ) -> None:
     if not per_region_results:
         return
@@ -4903,7 +5547,9 @@ def plot_per_region_brains(
     from nilearn import plotting
     from utils.atlas_utils import REGION_GROUPS
 
-    electrodes = _load_region_electrodes(data_root, nilearn_data_dir, include_bad)
+    electrodes = _load_region_electrodes(
+        data_root, atlas_path, nilearn_data_dir, include_bad
+    )
     electrodes = electrodes[electrodes["region_group"] != "unassigned"].copy()
     region_counts = electrodes["region_group"].value_counts().to_dict()
     surface_atlas = _load_destrieux_surface_atlas(nilearn_data_dir)
@@ -5066,6 +5712,7 @@ def generate_paper_results(
     include_bad: bool = False,
 ) -> None:
     config = read_config(config_path)
+    configured_destrieux_atlas_path = destrieux_atlas_path(config, config_path)
     tasks_to_exclude = excluded_tasks(config)
     loaded = filter_loaded_tasks(load_results(config), tasks_to_exclude)
     configured_valid_best_lags = valid_best_lags(config)
@@ -5186,30 +5833,40 @@ def generate_paper_results(
             output_dir,
             formats,
         )
+    write_neural_conv_model_summary_table(config, output_dir, table_formats)
     plot_lag_curves(loaded, config, output_dir, formats, colors)
+    plot_lag_curves_with_best_lags(loaded, config, output_dir, formats, colors)
     plot_per_region_lag_curves(per_region_results, config, output_dir, formats)
-    plot_atlas_region_electrodes(
-        output_dir,
-        formats,
-        data_root,
-        nilearn_data_dir,
-        include_bad,
-    )
     plot_selected_electrode_glass_brains(
         output_dir,
         formats,
         data_root,
         include_bad,
     )
-    plot_per_region_brains(
-        per_region_results,
-        config,
-        output_dir,
-        formats,
-        data_root,
-        nilearn_data_dir,
-        include_bad,
-    )
+    if configured_destrieux_atlas_path is None:
+        print(
+            "Skipping Destrieux atlas figures; configure "
+            "plotting.destrieux_atlas_path in the paper-results config to generate them."
+        )
+    else:
+        plot_atlas_region_electrodes(
+            output_dir,
+            formats,
+            data_root,
+            configured_destrieux_atlas_path,
+            nilearn_data_dir,
+            include_bad,
+        )
+        plot_per_region_brains(
+            per_region_results,
+            config,
+            output_dir,
+            formats,
+            data_root,
+            configured_destrieux_atlas_path,
+            nilearn_data_dir,
+            include_bad,
+        )
 
 
 def parse_args() -> argparse.Namespace:

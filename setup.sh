@@ -25,6 +25,12 @@ download_file() {
 # Parse command line arguments first
 INSTALL_GPU=false
 INSTALL_DEV=false
+INSTALL_DOCS=false
+INSTALL_PAPER=false
+INSTALL_AUDIO=false
+INSTALL_DATA=false
+INSTALL_DIVER_FULL=false
+INSTALL_ALL=false
 FORCE_VENV=false
 ENV_NAME="decoding_env"
 
@@ -38,6 +44,30 @@ while [[ $# -gt 0 ]]; do
             INSTALL_DEV=true
             shift
             ;;
+        --docs)
+            INSTALL_DOCS=true
+            shift
+            ;;
+        --paper)
+            INSTALL_PAPER=true
+            shift
+            ;;
+        --audio)
+            INSTALL_AUDIO=true
+            shift
+            ;;
+        --data)
+            INSTALL_DATA=true
+            shift
+            ;;
+        --diver-full)
+            INSTALL_DIVER_FULL=true
+            shift
+            ;;
+        --all)
+            INSTALL_ALL=true
+            shift
+            ;;
         --venv)
             FORCE_VENV=true
             shift
@@ -47,11 +77,17 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help)
-            echo "Usage: $0 [--gpu] [--dev] [--venv] [--env-name NAME]"
-            echo "  --gpu       Install GPU dependencies (CUDA packages)"
-            echo "  --dev       Install development dependencies (testing)"
-            echo "  --venv      Force using python venv instead of conda"
-            echo "  --env-name  Specify virtual environment name (default: decoding_env)"
+            echo "Usage: $0 [--gpu] [--dev] [--docs] [--paper] [--audio] [--data] [--diver-full] [--all] [--venv] [--env-name NAME]"
+            echo "  --gpu         Install GPU dependencies (CUDA packages)"
+            echo "  --dev         Install development dependencies (testing)"
+            echo "  --docs        Install documentation site dependencies"
+            echo "  --paper       Install paper result and atlas visualization dependencies"
+            echo "  --audio       Install audio/prosody transcription dependencies"
+            echo "  --data        Install dataset preprocessing dependencies"
+            echo "  --diver-full  Install vendored DIVER data loading dependencies"
+            echo "  --all         Install all optional dependencies"
+            echo "  --venv        Force using python venv instead of conda"
+            echo "  --env-name    Specify virtual environment name (default: decoding_env)"
             exit 0
             ;;
         *)
@@ -213,16 +249,32 @@ else
 fi
 
 # Build dependency installation string
+EXTRAS=""
+add_extra() {
+    local extra="$1"
+    if [ -z "$EXTRAS" ]; then
+        EXTRAS="$extra"
+    else
+        EXTRAS="$EXTRAS,$extra"
+    fi
+}
+
+if [ "$INSTALL_ALL" = true ]; then
+    add_extra "all"
+else
+    [ "$INSTALL_GPU" = true ] && add_extra "gpu"
+    [ "$INSTALL_DEV" = true ] && add_extra "dev"
+    [ "$INSTALL_DOCS" = true ] && add_extra "docs"
+    [ "$INSTALL_PAPER" = true ] && add_extra "paper"
+    [ "$INSTALL_AUDIO" = true ] && add_extra "audio"
+    [ "$INSTALL_DATA" = true ] && add_extra "data"
+    [ "$INSTALL_DIVER_FULL" = true ] && add_extra "diver-full"
+fi
+
 DEPS=""
-if [ "$INSTALL_GPU" = true ] && [ "$INSTALL_DEV" = true ]; then
-    DEPS="[gpu,dev]"
-    echo "Installing base, GPU, and development dependencies..."
-elif [ "$INSTALL_GPU" = true ]; then
-    DEPS="[gpu]"
-    echo "Installing base and GPU dependencies..."
-elif [ "$INSTALL_DEV" = true ]; then
-    DEPS="[dev]"
-    echo "Installing base and development dependencies..."
+if [ -n "$EXTRAS" ]; then
+    DEPS="[$EXTRAS]"
+    echo "Installing base dependencies with extras: $EXTRAS"
 else
     echo "Installing base dependencies..."
 fi

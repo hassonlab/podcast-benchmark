@@ -5,6 +5,11 @@ colors:
   diver: '#F58518'
   popt: '#E45756'
   best: '#F58518'
+model_summary:
+  neural_conv_decoder:
+    enabled: true
+    config: configs/baselines/content_noncontent_task/neural_conv_decoder/supersubject.yml
+    output_name: neural_conv_decoder_summary
 plotting:
   half_peak_profile_conditions:
   - super_subject
@@ -82,7 +87,7 @@ plotting:
     llm_embedding_pretraining: LLM Embedding Pretraining
     pos: Part of Speech
     sentence_onset: Sentence Onset
-    volume_level: Audio Envelope
+    volume_level: Audio Intensity
     whisper_embedding: Whisper Embedding
     word_embedding: Word Embedding
   model_display_names:

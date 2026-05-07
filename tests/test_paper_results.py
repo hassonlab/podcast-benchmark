@@ -37,6 +37,11 @@ from scripts.generate_paper_results import (
     load_per_region_run,
     curve_for_metric,
     metric_norm,
+    neural_conv_model_summary_latex_table,
+    neural_conv_model_summary_rows,
+    neural_conv_summary_config_path,
+    neural_conv_summary_enabled,
+    neural_conv_summary_output_name,
     ordered_tasks_by_group_average,
     significance_label,
     normalize_region_name,
@@ -1762,3 +1767,50 @@ def test_best_lag_latex_table_includes_relative_percent_for_non_max_values():
 
     assert r"0.500 (-29\%)" in table
     assert r"\textbf{0.700}" in table
+
+
+def test_neural_conv_summary_options_default_and_override_paths():
+    assert neural_conv_summary_enabled({}) is True
+    assert neural_conv_summary_output_name({}) == "neural_conv_decoder_summary"
+
+    config = {
+        "model_summary": {
+            "neural_conv_decoder": {
+                "enabled": False,
+                "config": "custom.yml",
+                "output_name": "custom_summary",
+            }
+        }
+    }
+
+    assert neural_conv_summary_enabled(config) is False
+    assert neural_conv_summary_config_path(config) == Path("custom.yml")
+    assert neural_conv_summary_output_name(config) == "custom_summary"
+
+
+def test_neural_conv_model_summary_rows_and_latex_table():
+    import torch
+
+    model = torch.nn.Sequential(
+        torch.nn.Conv1d(3, 4, kernel_size=2),
+        torch.nn.ReLU(),
+        torch.nn.AdaptiveMaxPool1d(1),
+    )
+    summary = neural_conv_model_summary_rows(model, torch.zeros(2, 3, 5))
+
+    assert summary["type"].tolist() == ["Conv1d", "ReLU", "AdaptiveMaxPool1d"]
+    assert summary.loc[0, "output_shape"] == "(2, 4, 4)"
+    assert summary.loc[0, "parameters"] == 28
+
+    latex = neural_conv_model_summary_latex_table(
+        summary,
+        model,
+        Path(
+            "configs/baselines/content_noncontent_task/"
+            "neural_conv_decoder/supersubject.yml"
+        ),
+    )
+
+    assert r"\caption{Neural convolution decoder model summary." in latex
+    assert "content\\_noncontent\\_task" in latex
+    assert r"\textbf{Total} &  &  & 28 \\" in latex
