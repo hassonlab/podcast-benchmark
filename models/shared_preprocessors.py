@@ -1,8 +1,18 @@
+import copy
+import hashlib
+import inspect
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 import core.registry as registry
+from utils.dataset import _apply_preprocessing
+
+_DEFAULT_PREPROCESSOR_CACHE_DIR = ".cache/preprocessors"
 
 
 @registry.register_data_preprocessor()
@@ -131,6 +141,162 @@ def zscore_preprocessor(
     standardized = standardized.reshape(channel_first.shape)
     standardized = np.moveaxis(standardized, 0, channel_axis)
     return standardized.astype(np.float32, copy=False)
+
+
+@registry.register_data_preprocessor("disk_cache_preprocessor")
+def disk_cache_preprocessor(
+    data: np.ndarray,
+    preprocessor_params: Optional[dict] = None,
+    **context,
+) -> np.ndarray:
+    """Cache the output of one wrapped preprocessor or an ordered preprocessor chain."""
+
+    params = preprocessor_params if preprocessor_params is not None else {}
+    if not isinstance(params, dict):
+        raise ValueError("disk_cache_preprocessor params must be a dictionary.")
+
+    names, wrapped_params = _resolve_wrapped_preprocessor_config(params)
+    wrapped_fns = []
+    for name in names:
+        if name not in registry.data_preprocessor_registry:
+            raise ValueError(f"Unknown wrapped preprocessor '{name}'.")
+        wrapped_fns.append(registry.data_preprocessor_registry[name])
+
+    cache_dir = Path(params.get("cache_dir", _DEFAULT_PREPROCESSOR_CACHE_DIR))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_identity = _build_cache_identity(
+        names=names,
+        wrapped_fns=wrapped_fns,
+        wrapped_params=wrapped_params,
+        mode=params.get("mode", "normal"),
+        context=context,
+    )
+    cache_key = hashlib.sha256(
+        json.dumps(cache_identity, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    cache_path = cache_dir / f"{cache_key}.npz"
+
+    if cache_path.exists():
+        with np.load(cache_path) as cached:
+            return cached["data"].astype(np.float32, copy=False)
+
+    output = _apply_preprocessing(
+        data,
+        wrapped_fns,
+        copy.deepcopy(wrapped_params),
+        **context,
+    )
+    metadata = json.dumps(cache_identity, sort_keys=True)
+    _atomic_save_npz(cache_path, data=np.asarray(output), metadata=metadata)
+    return output
+
+
+def _resolve_wrapped_preprocessor_config(params: dict) -> tuple[list[str], list]:
+    names = params.get("base_preprocessing_fn_name")
+    if names is None:
+        raise ValueError("disk_cache_preprocessor requires base_preprocessing_fn_name.")
+
+    if isinstance(names, str):
+        names_list = [names]
+        wrapped_params = [params.get("base_preprocessor_params")]
+    elif isinstance(names, list):
+        names_list = names
+        raw_params = params.get("base_preprocessor_params")
+        if isinstance(raw_params, list):
+            wrapped_params = [
+                raw_params[i] if i < len(raw_params) else None
+                for i in range(len(names_list))
+            ]
+        else:
+            wrapped_params = [raw_params for _ in names_list]
+    else:
+        raise ValueError(
+            "base_preprocessing_fn_name must be a string or list of strings."
+        )
+
+    if not all(isinstance(name, str) for name in names_list):
+        raise ValueError("base_preprocessing_fn_name entries must be strings.")
+
+    return names_list, wrapped_params
+
+
+def _build_cache_identity(
+    names: list[str],
+    wrapped_fns: list,
+    wrapped_params: list,
+    mode: str,
+    context: dict,
+) -> dict:
+    selected_rows = context.get("selected_rows_df", context.get("selected_rows"))
+    starts = []
+    if selected_rows is not None and "start" in selected_rows:
+        starts = _normalize_for_json(selected_rows["start"].to_list())
+
+    return {
+        "version": 1,
+        "mode": mode,
+        "pipeline": [
+            {
+                "name": name,
+                "source_hash": _source_hash(fn),
+                "params": _normalize_for_json(params),
+            }
+            for name, fn, params in zip(names, wrapped_fns, wrapped_params)
+        ],
+        "lag": _normalize_for_json(context.get("lag")),
+        "selected_rows_start": starts,
+        "subject_channel_names": _normalize_for_json(
+            context.get("subject_channel_names")
+        ),
+        "subject_channel_counts": _normalize_for_json(
+            context.get("subject_channel_counts")
+        ),
+    }
+
+
+def _source_hash(fn) -> Optional[str]:
+    try:
+        source = inspect.getsource(fn)
+    except (OSError, TypeError):
+        return None
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _normalize_for_json(value):
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_for_json(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_json(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _normalize_for_json(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _atomic_save_npz(cache_path: Path, **arrays) -> None:
+    temp_file = tempfile.NamedTemporaryFile(
+        dir=cache_path.parent,
+        prefix=f".{cache_path.stem}.",
+        suffix=".tmp.npz",
+        delete=False,
+    )
+    temp_name = temp_file.name
+    temp_file.close()
+    try:
+        np.savez_compressed(temp_name, **arrays)
+        os.replace(temp_name, cache_path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
 
 
 def window_data(data: np.ndarray, num_average_samples: int) -> np.ndarray:

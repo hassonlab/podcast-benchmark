@@ -160,6 +160,40 @@ class TestApplyPreprocessing:
 
         np.testing.assert_allclose(result, (data + 1.5) * 2.0)
 
+    def test_passes_lag_and_subject_channel_names_to_context_aware_preprocessor(
+        self, mock_raw_pair, task_df_in_bounds
+    ):
+        captured = {}
+
+        def capture_context(
+            data,
+            params,
+            lag=None,
+            subject_channel_names=None,
+            subject_channel_counts=None,
+        ):
+            captured["lag"] = lag
+            captured["subject_channel_names"] = subject_channel_names
+            captured["subject_channel_counts"] = subject_channel_counts
+            return data
+
+        ds = RawNeuralDataset(
+            mock_raw_pair,
+            task_df_in_bounds,
+            0.5,
+            preprocessing_fns=[capture_context],
+            preprocessor_params=None,
+        )
+
+        ds.get_data_for_lag(125)
+
+        assert captured["lag"] == 125
+        assert captured["subject_channel_names"] == [
+            ["A1", "A2", "A3"],
+            ["B1", "B2", "B3", "B4"],
+        ]
+        assert captured["subject_channel_counts"] == [3, 4]
+
 
 class TestRawNeuralDataset:
     """Test RawNeuralDataset for correct window filtering and lag slicing."""

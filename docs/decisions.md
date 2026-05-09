@@ -14,6 +14,10 @@ This keeps the core benchmark surface controlled and comparable while still allo
 
 Models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported model or task into `main.py`.
 
+## Disk-Cached Preprocessor Pipelines
+
+Expensive preprocessing can be wrapped with the registered `disk_cache_preprocessor`. The cache stores the final output of a full ordered preprocessor pipeline, not intermediate stages, and keys entries by wrapped preprocessor names, implementation source hashes, normalized parameters, lag, selected event starts, ordered subject electrode names, subject channel counts, and cache mode. This keeps repeated foundation feature extraction reproducible while invalidating automatically when implementation, parameters, selected rows, electrodes, lag, or mode changes.
+
 ## YAML Experiment Configuration
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.

@@ -4,13 +4,23 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from core.config import DataParams, ModelSpec, TaskConfig, TrainingParams
+from core.config import (
+    DataParams,
+    ExperimentConfig,
+    ModelSpec,
+    RunMode,
+    TaskConfig,
+    TrainingParams,
+)
+from core import registry
 from core.registry import register_data_preprocessor, register_model_constructor
+import main
 import metrics.regression_metrics  # noqa: F401 - registers mse
 import models.foundation_feature_preprocessor  # noqa: F401 - registers preprocessor
+import models.shared_preprocessors  # noqa: F401 - registers disk cache preprocessor
 import models.shared_decoders  # noqa: F401 - registers shared probe
+from utils import data_utils
 from utils.decoding_utils import run_training_over_lags
-
 
 SMOKE_STATS = {"preprocessor_calls": 0, "foundation_encode_calls": 0}
 
@@ -91,6 +101,12 @@ def _training_params():
         tensorboard_logging=False,
         normalize_targets=False,
     )
+
+
+def _single_lag_training_params():
+    params = _training_params()
+    params.lag = 0
+    return params
 
 
 def _task_config(data_params):
@@ -229,3 +245,69 @@ def test_run_training_over_lags_smoke_with_per_subject_feature_concat(tmp_path):
     assert (checkpoint_dir / "lag_0" / "best_model_fold1.pt").exists()
     assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
     assert SMOKE_STATS["foundation_encode_calls"] == 6
+
+
+def test_run_single_task_smoke_with_disk_cache_preprocessor(tmp_path, monkeypatch):
+    SMOKE_STATS["preprocessor_calls"] = 0
+    cache_dir = tmp_path / "preprocessor_cache"
+
+    monkeypatch.setitem(
+        registry.task_registry,
+        "smoke_disk_cache_task",
+        {
+            "getter": lambda task_config: _task_df(),
+            "config_type": TaskConfig,
+        },
+    )
+    monkeypatch.setattr(data_utils, "load_raws", lambda data_params: _fake_raws())
+
+    def build_config(trial_name):
+        return ExperimentConfig(
+            model_spec=ModelSpec(
+                constructor_name="smoke_flatten_regressor",
+                params={"output_dim": 1},
+            ),
+            task_config=TaskConfig(
+                task_name="smoke_disk_cache_task",
+                data_params=DataParams(
+                    window_width=0.004,
+                    preprocessing_fn_name="disk_cache_preprocessor",
+                    preprocessor_params={
+                        "base_preprocessing_fn_name": "smoke_scale_preprocessor",
+                        "base_preprocessor_params": {"scale": 0.5},
+                        "cache_dir": str(cache_dir),
+                    },
+                    subject_ids=[1, 2],
+                ),
+            ),
+            training_params=_single_lag_training_params(),
+            run_mode=RunMode.COMBINED,
+            trial_name=trial_name,
+            output_dir=str(tmp_path / "results"),
+            checkpoint_dir=str(tmp_path / "checkpoints"),
+            tensorboard_dir=str(tmp_path / "tensorboard"),
+        )
+
+    main.run_single_task(build_config("disk_cache_first"))
+    main.run_single_task(build_config("disk_cache_second"))
+
+    first_result_files = list(
+        (tmp_path / "results").glob("disk_cache_first_*/lag_performance.csv")
+    )
+    second_result_files = list(
+        (tmp_path / "results").glob("disk_cache_second_*/lag_performance.csv")
+    )
+    assert len(first_result_files) == 1
+    assert len(second_result_files) == 1
+
+    for result_file in first_result_files + second_result_files:
+        result = pd.read_csv(result_file)
+        assert result["lags"].tolist() == [0]
+        assert np.isfinite(result.loc[0, "test_mse_mean"])
+
+    assert (cache_dir).exists()
+    assert len(list(cache_dir.glob("*.npz"))) == 1
+    assert (checkpoint_dir := tmp_path / "checkpoints").exists()
+    assert list(checkpoint_dir.glob("disk_cache_first_*/lag_0/best_model_fold1.pt"))
+    assert list(checkpoint_dir.glob("disk_cache_second_*/lag_0/best_model_fold1.pt"))
+    assert SMOKE_STATS["preprocessor_calls"] == 1

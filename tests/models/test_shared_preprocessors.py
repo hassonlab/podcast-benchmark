@@ -2,11 +2,259 @@ import pytest
 
 import numpy as np
 
+import core.registry as registry
 from models.shared_preprocessors import (
+    disk_cache_preprocessor,
     window_rms_preprocessor,
     log_transform_preprocessor,
     zscore_preprocessor,
 )
+
+
+def _cache_context(starts=None, channel_names=None, counts=None, lag=0):
+    import pandas as pd
+
+    return {
+        "selected_rows": pd.DataFrame({"start": starts or [1.0, 2.0, 3.0]}),
+        "selected_rows_df": pd.DataFrame({"start": starts or [1.0, 2.0, 3.0]}),
+        "lag": lag,
+        "subject_channel_names": channel_names or [["A1", "A2"], ["B1"]],
+        "subject_channel_counts": counts or [2, 1],
+    }
+
+
+class TestDiskCachePreprocessor:
+    def test_single_wrapped_preprocessor_cache_miss_then_hit(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"count": 0}
+
+        def add_offset(data, params):
+            calls["count"] += 1
+            return data + params["offset"]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_add_offset", add_offset
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_add_offset",
+            "base_preprocessor_params": {"offset": 2.0},
+            "cache_dir": str(tmp_path),
+        }
+
+        first = disk_cache_preprocessor(data, params, **_cache_context())
+        second = disk_cache_preprocessor(data, params, **_cache_context())
+
+        np.testing.assert_allclose(first, data + 2.0)
+        np.testing.assert_allclose(second, first)
+        assert calls["count"] == 1
+
+    def test_wrapped_preprocessor_chain_cache_miss_then_hit(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"add": 0, "scale": 0}
+
+        def add_offset(data, params):
+            calls["add"] += 1
+            return data + params["offset"]
+
+        def scale(data, params):
+            calls["scale"] += 1
+            return data * params["factor"]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_chain_add", add_offset
+        )
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_chain_scale", scale
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": [
+                "cache_test_chain_add",
+                "cache_test_chain_scale",
+            ],
+            "base_preprocessor_params": [{"offset": 1.0}, {"factor": 4.0}],
+            "cache_dir": str(tmp_path),
+        }
+
+        first = disk_cache_preprocessor(data, params, **_cache_context())
+        second = disk_cache_preprocessor(data, params, **_cache_context())
+
+        np.testing.assert_allclose(first, (data + 1.0) * 4.0)
+        np.testing.assert_allclose(second, first)
+        assert calls == {"add": 1, "scale": 1}
+
+    def test_second_call_does_not_execute_any_wrapped_preprocessors_on_hit(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"count": 0}
+
+        def fail_after_first(data, params):
+            calls["count"] += 1
+            if calls["count"] > 1:
+                raise AssertionError("cache hit executed wrapped preprocessor")
+            return data + 3.0
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_fail_after_first",
+            fail_after_first,
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_fail_after_first",
+            "cache_dir": str(tmp_path),
+        }
+
+        disk_cache_preprocessor(data, params, **_cache_context())
+        result = disk_cache_preprocessor(data, params, **_cache_context())
+
+        np.testing.assert_allclose(result, data + 3.0)
+        assert calls["count"] == 1
+
+    @pytest.mark.parametrize(
+        "first_context,second_context",
+        [
+            (_cache_context(lag=0), _cache_context(lag=100)),
+            (
+                _cache_context(starts=[1.0, 2.0, 3.0]),
+                _cache_context(starts=[1.0, 2.5, 3.0]),
+            ),
+            (
+                _cache_context(channel_names=[["A1", "A2"], ["B1"]]),
+                _cache_context(channel_names=[["A2", "A1"], ["B1"]]),
+            ),
+        ],
+    )
+    def test_context_identity_changes_cause_miss(
+        self, tmp_path, monkeypatch, first_context, second_context
+    ):
+        calls = {"count": 0}
+
+        def add_call_count(data, params):
+            calls["count"] += 1
+            return data + calls["count"]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_context_identity",
+            add_call_count,
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_context_identity",
+            "cache_dir": str(tmp_path),
+        }
+
+        disk_cache_preprocessor(data, params, **first_context)
+        result = disk_cache_preprocessor(data, params, **second_context)
+
+        np.testing.assert_allclose(result, data + 2.0)
+        assert calls["count"] == 2
+
+    def test_changing_wrapped_preprocessor_params_causes_miss(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"count": 0}
+
+        def add_offset(data, params):
+            calls["count"] += 1
+            return data + params["offset"]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_param_change", add_offset
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+
+        result_a = disk_cache_preprocessor(
+            data,
+            {
+                "base_preprocessing_fn_name": "cache_test_param_change",
+                "base_preprocessor_params": {"offset": 1.0},
+                "cache_dir": str(tmp_path),
+            },
+            **_cache_context(),
+        )
+        result_b = disk_cache_preprocessor(
+            data,
+            {
+                "base_preprocessing_fn_name": "cache_test_param_change",
+                "base_preprocessor_params": {"offset": 2.0},
+                "cache_dir": str(tmp_path),
+            },
+            **_cache_context(),
+        )
+
+        np.testing.assert_allclose(result_a, data + 1.0)
+        np.testing.assert_allclose(result_b, data + 2.0)
+        assert calls["count"] == 2
+
+    def test_changing_wrapped_preprocessor_order_causes_miss(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"add": 0, "scale": 0}
+
+        def add_one(data, params):
+            calls["add"] += 1
+            return data + 1.0
+
+        def scale_by_two(data, params):
+            calls["scale"] += 1
+            return data * 2.0
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_add_one", add_one
+        )
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_scale_two", scale_by_two
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+
+        first = disk_cache_preprocessor(
+            data,
+            {
+                "base_preprocessing_fn_name": [
+                    "cache_test_add_one",
+                    "cache_test_scale_two",
+                ],
+                "base_preprocessor_params": [None, None],
+                "cache_dir": str(tmp_path),
+            },
+            **_cache_context(),
+        )
+        second = disk_cache_preprocessor(
+            data,
+            {
+                "base_preprocessing_fn_name": [
+                    "cache_test_scale_two",
+                    "cache_test_add_one",
+                ],
+                "base_preprocessor_params": [None, None],
+                "cache_dir": str(tmp_path),
+            },
+            **_cache_context(),
+        )
+
+        np.testing.assert_allclose(first, (data + 1.0) * 2.0)
+        np.testing.assert_allclose(second, (data * 2.0) + 1.0)
+        assert calls == {"add": 2, "scale": 2}
+
+    def test_unknown_wrapped_preprocessor_raises_clear_value_error(self, tmp_path):
+        data = np.ones((3, 3, 2), dtype=np.float32)
+
+        with pytest.raises(
+            ValueError, match="Unknown wrapped preprocessor 'missing_preprocessor'"
+        ):
+            disk_cache_preprocessor(
+                data,
+                {
+                    "base_preprocessing_fn_name": "missing_preprocessor",
+                    "cache_dir": str(tmp_path),
+                },
+                **_cache_context(),
+            )
 
 
 class TestWindowRMSPreprocessor:

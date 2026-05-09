@@ -28,7 +28,7 @@ The main pipeline is:
 
 `tasks/` defines decoding targets such as word embeddings, Whisper embeddings, sentence onset, content/non-content words, part of speech, LLM surprise, IU boundaries, volume level, and LLM decoding. Each task registers a data getter and task-specific config.
 
-`models/` contains model implementations and integrations. Foundation models such as `brainbert/`, `diver/`, and `popt/` live here alongside simple baselines such as `neural_conv_decoder/`, `linear_model/`, and `time_pooling_model/`. Shared helpers, decoders, config setters, and preprocessors are in the top-level `models/*.py` files.
+`models/` contains model implementations and integrations. Foundation models such as `brainbert/`, `diver/`, and `popt/` live here alongside simple baselines such as `neural_conv_decoder/`, `linear_model/`, and `time_pooling_model/`. Shared helpers, decoders, config setters, and preprocessors are in the top-level `models/*.py` files. `models/shared_preprocessors.py` includes a `disk_cache_preprocessor` wrapper that caches the final output of one registered preprocessor or an ordered preprocessor pipeline under `.cache/preprocessors/` by default.
 
 `metrics/` contains registered losses and evaluation metrics for regression, classification, embedding prediction, and language model decoding.
 

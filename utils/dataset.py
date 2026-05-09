@@ -19,10 +19,24 @@ def _preprocessor_accepts_context(preprocessing_fn):
             "selected_rows",
             "selected_rows_df",
             "subject_channel_counts",
+            "subject_channel_names",
             "model_inputs",
             "device",
+            "lag",
         )
     )
+
+
+def _preprocessor_context_kwargs(preprocessing_fn, context):
+    signature = inspect.signature(preprocessing_fn)
+    if any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
+    ):
+        return context
+    return {
+        name: value for name, value in context.items() if name in signature.parameters
+    }
 
 
 def _apply_preprocessing(data, preprocessing_fns, preprocessor_params, **context):
@@ -36,7 +50,11 @@ def _apply_preprocessing(data, preprocessing_fns, preprocessor_params, **context
         else:
             params = preprocessor_params
         if context and _preprocessor_accepts_context(preprocessing_fn):
-            data = preprocessing_fn(data, params, **context)
+            data = preprocessing_fn(
+                data,
+                params,
+                **_preprocessor_context_kwargs(preprocessing_fn, context),
+            )
         else:
             data = preprocessing_fn(data, params)
 
@@ -75,6 +93,7 @@ class RawNeuralDataset:
         self.task_df = task_df
         self.data_durations = [raw.times[-1] for raw in raws]
         self._raw_subject_channel_counts = [len(raw.ch_names) for raw in raws]
+        self._raw_subject_channel_names = [list(raw.ch_names) for raw in raws]
         self.subject_channel_counts = list(self._raw_subject_channel_counts)
         self._sfreqs = [raw.info["sfreq"] for raw in raws]
 
@@ -84,9 +103,7 @@ class RawNeuralDataset:
             )
 
         self.sfreq = self._sfreqs[0]
-        self.raw_arrays = [
-            np.asarray(raw.get_data(), dtype=np.float32) for raw in raws
-        ]
+        self.raw_arrays = [np.asarray(raw.get_data(), dtype=np.float32) for raw in raws]
 
     def get_data_for_lag(
         self, lag: int
@@ -110,11 +127,15 @@ class RawNeuralDataset:
 
         selected_rows_df = None
         subject_channel_counts = []
+        subject_channel_names = []
         per_raw_onsets = []
         total_channel_count = 0
 
-        for raw_array, data_duration, channel_count in zip(
-            self.raw_arrays, self.data_durations, self._raw_subject_channel_counts
+        for raw_array, data_duration, channel_count, channel_names in zip(
+            self.raw_arrays,
+            self.data_durations,
+            self._raw_subject_channel_counts,
+            self._raw_subject_channel_names,
         ):
             valid_mask = (self.task_df.start + tmin >= 0) & (
                 self.task_df.start + tmax <= data_duration
@@ -139,6 +160,7 @@ class RawNeuralDataset:
 
             per_raw_onsets.append(onset_samples[selection])
             subject_channel_counts.append(channel_count)
+            subject_channel_names.append(channel_names)
             total_channel_count += channel_count
 
         if not per_raw_onsets or selected_rows_df is None:
@@ -171,6 +193,8 @@ class RawNeuralDataset:
                 self.preprocessor_params,
                 selected_rows=selected_rows_df,
                 selected_rows_df=selected_rows_df,
+                lag=lag,
+                subject_channel_names=subject_channel_names,
                 subject_channel_counts=subject_channel_counts,
             )
 
