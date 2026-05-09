@@ -15,7 +15,9 @@ def _as_model_spec(spec):
         return spec
     if isinstance(spec, dict):
         return dict_to_config(spec, ModelSpec)
-    raise TypeError(f"foundation_model_spec must be a dict or ModelSpec, got {type(spec)}")
+    raise TypeError(
+        f"foundation_model_spec must be a dict or ModelSpec, got {type(spec)}"
+    )
 
 
 def _resolve_device(params):
@@ -97,8 +99,7 @@ def _encode_per_subject_concat(
                 torch.split(batch, subject_channel_counts, dim=1)
             ):
                 subject_kwargs = {
-                    key: chunks[subject_idx]
-                    for key, chunks in coord_chunks.items()
+                    key: chunks[subject_idx] for key, chunks in coord_chunks.items()
                 }
                 subject_embeddings.append(
                     model.encode_features(chunk, **subject_kwargs).detach().cpu()
@@ -133,7 +134,9 @@ def foundation_feature_cache(
     model_inputs = _build_input_tensors(rows, input_fields, device)
     data_tensor = torch.as_tensor(data, dtype=torch.float32)
 
-    model = build_model_from_spec(foundation_spec, lag=params.get("lag"), fold=1).to(device)
+    model = build_model_from_spec(foundation_spec, lag=params.get("lag"), fold=1).to(
+        device
+    )
     model.eval()
     for param in model.parameters():
         param.requires_grad = False
@@ -189,65 +192,120 @@ def _set_preprocessor_entries(data_params, entries):
     data_params.preprocessor_params = [params for _, params in entries]
 
 
+def _iter_wrapped_preprocessor_entries(wrapper_params):
+    names = wrapper_params.get("base_preprocessing_fn_name")
+    params = wrapper_params.get("base_preprocessor_params")
+    if names is None:
+        return []
+    if not isinstance(names, list):
+        names = [names]
+        params = [params]
+    elif params is None:
+        params = [None] * len(names)
+    elif not isinstance(params, list):
+        params = [params]
+    return list(zip(names, params))
+
+
+def _set_wrapped_preprocessor_entries(wrapper_params, entries):
+    wrapper_params["base_preprocessing_fn_name"] = [name for name, _ in entries]
+    wrapper_params["base_preprocessor_params"] = [params for _, params in entries]
+
+
+def _configure_foundation_feature_params(
+    experiment_config, data_params, params, raws, task_df
+):
+    params = dict(params or {})
+    foundation_spec = _as_model_spec(params["foundation_model_spec"])
+    foundation_setters = params.get("foundation_config_setter_name")
+
+    if foundation_setters:
+        original_model_spec = experiment_config.model_spec
+        experiment_config.model_spec = foundation_spec
+        try:
+            setter_names = (
+                foundation_setters
+                if isinstance(foundation_setters, list)
+                else [foundation_setters]
+            )
+            for setter_name in setter_names:
+                setter = registry.config_setter_registry[setter_name]
+                experiment_config = setter(experiment_config, raws, task_df)
+        finally:
+            foundation_spec = experiment_config.model_spec
+            experiment_config.model_spec = original_model_spec
+
+    input_fields = list(
+        experiment_config.task_config.task_specific_config.input_fields or []
+    )
+    params["input_fields"] = params.get("input_fields", input_fields)
+    params["foundation_model_spec"] = foundation_spec
+    foundation_info = registry.model_constructor_registry.get(
+        foundation_spec.constructor_name, {}
+    )
+    getter_name = foundation_spec.model_data_getter or foundation_info.get(
+        "required_data_getter"
+    )
+    if getter_name:
+        experiment_config.model_spec.model_data_getter = getter_name
+        experiment_config.model_spec.params.setdefault(
+            "data_root", data_params.data_root
+        )
+    for key in ("output_dim", "embedding_dim", "output_activation"):
+        if key in foundation_spec.params:
+            experiment_config.model_spec.params.setdefault(
+                key, foundation_spec.params[key]
+            )
+    return experiment_config, params
+
+
+def _configure_disk_cache_wrapper_params(
+    experiment_config, data_params, params, raws, task_df
+):
+    wrapper_params = dict(params or {})
+    wrapped_entries = _iter_wrapped_preprocessor_entries(wrapper_params)
+    if not wrapped_entries:
+        return experiment_config, wrapper_params
+
+    updated_entries = []
+    for wrapped_name, wrapped_params in wrapped_entries:
+        if wrapped_name == "foundation_feature_cache":
+            experiment_config, wrapped_params = _configure_foundation_feature_params(
+                experiment_config,
+                data_params,
+                wrapped_params,
+                raws,
+                task_df,
+            )
+        updated_entries.append((wrapped_name, wrapped_params))
+    _set_wrapped_preprocessor_entries(wrapper_params, updated_entries)
+    return experiment_config, wrapper_params
+
+
 @registry.register_config_setter("foundation_feature_cache")
 def set_foundation_feature_cache_config(experiment_config, raws, task_df):
     """Configure nested frozen foundation spec before generic feature caching."""
     data_params = experiment_config.task_config.data_params
     entries = _iter_preprocessor_entries(data_params)
-    updated_foundation_entries = []
+    updated_entries = []
     for name, params in entries:
-        if name != "foundation_feature_cache":
-            continue
-
-        params = dict(params or {})
-        foundation_spec = _as_model_spec(params["foundation_model_spec"])
-        foundation_setters = params.get("foundation_config_setter_name")
-
-        if foundation_setters:
-            original_model_spec = experiment_config.model_spec
-            experiment_config.model_spec = foundation_spec
-            try:
-                setter_names = (
-                    foundation_setters
-                    if isinstance(foundation_setters, list)
-                    else [foundation_setters]
-                )
-                for setter_name in setter_names:
-                    setter = registry.config_setter_registry[setter_name]
-                    experiment_config = setter(experiment_config, raws, task_df)
-            finally:
-                foundation_spec = experiment_config.model_spec
-                experiment_config.model_spec = original_model_spec
-
-        input_fields = list(
-            experiment_config.task_config.task_specific_config.input_fields or []
-        )
-        params["input_fields"] = params.get("input_fields", input_fields)
-        params["foundation_model_spec"] = foundation_spec
-        foundation_info = registry.model_constructor_registry.get(
-            foundation_spec.constructor_name, {}
-        )
-        getter_name = foundation_spec.model_data_getter or foundation_info.get(
-            "required_data_getter"
-        )
-        if getter_name:
-            experiment_config.model_spec.model_data_getter = getter_name
-            experiment_config.model_spec.params.setdefault(
-                "data_root", data_params.data_root
+        if name == "foundation_feature_cache":
+            experiment_config, params = _configure_foundation_feature_params(
+                experiment_config,
+                data_params,
+                params,
+                raws,
+                task_df,
             )
-        for key in ("output_dim", "embedding_dim", "output_activation"):
-            if key in foundation_spec.params:
-                experiment_config.model_spec.params.setdefault(
-                    key, foundation_spec.params[key]
-                )
-        updated_foundation_entries.append((name, params))
+        elif name == "disk_cache_preprocessor":
+            experiment_config, params = _configure_disk_cache_wrapper_params(
+                experiment_config,
+                data_params,
+                params,
+                raws,
+                task_df,
+            )
+        updated_entries.append((name, params))
 
-    current_non_foundation_entries = [
-        entry
-        for entry in _iter_preprocessor_entries(data_params)
-        if entry[0] != "foundation_feature_cache"
-    ]
-    _set_preprocessor_entries(
-        data_params, current_non_foundation_entries + updated_foundation_entries
-    )
+    _set_preprocessor_entries(data_params, updated_entries)
     return experiment_config

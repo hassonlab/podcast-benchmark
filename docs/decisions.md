@@ -16,7 +16,7 @@ Models, tasks, preprocessors, metrics, config setters, and model data getters ar
 
 ## Disk-Cached Preprocessor Pipelines
 
-Expensive preprocessing can be wrapped with the registered `disk_cache_preprocessor`. The cache stores the final output of a full ordered preprocessor pipeline, not intermediate stages, and keys entries by wrapped preprocessor names, implementation source hashes, normalized parameters, lag, selected event starts, ordered subject electrode names, subject channel counts, and cache mode. This keeps repeated foundation feature extraction reproducible while invalidating automatically when implementation, parameters, selected rows, electrodes, lag, or mode changes.
+Expensive preprocessing can be wrapped with the registered `disk_cache_preprocessor`. The cache stores the final output of a full ordered preprocessor pipeline, not intermediate stages, and keys entries by wrapped preprocessor names, implementation source hashes, normalized parameters, lag, selected event starts, ordered subject electrode names, subject channel counts, and cache mode. Checked-in foundation model configs use this wrapper around `foundation_feature_cache`, while keeping `config_setter_name: foundation_feature_cache` so nested foundation model settings are still prepared before training. This keeps repeated foundation feature extraction reproducible while invalidating automatically when implementation, parameters, selected rows, electrodes, lag, or mode changes.
 
 ## YAML Experiment Configuration
 

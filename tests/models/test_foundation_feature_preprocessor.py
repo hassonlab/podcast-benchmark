@@ -3,11 +3,14 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from core.config import ModelSpec
+from core import registry
+from core.config import DataParams, ExperimentConfig, ModelSpec, TaskConfig
 from core.registry import register_model_constructor
-from models.foundation_feature_preprocessor import foundation_feature_cache
+from models.foundation_feature_preprocessor import (
+    foundation_feature_cache,
+    set_foundation_feature_cache_config,
+)
 from utils.dataset import _apply_preprocessing
-
 
 FAKE_CACHE_STATS = {"instances": []}
 
@@ -23,12 +26,16 @@ class FakeFoundationModel(nn.Module):
         self.calls.append(
             {
                 "x": x.detach().cpu().clone(),
-                "xyz_id": kwargs.get("xyz_id", None).detach().cpu().clone()
-                if torch.is_tensor(kwargs.get("xyz_id", None))
-                else None,
-                "lip_coords": kwargs.get("lip_coords", None).detach().cpu().clone()
-                if torch.is_tensor(kwargs.get("lip_coords", None))
-                else None,
+                "xyz_id": (
+                    kwargs.get("xyz_id", None).detach().cpu().clone()
+                    if torch.is_tensor(kwargs.get("xyz_id", None))
+                    else None
+                ),
+                "lip_coords": (
+                    kwargs.get("lip_coords", None).detach().cpu().clone()
+                    if torch.is_tensor(kwargs.get("lip_coords", None))
+                    else None
+                ),
             }
         )
         pooled = x.reshape(x.shape[0], x.shape[1], -1).mean(dim=-1)
@@ -120,3 +127,60 @@ def test_legacy_two_argument_preprocessors_still_work_with_context():
     )
 
     np.testing.assert_array_equal(result, data + 3)
+
+
+def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
+    monkeypatch,
+):
+    def fake_foundation_setter(config, raws, task_df):
+        config.model_spec.params["output_dim"] = 7
+        config.model_spec.params["embedding_dim"] = 7
+        return config
+
+    monkeypatch.setitem(
+        registry.config_setter_registry,
+        "fake_foundation_config_setter",
+        fake_foundation_setter,
+    )
+
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="probe_model",
+            params={},
+        ),
+        task_config=TaskConfig(
+            task_name="fake_task",
+            data_params=DataParams(
+                data_root="data",
+                preprocessing_fn_name=["disk_cache_preprocessor"],
+                preprocessor_params=[
+                    {
+                        "base_preprocessing_fn_name": ["foundation_feature_cache"],
+                        "base_preprocessor_params": [
+                            {
+                                "mode": "normal",
+                                "foundation_config_setter_name": "fake_foundation_config_setter",
+                                "foundation_model_spec": {
+                                    "constructor_name": "fake_foundation_cache_model",
+                                    "params": {},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            ),
+        ),
+    )
+
+    result = set_foundation_feature_cache_config(config, raws=[], task_df=None)
+    wrapper_params = result.task_config.data_params.preprocessor_params[0]
+    foundation_params = wrapper_params["base_preprocessor_params"][0]
+
+    assert result.task_config.data_params.preprocessing_fn_name == [
+        "disk_cache_preprocessor"
+    ]
+    assert wrapper_params["base_preprocessing_fn_name"] == ["foundation_feature_cache"]
+    assert foundation_params["foundation_model_spec"].params["output_dim"] == 7
+    assert foundation_params["input_fields"] == []
+    assert result.model_spec.params["output_dim"] == 7
+    assert result.model_spec.params["embedding_dim"] == 7
