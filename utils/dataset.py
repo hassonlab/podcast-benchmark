@@ -1,10 +1,31 @@
+import inspect
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 
-def _apply_preprocessing(data, preprocessing_fns, preprocessor_params):
+def _preprocessor_accepts_context(preprocessing_fn):
+    signature = inspect.signature(preprocessing_fn)
+    if any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
+    ):
+        return True
+    return any(
+        name in signature.parameters
+        for name in (
+            "selected_rows",
+            "selected_rows_df",
+            "subject_channel_counts",
+            "model_inputs",
+            "device",
+        )
+    )
+
+
+def _apply_preprocessing(data, preprocessing_fns, preprocessor_params, **context):
     """Apply a list of preprocessing functions to data."""
     if not preprocessing_fns:
         return data
@@ -14,7 +35,10 @@ def _apply_preprocessing(data, preprocessing_fns, preprocessor_params):
             params = preprocessor_params[i] if i < len(preprocessor_params) else None
         else:
             params = preprocessor_params
-        data = preprocessing_fn(data, params)
+        if context and _preprocessor_accepts_context(preprocessing_fn):
+            data = preprocessing_fn(data, params, **context)
+        else:
+            data = preprocessing_fn(data, params)
 
     return data
 
@@ -142,7 +166,12 @@ class RawNeuralDataset:
 
         if self.preprocessing_fns:
             neural = _apply_preprocessing(
-                neural, self.preprocessing_fns, self.preprocessor_params
+                neural,
+                self.preprocessing_fns,
+                self.preprocessor_params,
+                selected_rows=selected_rows_df,
+                selected_rows_df=selected_rows_df,
+                subject_channel_counts=subject_channel_counts,
             )
 
         targets = selected_rows_df.target.to_numpy(copy=True)

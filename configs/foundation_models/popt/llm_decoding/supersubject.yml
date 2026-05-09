@@ -1,4 +1,4 @@
-config_setter_name: popt_finetune
+config_setter_name: foundation_feature_cache
 task_config:
   task_name: llm_decoding_task
   data_params:
@@ -8,6 +8,28 @@ task_config:
     use_lip_coords: true
     target_sr: 2048
     window_width: 1.0
+    preprocessing_fn_name:
+    - foundation_feature_cache
+    preprocessor_params:
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: popt_finetune
+      foundation_model_spec:
+        constructor_name: popt_finetune
+        params:
+          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
+          brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+          use_lip_coords: true
+          max_coord_value: 5000
+          use_brainbert: true
+          output_dim: 768
+          mlp_layer_sizes: []
+          dropout: 0.0
+          freeze_foundation: false
+          num_frozen_layers: 0
+        feature_cache: false
+        per_subject_feature_concat: false
+        sub_models: {}
   task_specific_config:
     max_context: 32
     max_target_tokens: 16
@@ -38,15 +60,12 @@ training_params:
   smaller_is_better: true
 trial_name: popt_supersubject_llm_decoding
 model_spec:
-  constructor_name: popt_finetune
+  constructor_name: mlp_probe_decoder
   params:
-    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
-    brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
-    use_lip_coords: true
-    max_coord_value: 5000
-    use_brainbert: true
-    output_dim: 768
-    mlp_layer_sizes: []
+    layer_sizes:
+    - 768
     dropout: 0.0
-    freeze_foundation: false
-    num_frozen_layers: 0
+    use_layer_norm: true
+    output_dim: 768
+    embedding_dim: 768
+  sub_models: {}

@@ -20,15 +20,10 @@ from utils import data_utils
 from utils.config_utils import load_config, get_nested_value
 from utils.dataset import RawNeuralDataset
 from utils.decoding_utils import (
-    CachedFeatureModel,
-    _build_cached_fold_loaders,
     _build_fold_loaders,
-    _build_full_lag_loader,
     _create_optimizer,
     _get_fold_indices,
     _maybe_shuffle_targets,
-    _maybe_prepare_feature_cache_model,
-    _maybe_prepare_per_subject_concat_model,
     _normalize_fold_targets,
     _run_epoch,
     _select_requested_folds,
@@ -208,28 +203,6 @@ def _count_params(model: torch.nn.Module) -> tuple[int, int, int, float]:
     return total, trainable, frozen, memory
 
 
-def _same_cached_feature_model(
-    model: torch.nn.Module, cache_model: torch.nn.Module | None
-) -> bool:
-    if cache_model is None or not isinstance(model, CachedFeatureModel):
-        return False
-    return model.model.__class__ is cache_model.__class__
-
-
-def _count_profile_params(
-    model: torch.nn.Module, cache_model: torch.nn.Module | None = None
-) -> tuple[int, int, int, float]:
-    model_total, model_trainable, model_frozen, model_memory = _count_params(model)
-    if cache_model is None or _same_cached_feature_model(model, cache_model):
-        return model_total, model_trainable, model_frozen, model_memory
-
-    cache_total, _, _, cache_memory = _count_params(cache_model)
-    total = cache_total + model_total
-    trainable = model_trainable
-    frozen = total - trainable
-    return total, trainable, frozen, cache_memory + model_memory
-
-
 def _first_parameter_dtype(model: torch.nn.Module) -> str:
     for param in model.parameters():
         return str(param.dtype).replace("torch.", "")
@@ -317,13 +290,6 @@ def _warmup_train_batch(
 def _prepare_trainable_model(model_spec, lag, fold, loaders, training_params, device):
     model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
     optimizer = _create_optimizer(model, training_params)
-    model, loaders, probe_optimizer = _maybe_prepare_per_subject_concat_model(
-        model, loaders, model_spec, training_params, device
-    )
-    if probe_optimizer is not None:
-        optimizer = probe_optimizer
-    elif getattr(model_spec, "feature_cache", False):
-        model = CachedFeatureModel(model).to(device)
     return model, loaders, optimizer
 
 
@@ -368,58 +334,16 @@ def profile_config(
     split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
     target_splits = _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params)
 
-    use_cache = getattr(model_spec, "feature_cache", False) or getattr(
-        model_spec, "per_subject_feature_concat", False
-    )
-
-    cached_features = None
-    cached_extra_inputs = None
-    cache_model = None
     cache_build_seconds = 0.0
     cache_peak = "n/a"
-    if use_cache:
-        full_lag_loader = _build_full_lag_loader(
-            neural_data, data_df, Y, unit_config.task_config, training_params
-        )
-        _reset_cuda_peak(device)
-        _sync(device)
-        start = time.perf_counter()
-        (
-            cached_features,
-            cached_extra_inputs,
-            cache_model,
-        ) = _maybe_prepare_feature_cache_model(
-            model_spec,
-            lag,
-            full_lag_loader,
-            training_params,
-            device,
-            subject_channel_counts=(
-                subject_channel_counts
-                if getattr(model_spec, "per_subject_feature_concat", False)
-                else None
-            ),
-            return_cache_model=True,
-        )
-        _sync(device)
-        cache_build_seconds = time.perf_counter() - start
-        cache_peak = _peak_cuda_memory_mb(device)
-        loaders = _build_cached_fold_loaders(
-            cached_features,
-            cached_extra_inputs,
-            split_indices,
-            target_splits,
-            training_params,
-        )
-    else:
-        loaders = _build_fold_loaders(
-            neural_data,
-            data_df,
-            unit_config.task_config,
-            split_indices,
-            target_splits,
-            training_params,
-        )
+    loaders = _build_fold_loaders(
+        neural_data,
+        data_df,
+        unit_config.task_config,
+        split_indices,
+        target_splits,
+        training_params,
+    )
 
     all_fns = setup_metrics_and_loss(training_params)
     metric_names = all_fns.keys()
@@ -428,7 +352,7 @@ def profile_config(
     )
 
     input_shape = _shape(neural_data)
-    cached_feature_shape = _shape(cached_features)
+    cached_feature_shape = "n/a"
     output_shape = _forward_output_shape(model, loaders["train"], device)
 
     _warmup_train_batch(
@@ -462,9 +386,7 @@ def profile_config(
         model, loaders["test"], device, warmup_iters, timing_iters
     )
 
-    total_params, trainable_params, frozen_params, param_memory = _count_profile_params(
-        model, cache_model
-    )
+    total_params, trainable_params, frozen_params, param_memory = _count_params(model)
     num_train_samples = len(loaders["train"].dataset)
     num_steps = len(loaders["train"])
     num_samples = len(neural_data)
@@ -495,7 +417,7 @@ def profile_config(
         ),
         "num_subjects": len(subject_channel_counts),
         "num_channels": num_channels,
-        "cache_build_seconds": cache_build_seconds if use_cache else "n/a",
+        "cache_build_seconds": "n/a",
         "cache_samples_per_second": cache_sps,
         "cache_ms_per_sample": cache_ms,
         "finetune_epoch_seconds": finetune_epoch_seconds,
