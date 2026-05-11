@@ -24,7 +24,7 @@ The main pipeline is:
 
 `core/config.py` defines the dataclasses used by YAML configs, including `ExperimentConfig`, `TaskConfig`, `DataParams`, `TrainingParams`, and `ModelSpec`.
 
-`configs/` contains experiment YAML files. `configs/foundation_models/` holds generated benchmark configs for foundation models and tasks, with foundation feature preprocessing wrapped by `disk_cache_preprocessor` so repeated runs reuse `.cache/preprocessors/` outputs. `configs/examples/` contains smaller examples.
+`configs/` contains experiment YAML files. `configs/foundation_models/` holds generated benchmark configs for foundation models and tasks, with ordered foundation preprocessing wrapped by `disk_cache_preprocessor` so repeated runs reuse `.cache/preprocessors/` outputs. BrainBERT and PopT configs declare STFT as an explicit wrapped preprocessor before foundation feature extraction. `configs/examples/` contains smaller examples.
 
 `tasks/` defines decoding targets such as word embeddings, Whisper embeddings, sentence onset, content/non-content words, part of speech, LLM surprise, IU boundaries, volume level, and LLM decoding. Each task registers a data getter and task-specific config.
 

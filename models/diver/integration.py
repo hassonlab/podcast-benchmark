@@ -689,7 +689,6 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     experiment_config = set_input_channels(
         experiment_config, raws, _df_word, ["diver_finetune"]
     )
-    experiment_config.task_config.data_params.use_stft_preprocessing = False
 
     diver_model_spec = _find_first_model_spec_by_constructor(
         experiment_config.model_spec, "diver_finetune"
