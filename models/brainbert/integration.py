@@ -22,6 +22,7 @@ from torch.nn import functional as F
 
 from core import registry
 from models.shared_decoders import MLPProbeDecoder as MLPDecoder
+from models.stft_config import configure_explicit_stft_preprocessor
 
 
 @registry.register_data_preprocessor("stft_preprocessing")
@@ -69,35 +70,6 @@ def _resolve_output_activation(model_params, output_dim):
     if output_dim > 1 and "softmax_output" in losses:
         return "softmax"
     return "linear"
-
-
-def _append_preprocessor(data_params, fn_name, params):
-    existing_names = data_params.preprocessing_fn_name
-    existing_params = data_params.preprocessor_params
-
-    if existing_names is None:
-        data_params.preprocessing_fn_name = [fn_name]
-        data_params.preprocessor_params = [params]
-        return
-
-    if not isinstance(existing_names, list):
-        existing_names = [existing_names]
-    if existing_params is None:
-        existing_params = [None] * len(existing_names)
-    elif not isinstance(existing_params, list):
-        existing_params = [existing_params]
-
-    if fn_name in existing_names:
-        idx = existing_names.index(fn_name)
-        while len(existing_params) <= idx:
-            existing_params.append(None)
-        existing_params[idx] = params
-    else:
-        existing_names.append(fn_name)
-        existing_params.append(params)
-
-    data_params.preprocessing_fn_name = existing_names
-    data_params.preprocessor_params = existing_params
 
 
 def _default_output_dim_for_task(task_name, task_specific_config):
@@ -572,21 +544,11 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         if raws
         else 512
     )
-    stft_config = dict(
-        model_params.get("stft_config")
-        or data_params.stft_config
-        or {
-            "freq_channel_cutoff": 40,
-            "nperseg": 400,
-            "noverlap": 350,
-            "normalizing": "zscore",
-        }
+    stft_config = configure_explicit_stft_preprocessor(
+        data_params,
+        sample_rate=int(sample_rate),
+        model_name="BrainBERT finetuning",
     )
-    stft_config.setdefault("fs", int(sample_rate))
-
-    _append_preprocessor(data_params, "stft_preprocessing", stft_config)
-    data_params.use_stft_preprocessing = True
-    data_params.stft_config = stft_config
 
     foundation_dir = model_params.get("foundation_dir") or model_params.get("checkpoint_path")
     model_dir = model_params.get("model_dir")
