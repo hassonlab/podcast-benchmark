@@ -4,6 +4,8 @@ Tests for utils/dataset.py.
 Tests dataset utilities for handling lagged raw slicing and dictionary inputs.
 """
 
+from pathlib import Path
+
 import mne
 import numpy as np
 import pandas as pd
@@ -545,7 +547,6 @@ class TestChunkedPreprocessedLoader:
         loader = ChunkedPreprocessedLoader(
             [path0, path1],
             data_df,
-            "val",
             [1, 4, 5],
             task_config,
             targets,
@@ -583,7 +584,6 @@ class TestChunkedPreprocessedLoader:
         train_loader = ChunkedPreprocessedLoader(
             [path0, path1],
             data_df,
-            "train",
             np.arange(8),
             task_config,
             targets,
@@ -599,7 +599,6 @@ class TestChunkedPreprocessedLoader:
         eval_loader = ChunkedPreprocessedLoader(
             [path0, path1],
             data_df,
-            "test",
             np.arange(8),
             task_config,
             targets,
@@ -649,7 +648,6 @@ class TestChunkedPreprocessedLoader:
         loader = ChunkedPreprocessedLoader(
             [path0, path1],
             pd.DataFrame({"target": np.arange(4)}),
-            "test",
             np.arange(4),
             TaskConfig(),
             torch.arange(4, dtype=torch.float32),
@@ -659,6 +657,38 @@ class TestChunkedPreprocessedLoader:
 
         assert [batch[2].tolist() for batch in loader] == [[0.0, 1.0], [2.0, 3.0]]
         assert max_active_loads == 1
+
+    def test_iter_only_loads_chunks_used_by_split(self, tmp_path, monkeypatch):
+        path0 = tmp_path / "chunk0.npz"
+        path1 = tmp_path / "chunk1.npz"
+        self._write_chunk(path0, np.arange(2).reshape(2, 1), [0, 1], [0, 1])
+        self._write_chunk(path1, np.arange(2, 4).reshape(2, 1), [2, 3], [2, 3])
+
+        loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            pd.DataFrame({"target": np.arange(4)}),
+            [2, 3],
+            TaskConfig(),
+            torch.arange(4, dtype=torch.float32),
+            batch_size=2,
+            shuffle=False,
+            chunk_row_positions=[
+                np.asarray([0, 1], dtype=np.int64),
+                np.asarray([2, 3], dtype=np.int64),
+            ],
+        )
+
+        real_load = np.load
+        loaded_paths = []
+
+        def tracked_load(path, *args, **kwargs):
+            loaded_paths.append(Path(path))
+            return real_load(path, *args, **kwargs)
+
+        monkeypatch.setattr(np, "load", tracked_load)
+
+        assert [batch[2].tolist() for batch in loader] == [[2.0, 3.0]]
+        assert loaded_paths == [path1]
 
 
 @pytest.fixture

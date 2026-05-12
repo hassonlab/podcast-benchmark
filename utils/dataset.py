@@ -267,6 +267,7 @@ class RawNeuralDataset:
         cache_path.mkdir(parents=True, exist_ok=True)
 
         chunk_paths = []
+        chunk_row_positions = []
         all_targets = self._targets_to_numpy(selected_rows_df)
         try:
             for chunk_idx, start in enumerate(
@@ -301,6 +302,7 @@ class RawNeuralDataset:
                     row_positions=row_positions,
                 )
                 chunk_paths.append(chunk_path)
+                chunk_row_positions.append(row_positions)
                 del neural
         except Exception:
             for chunk_path in chunk_paths:
@@ -313,6 +315,7 @@ class RawNeuralDataset:
         self.subject_channel_counts = subject_channel_counts
         return PreprocessedChunkStore(
             chunk_paths=chunk_paths,
+            chunk_row_positions=chunk_row_positions,
             data_df=selected_rows_df,
             targets=torch.from_numpy(all_targets),
             subject_channel_counts=subject_channel_counts,
@@ -322,6 +325,7 @@ class RawNeuralDataset:
 @dataclass
 class PreprocessedChunkStore:
     chunk_paths: list[Path]
+    chunk_row_positions: list[np.ndarray]
     data_df: pd.DataFrame
     targets: torch.Tensor
     subject_channel_counts: list[int]
@@ -335,7 +339,6 @@ class PreprocessedChunkStore:
 
     def get_loader(
         self,
-        phase: str,
         indices,
         task_config,
         targets,
@@ -346,13 +349,13 @@ class PreprocessedChunkStore:
         return ChunkedPreprocessedLoader(
             self.chunk_paths,
             self.data_df,
-            phase,
             indices,
             task_config,
             targets,
             batch_size,
             shuffle=shuffle,
             seed=seed,
+            chunk_row_positions=self.chunk_row_positions,
         )
 
 
@@ -361,53 +364,55 @@ class ChunkedPreprocessedLoader:
         self,
         chunk_paths,
         data_df,
-        phase,
         indices,
         task_config,
         targets,
         batch_size,
         shuffle=False,
         seed=0,
+        chunk_row_positions=None,
     ):
         self.chunk_paths = list(chunk_paths)
-        self.data_df = data_df
-        self.phase = phase
+        if chunk_row_positions is None:
+            chunk_row_positions = self._load_chunk_row_positions(self.chunk_paths)
+        self.chunk_row_positions = [
+            np.asarray(row_positions, dtype=np.int64)
+            for row_positions in chunk_row_positions
+        ]
         self.indices = np.asarray(indices, dtype=np.int64)
         self.index_set = set(self.indices.tolist())
-        self.task_config = task_config
-        self.targets = targets
         self.batch_size = int(batch_size)
         self.shuffle = shuffle
         self.seed = int(seed)
         self.epoch = 0
-        self._length = None
+        self.input_fields = task_config.task_specific_config.input_fields
+        self.extra_inputs = data_utils.df_columns_to_tensors(
+            data_df,
+            self.input_fields,
+            self.indices,
+        )
+        self.targets_for_split = targets[
+            torch.as_tensor(self.indices, dtype=torch.long)
+        ]
+        self.absolute_to_split_position = {
+            int(abs_pos): split_pos for split_pos, abs_pos in enumerate(self.indices)
+        }
+        self.chunk_plans = self._build_chunk_plans()
+        self._length = sum(len(plan["batches"]) for plan in self.chunk_plans)
 
-    def __len__(self):
-        if self._length is None:
-            total_batches = 0
-            for chunk_path in self.chunk_paths:
-                with np.load(chunk_path) as loaded:
-                    row_positions = loaded["row_positions"].astype(
-                        np.int64, copy=False
-                    )
-                n_in_split = sum(int(pos) in self.index_set for pos in row_positions)
-                if n_in_split:
-                    total_batches += math.ceil(n_in_split / self.batch_size)
-            self._length = total_batches
-        return self._length
+    @staticmethod
+    def _load_chunk_row_positions(chunk_paths):
+        row_positions = []
+        for chunk_path in chunk_paths:
+            with np.load(chunk_path) as loaded:
+                row_positions.append(
+                    loaded["row_positions"].astype(np.int64, copy=False)
+                )
+        return row_positions
 
-    def __iter__(self):
-        rng = np.random.default_rng(self.seed + self.epoch) if self.shuffle else None
-        chunk_order = np.arange(len(self.chunk_paths))
-        if self.shuffle:
-            rng.shuffle(chunk_order)
-        self.epoch += 1
-
-        for chunk_idx in chunk_order:
-            with np.load(self.chunk_paths[int(chunk_idx)]) as loaded:
-                data = loaded["data"]
-                row_positions = loaded["row_positions"].astype(np.int64, copy=False)
-
+    def _build_chunk_plans(self):
+        plans = []
+        for chunk_idx, row_positions in enumerate(self.chunk_row_positions):
             mask = np.fromiter(
                 (int(pos) in self.index_set for pos in row_positions),
                 dtype=bool,
@@ -416,24 +421,78 @@ class ChunkedPreprocessedLoader:
             if not np.any(mask):
                 continue
 
+            # absolute = selected_rows_df row, local = row within this chunk,
+            # split = row within this loader's train/val/test tensors.
             local_positions = np.flatnonzero(mask)
-            if self.shuffle:
-                rng.shuffle(local_positions)
-
             absolute_positions = row_positions[local_positions]
-            for start in range(0, len(local_positions), self.batch_size):
-                batch_local = local_positions[start : start + self.batch_size]
-                batch_abs = absolute_positions[start : start + self.batch_size]
-                neural_batch = torch.from_numpy(
-                    np.asarray(data[batch_local], dtype=np.float32)
+            split_positions = np.asarray(
+                [
+                    self.absolute_to_split_position[int(abs_pos)]
+                    for abs_pos in absolute_positions
+                ],
+                dtype=np.int64,
+            )
+            batches = [
+                (
+                    local_positions[start : start + self.batch_size],
+                    split_positions[start : start + self.batch_size],
                 )
-                inputs_dict = data_utils.df_columns_to_tensors(
-                    self.data_df,
-                    self.task_config.task_specific_config.input_fields,
-                    batch_abs,
-                )
-                target_batch = self.targets[torch.as_tensor(batch_abs, dtype=torch.long)]
-                yield neural_batch, inputs_dict, target_batch
+                for start in range(0, len(local_positions), self.batch_size)
+            ]
+            plans.append(
+                {
+                    "chunk_idx": chunk_idx,
+                    "local_positions": local_positions,
+                    "split_positions": split_positions,
+                    "batches": batches,
+                }
+            )
+        return plans
+
+    def __len__(self):
+        return self._length
+
+    def __iter__(self):
+        rng = np.random.default_rng(self.seed + self.epoch) if self.shuffle else None
+        plan_order = np.arange(len(self.chunk_plans))
+        if self.shuffle:
+            rng.shuffle(plan_order)
+        self.epoch += 1
+
+        for plan_idx in plan_order:
+            plan = self.chunk_plans[int(plan_idx)]
+            local_positions = plan["local_positions"]
+            split_positions = plan["split_positions"]
+            if self.shuffle:
+                order = np.arange(len(local_positions))
+                rng.shuffle(order)
+                local_positions = local_positions[order]
+                split_positions = split_positions[order]
+                batches = [
+                    (
+                        local_positions[start : start + self.batch_size],
+                        split_positions[start : start + self.batch_size],
+                    )
+                    for start in range(0, len(local_positions), self.batch_size)
+                ]
+            else:
+                batches = plan["batches"]
+
+            with np.load(self.chunk_paths[plan["chunk_idx"]]) as loaded:
+                data = loaded["data"]
+
+                for batch_local, batch_split in batches:
+                    neural_batch = torch.from_numpy(
+                        np.asarray(data[batch_local], dtype=np.float32)
+                    )
+                    inputs_dict = {
+                        name: tensor[torch.as_tensor(batch_split, dtype=torch.long)]
+                        for name, tensor in self.extra_inputs.items()
+                    }
+                    target_batch = self.targets_for_split[
+                        torch.as_tensor(batch_split, dtype=torch.long)
+                    ]
+                    yield neural_batch, inputs_dict, target_batch
 
 
 class NeuralDictDataset(Dataset):
