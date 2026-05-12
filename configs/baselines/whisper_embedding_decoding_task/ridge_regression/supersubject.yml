@@ -1,3 +1,5 @@
+config_setter_name:
+- set_input_channels
 task_config:
   task_name: whisper_embedding_decoding_task
   data_params:
@@ -6,6 +8,9 @@ task_config:
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: true
     window_width: 1.0
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 32
   task_specific_config:
     embedding_pca_dim: 50
 training_params:
@@ -21,24 +26,18 @@ training_params:
   metrics:
   - mse
   - corr
-  - cosine_sim
   - cosine_dist
+  - pairwise_accuracy
   early_stopping_metric: cosine_sim
   smaller_is_better: false
-  ridge_regression_baseline: true
   tensorboard_logging: false
-trial_name: ridge_regression_whisper_embedding_supersubject
+  weight_decay: 0.001
+  learning_rate: 0.05
 model_spec:
-  constructor_name: ''
+  constructor_name: 'torch_linear_model'
   params:
-    alphas:
-    - 0.001
-    - 0.01
-    - 0.1
-    - 1.0
-    - 10.0
-    - 100.0
-    - 1000.0
-    cv: 5
-    backend: torch_cuda
-    fit_intercept: true
+    output_dim: 50
+    num_timepoints: 16
+    bias: true
+    activation: linear
+trial_name: ridge_regression_whisper_embedding_supersubject

@@ -50,7 +50,7 @@ task_config:
     audio_sr: 44100
     butter_order: 4
     cutoff_hz: 8.0
-    hop_size: 25.0
+    hop_size: 100.0
     target_sr: 512
     window_size: 200.0
     zero_phase: true
