@@ -55,7 +55,7 @@ task_config:
 training_params:
   batch_size: 4
   early_stopping_metric: cross_entropy
-  early_stopping_patience: 5
+  early_stopping_patience: 10
   epochs: 100
   lag_step_size: 500
   learning_rate: 1.0e-05

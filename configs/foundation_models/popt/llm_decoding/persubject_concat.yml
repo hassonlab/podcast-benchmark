@@ -47,7 +47,7 @@ training_params:
   epochs: 100
   learning_rate: 1.0e-05
   weight_decay: 1.0e-05
-  early_stopping_patience: 5
+  early_stopping_patience: 10
   n_folds: 5
   min_lag: -1000
   max_lag: 1500
