@@ -20,7 +20,7 @@ Naming rules:
 Examples:
 
 - `configs/baselines/word_embedding_decoding_task/neural_conv_decoder/gpt2_supersubject.yml`
-- `configs/baselines/word_embedding_decoding_task/ridge_regression/per_region.yml`
+- `configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml`
 - `configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_per_region.yml`
 - `configs/controls/llm_decoding/no_brain_data.yml`
 - `configs/examples/example_foundation_model/finetuning.yml`

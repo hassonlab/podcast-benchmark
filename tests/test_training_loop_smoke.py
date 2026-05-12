@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from core.config import (
+    ChunkedPreprocessingParams,
     DataParams,
     ExperimentConfig,
     ModelSpec,
@@ -152,6 +153,49 @@ def test_run_training_over_lags_smoke_with_preprocessor(tmp_path):
     assert (checkpoint_dir / "lag_0" / "best_model_fold1.pt").exists()
     assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
     assert SMOKE_STATS["preprocessor_calls"] == 1
+
+
+def test_run_training_over_lags_smoke_with_chunked_preprocessing(tmp_path):
+    SMOKE_STATS["preprocessor_calls"] = 0
+
+    output_dir = tmp_path / "chunked_results"
+    checkpoint_dir = tmp_path / "chunked_checkpoints"
+    cache_dir = tmp_path / "chunks"
+
+    run_training_over_lags(
+        [0],
+        _fake_raws(),
+        _task_df(),
+        preprocessing_fns=[smoke_scale_preprocessor],
+        model_spec=ModelSpec(
+            constructor_name="smoke_flatten_regressor",
+            params={"output_dim": 1},
+        ),
+        task_name="smoke_task",
+        training_params=_training_params(),
+        task_config=_task_config(
+            DataParams(
+                window_width=0.004,
+                preprocessor_params=[{"scale": 0.5}],
+                chunked_preprocessing=ChunkedPreprocessingParams(
+                    enabled=True,
+                    num_chunks=3,
+                    cache_dir=str(cache_dir),
+                ),
+            )
+        ),
+        output_dir=str(output_dir),
+        checkpoint_dir=str(checkpoint_dir),
+        write_to_tensorboard=False,
+    )
+
+    result = pd.read_csv(output_dir / "lag_performance.csv")
+    assert result["lags"].tolist() == [0]
+    assert np.isfinite(result.loc[0, "test_mse_mean"])
+    assert (checkpoint_dir / "lag_0" / "best_model_fold1.pt").exists()
+    assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
+    assert SMOKE_STATS["preprocessor_calls"] == 3
+    assert not list(cache_dir.glob("*.npz"))
 
 
 def test_run_training_over_lags_smoke_with_foundation_feature_cache(tmp_path):

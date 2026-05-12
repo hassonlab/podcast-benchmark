@@ -27,6 +27,17 @@ class BaseTaskConfig(ABC):
 
 
 @dataclass
+class ChunkedPreprocessingParams:
+    # If true, preprocess lag windows in temporary disk-backed chunks instead of
+    # materializing the full preprocessed lag tensor in memory.
+    enabled: bool = False
+    # Desired number of near-equal chunks per lag.
+    num_chunks: int = 1
+    # Directory for temporary chunk .npz files.
+    cache_dir: str = ".cache/preprocessed_chunks"
+
+
+@dataclass
 class DataParams:
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
@@ -67,6 +78,10 @@ class DataParams:
     signal_unit: Optional[str] = None
     # If true, will drop bad channels marked in raw.info['bads'] after loading data.
     do_drop_bads: bool = True
+    # Optional disk-backed preprocessing path for large lag datasets.
+    chunked_preprocessing: ChunkedPreprocessingParams = field(
+        default_factory=lambda: ChunkedPreprocessingParams()
+    )
 
 
 @dataclass
@@ -127,16 +142,6 @@ class TrainingParams:
     visualize_fold_distribution: bool = False
     # If true writes training logs to Tensorboard.
     tensorboard_logging: bool = True
-    # If true trains and evaluates a linear regression baseline.
-    linear_regression_baseline: bool = False
-    # If true trains and evaluates a ridge regression baseline.
-    ridge_regression_baseline: bool = False
-    # Regularization strength (alpha) for ridge regression baseline.
-    ridge_alpha: float = 1.0
-    # If true trains and evaluates a logistic regression baseline.
-    logistic_regression_baseline: bool = False
-    # If true trains and evaluates an L2-regularized logistic regression CV baseline.
-    ridge_logistic_regression_baseline: bool = False
     # If true, normalizes targets (Y) to zero mean and unit variance using training set statistics.
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).

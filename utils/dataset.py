@@ -1,9 +1,15 @@
 import inspect
+import math
+import os
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+
+from utils import data_utils
 
 
 def _preprocessor_accepts_context(preprocessing_fn):
@@ -105,34 +111,21 @@ class RawNeuralDataset:
         self.sfreq = self._sfreqs[0]
         self.raw_arrays = [np.asarray(raw.get_data(), dtype=np.float32) for raw in raws]
 
-    def get_data_for_lag(
-        self, lag: int
-    ) -> tuple[torch.Tensor, torch.Tensor, pd.DataFrame, list[int]]:
-        """Return neural data sliced for the given lag, targets, rows, and channel counts.
-
-        Slices each subject's raw array at onset + lag offset for every word.
-
-        Args:
-            lag: Lag in milliseconds.
-
-        Returns:
-            Tuple of `(neural_tensor, targets_tensor, task_df, subject_channel_counts)`
-            where `neural_tensor` has shape `[n_words, n_electrodes, n_window_samples]`.
-        """
+    def _lag_window_params(self, lag: int):
         lag_offset = int(round((lag / 1000 - self.window_width / 2) * self.sfreq))
         n_window_samples = int(round((self.window_width - 2e-3) * self.sfreq)) + 1
-
         tmin = lag / 1000 - self.window_width / 2
         tmax = lag / 1000 + self.window_width / 2 - 2e-3
+        return lag_offset, n_window_samples, tmin, tmax
 
+    def _selection_for_lag(self, lag: int):
+        _, _, tmin, tmax = self._lag_window_params(lag)
         selected_rows_df = None
         subject_channel_counts = []
         subject_channel_names = []
         per_raw_onsets = []
-        total_channel_count = 0
 
-        for raw_array, data_duration, channel_count, channel_names in zip(
-            self.raw_arrays,
+        for data_duration, channel_count, channel_names in zip(
             self.data_durations,
             self._raw_subject_channel_counts,
             self._raw_subject_channel_names,
@@ -161,13 +154,29 @@ class RawNeuralDataset:
             per_raw_onsets.append(onset_samples[selection])
             subject_channel_counts.append(channel_count)
             subject_channel_names.append(channel_names)
-            total_channel_count += channel_count
 
         if not per_raw_onsets or selected_rows_df is None:
             raise ValueError("No valid events found within data time bounds")
 
+        return (
+            selected_rows_df,
+            per_raw_onsets,
+            subject_channel_counts,
+            subject_channel_names,
+        )
+
+    def _slice_lag_windows(
+        self,
+        lag: int,
+        selected_positions,
+        per_raw_onsets,
+        subject_channel_counts,
+    ):
+        lag_offset, n_window_samples, _, _ = self._lag_window_params(lag)
+        selected_positions = np.asarray(selected_positions, dtype=np.int64)
+        total_channel_count = sum(subject_channel_counts)
         neural = np.empty(
-            (len(selected_rows_df), total_channel_count, n_window_samples),
+            (len(selected_positions), total_channel_count, n_window_samples),
             dtype=np.float32,
         )
         channel_start = 0
@@ -175,7 +184,8 @@ class RawNeuralDataset:
             self.raw_arrays, per_raw_onsets, subject_channel_counts
         ):
             channel_stop = channel_start + channel_count
-            for row_idx, onset in enumerate(onset_samples):
+            selected_onsets = onset_samples[selected_positions]
+            for row_idx, onset in enumerate(selected_onsets):
                 neural[
                     row_idx,
                     channel_start:channel_stop,
@@ -185,6 +195,40 @@ class RawNeuralDataset:
                     onset + lag_offset : onset + lag_offset + n_window_samples,
                 ]
             channel_start = channel_stop
+        return neural
+
+    @staticmethod
+    def _targets_to_numpy(selected_rows_df):
+        targets = selected_rows_df.target.to_numpy(copy=True)
+        if targets.dtype == object:
+            targets = np.stack(targets)
+        return np.asarray(targets, dtype=np.float32)
+
+    def get_data_for_lag(
+        self, lag: int
+    ) -> tuple[torch.Tensor, torch.Tensor, pd.DataFrame, list[int]]:
+        """Return neural data sliced for the given lag, targets, rows, and channel counts.
+
+        Slices each subject's raw array at onset + lag offset for every word.
+
+        Args:
+            lag: Lag in milliseconds.
+
+        Returns:
+            Tuple of `(neural_tensor, targets_tensor, task_df, subject_channel_counts)`
+            where `neural_tensor` has shape `[n_words, n_electrodes, n_window_samples]`.
+        """
+        (
+            selected_rows_df,
+            per_raw_onsets,
+            subject_channel_counts,
+            subject_channel_names,
+        ) = self._selection_for_lag(lag)
+
+        selected_positions = np.arange(len(selected_rows_df), dtype=np.int64)
+        neural = self._slice_lag_windows(
+            lag, selected_positions, per_raw_onsets, subject_channel_counts
+        )
 
         if self.preprocessing_fns:
             neural = _apply_preprocessing(
@@ -198,10 +242,7 @@ class RawNeuralDataset:
                 subject_channel_counts=subject_channel_counts,
             )
 
-        targets = selected_rows_df.target.to_numpy(copy=True)
-        if targets.dtype == object:
-            targets = np.stack(targets)
-        targets_tensor = torch.from_numpy(np.asarray(targets, dtype=np.float32))
+        targets_tensor = torch.from_numpy(self._targets_to_numpy(selected_rows_df))
 
         assert neural.shape[0] == len(
             selected_rows_df
@@ -211,6 +252,188 @@ class RawNeuralDataset:
         self.subject_channel_counts = subject_channel_counts
 
         return neural_tensor, targets_tensor, selected_rows_df, subject_channel_counts
+
+    def build_preprocessed_chunks(self, lag: int, num_chunks: int, cache_dir: str):
+        (
+            selected_rows_df,
+            per_raw_onsets,
+            subject_channel_counts,
+            subject_channel_names,
+        ) = self._selection_for_lag(lag)
+
+        num_chunks = max(1, int(num_chunks))
+        chunk_size = max(1, math.ceil(len(selected_rows_df) / num_chunks))
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+
+        chunk_paths = []
+        all_targets = self._targets_to_numpy(selected_rows_df)
+        try:
+            for chunk_idx, start in enumerate(
+                range(0, len(selected_rows_df), chunk_size)
+            ):
+                stop = min(start + chunk_size, len(selected_rows_df))
+                row_positions = np.arange(start, stop, dtype=np.int64)
+                chunk_rows_df = selected_rows_df.iloc[row_positions]
+                neural = self._slice_lag_windows(
+                    lag, row_positions, per_raw_onsets, subject_channel_counts
+                )
+
+                if self.preprocessing_fns:
+                    neural = _apply_preprocessing(
+                        neural,
+                        self.preprocessing_fns,
+                        self.preprocessor_params,
+                        selected_rows=chunk_rows_df,
+                        selected_rows_df=chunk_rows_df,
+                        lag=lag,
+                        subject_channel_names=subject_channel_names,
+                        subject_channel_counts=subject_channel_counts,
+                    )
+
+                chunk_path = (
+                    cache_path / f"lag_{lag}_chunk_{chunk_idx}_{os.getpid()}.npz"
+                )
+                np.savez(
+                    chunk_path,
+                    data=np.asarray(neural, dtype=np.float32),
+                    targets=all_targets[row_positions],
+                    row_positions=row_positions,
+                )
+                chunk_paths.append(chunk_path)
+                del neural
+        except Exception:
+            for chunk_path in chunk_paths:
+                try:
+                    chunk_path.unlink()
+                except FileNotFoundError:
+                    pass
+            raise
+
+        self.subject_channel_counts = subject_channel_counts
+        return PreprocessedChunkStore(
+            chunk_paths=chunk_paths,
+            data_df=selected_rows_df,
+            targets=torch.from_numpy(all_targets),
+            subject_channel_counts=subject_channel_counts,
+        )
+
+
+@dataclass
+class PreprocessedChunkStore:
+    chunk_paths: list[Path]
+    data_df: pd.DataFrame
+    targets: torch.Tensor
+    subject_channel_counts: list[int]
+
+    def cleanup(self):
+        for path in self.chunk_paths:
+            try:
+                Path(path).unlink()
+            except FileNotFoundError:
+                pass
+
+    def get_loader(
+        self,
+        phase: str,
+        indices,
+        task_config,
+        targets,
+        batch_size: int,
+        shuffle: bool = False,
+        seed: int = 0,
+    ):
+        return ChunkedPreprocessedLoader(
+            self.chunk_paths,
+            self.data_df,
+            phase,
+            indices,
+            task_config,
+            targets,
+            batch_size,
+            shuffle=shuffle,
+            seed=seed,
+        )
+
+
+class ChunkedPreprocessedLoader:
+    def __init__(
+        self,
+        chunk_paths,
+        data_df,
+        phase,
+        indices,
+        task_config,
+        targets,
+        batch_size,
+        shuffle=False,
+        seed=0,
+    ):
+        self.chunk_paths = list(chunk_paths)
+        self.data_df = data_df
+        self.phase = phase
+        self.indices = np.asarray(indices, dtype=np.int64)
+        self.index_set = set(self.indices.tolist())
+        self.task_config = task_config
+        self.targets = targets
+        self.batch_size = int(batch_size)
+        self.shuffle = shuffle
+        self.seed = int(seed)
+        self.epoch = 0
+        self._length = None
+
+    def __len__(self):
+        if self._length is None:
+            total_batches = 0
+            for chunk_path in self.chunk_paths:
+                with np.load(chunk_path) as loaded:
+                    row_positions = loaded["row_positions"].astype(
+                        np.int64, copy=False
+                    )
+                n_in_split = sum(int(pos) in self.index_set for pos in row_positions)
+                if n_in_split:
+                    total_batches += math.ceil(n_in_split / self.batch_size)
+            self._length = total_batches
+        return self._length
+
+    def __iter__(self):
+        rng = np.random.default_rng(self.seed + self.epoch) if self.shuffle else None
+        chunk_order = np.arange(len(self.chunk_paths))
+        if self.shuffle:
+            rng.shuffle(chunk_order)
+        self.epoch += 1
+
+        for chunk_idx in chunk_order:
+            with np.load(self.chunk_paths[int(chunk_idx)]) as loaded:
+                data = loaded["data"]
+                row_positions = loaded["row_positions"].astype(np.int64, copy=False)
+
+            mask = np.fromiter(
+                (int(pos) in self.index_set for pos in row_positions),
+                dtype=bool,
+                count=len(row_positions),
+            )
+            if not np.any(mask):
+                continue
+
+            local_positions = np.flatnonzero(mask)
+            if self.shuffle:
+                rng.shuffle(local_positions)
+
+            absolute_positions = row_positions[local_positions]
+            for start in range(0, len(local_positions), self.batch_size):
+                batch_local = local_positions[start : start + self.batch_size]
+                batch_abs = absolute_positions[start : start + self.batch_size]
+                neural_batch = torch.from_numpy(
+                    np.asarray(data[batch_local], dtype=np.float32)
+                )
+                inputs_dict = data_utils.df_columns_to_tensors(
+                    self.data_df,
+                    self.task_config.task_specific_config.input_fields,
+                    batch_abs,
+                )
+                target_batch = self.targets[torch.as_tensor(batch_abs, dtype=torch.long)]
+                yield neural_batch, inputs_dict, target_batch
 
 
 class NeuralDictDataset(Dataset):

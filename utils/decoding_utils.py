@@ -1,8 +1,6 @@
-from collections import Counter
 from typing import Optional
 import os
 import math
-import inspect
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -10,9 +8,8 @@ import torch
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
-from torch.nn import functional as F
-from torch.utils.data import DataLoader, TensorDataset, Dataset, Dataset
-from mup import MuAdam, MuAdamW
+from torch.utils.data import DataLoader
+from mup import MuAdamW
 
 # Optional TensorBoard support
 try:
@@ -35,187 +32,7 @@ from utils.model_utils import build_model_from_spec
 import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
-from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
-
-from sklearn.linear_model import LinearRegression
 import time
-
-DEFAULT_RIDGE_ALPHAS = np.logspace(-3, 6, 10).tolist()
-DEFAULT_RIDGE_LOGISTIC_CS = np.logspace(-3, 3, 7).tolist()
-
-
-def _flatten_baseline_features(X):
-    return np.reshape(X, (X.shape[0], -1))
-
-
-class BaselineTorchAdapter:
-    """Expose sklearn/Himalaya baselines through the torch model interface."""
-
-    def __init__(self, model):
-        self.model = model
-
-    def eval(self):
-        return self
-
-    def __call__(self, X, **kwargs):
-        X_np = X.detach().cpu().numpy()
-        X_flat = _flatten_baseline_features(X_np)
-        predictions = self.model.predict(X_flat)
-        predictions = np.asarray(predictions)
-        return torch.tensor(predictions, dtype=torch.float32, device=X.device)
-
-
-def train_logistic_regression(X_train, y_train, baseline_params=None):
-    """
-    Train a logistic regression model.
-
-    Args:
-        X_train: Training features
-        y_train: Training labels
-
-    Returns:
-        Trained LogisticRegression model
-    """
-    X_train = _flatten_baseline_features(X_train)
-    model = LogisticRegression(max_iter=1000)
-    model.fit(X_train, y_train)
-    return model
-
-
-def train_linear_regression(X_train, y_train, baseline_params=None):
-    """
-    Train a linear regression model.
-
-    Args:
-        X_train: Training features
-        y_train: Training targets
-
-    Returns:
-        Trained LinearRegression model
-    """
-    X_train = _flatten_baseline_features(X_train)
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    return model
-
-
-def train_ridge_regression(X_train, y_train, baseline_params=None):
-    """
-    Train a Himalaya RidgeCV regression baseline.
-
-    Args:
-        X_train: Training features
-        y_train: Training targets
-        baseline_params: Optional model_spec.params for ridge tuning/backend options
-
-    Returns:
-        Trained Himalaya RidgeCV model
-    """
-    from himalaya.backend import set_backend
-    from himalaya.ridge import RidgeCV
-
-    baseline_params = baseline_params or {}
-    if baseline_params.get("alphas") is not None:
-        alphas = baseline_params["alphas"]
-    elif baseline_params.get("alpha") is not None:
-        alphas = [baseline_params["alpha"]]
-    else:
-        alphas = DEFAULT_RIDGE_ALPHAS
-
-    backend = baseline_params.get("backend", "torch_cuda")
-    set_backend(backend, on_error="warn")
-
-    X_train = _flatten_baseline_features(X_train).astype(np.float32, copy=False)
-    y_train = np.asarray(y_train, dtype=np.float32)
-    model = RidgeCV(
-        alphas=alphas,
-        cv=baseline_params.get("cv", 5),
-        fit_intercept=baseline_params.get("fit_intercept", True),
-        Y_in_cpu=baseline_params.get("Y_in_cpu", False),
-        force_cpu=baseline_params.get("force_cpu", False),
-    )
-    model.fit(X_train, y_train)
-    return model
-
-
-def train_ridge_logistic_regression(X_train, y_train, baseline_params=None):
-    """Train an L2-regularized LogisticRegressionCV baseline."""
-    baseline_params = baseline_params or {}
-    X_train = _flatten_baseline_features(X_train)
-    y_train = np.asarray(y_train).ravel()
-    kwargs = {
-        "Cs": baseline_params.get("Cs", DEFAULT_RIDGE_LOGISTIC_CS),
-        "cv": baseline_params.get("cv", 5),
-        "penalty": "l2",
-        "solver": baseline_params.get("solver", "lbfgs"),
-        "max_iter": baseline_params.get("max_iter", 1000),
-        "class_weight": baseline_params.get("class_weight"),
-    }
-    if "multi_class" in inspect.signature(LogisticRegressionCV).parameters:
-        kwargs["multi_class"] = baseline_params.get("multi_class", "auto")
-    model = LogisticRegressionCV(**kwargs)
-    model.fit(X_train, y_train)
-    return model
-
-
-def _baseline_logits_from_estimator(model, X_flat, probabilities):
-    if hasattr(model, "decision_function"):
-        scores = model.decision_function(X_flat)
-        if scores.ndim == 1:
-            return np.stack([-scores, scores], axis=1)
-        return scores
-
-    probabilities = np.clip(probabilities, 1e-7, 1.0)
-    return np.log(probabilities)
-
-
-def _baseline_predictions_for_metric(model, X_flat, metric_name):
-    if not hasattr(model, "predict_proba"):
-        return model.predict(X_flat)
-
-    probabilities = model.predict_proba(X_flat)
-    if metric_name in {"cross_entropy", "weighted_cross_entropy", "confusion_matrix"}:
-        return _baseline_logits_from_estimator(model, X_flat, probabilities)
-    if probabilities.shape[-1] == 2:
-        return probabilities[:, 1]
-    return probabilities
-
-
-def compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params=None):
-    """
-    Compute all metrics for a baseline model (logistic or linear regression) on train/val/test splits.
-
-    Args:
-        model: Trained sklearn model (LogisticRegression or LinearRegression)
-        X_splits: Dict with keys 'train', 'val', 'test' containing feature arrays
-        Y_splits: Dict with keys 'train', 'val', 'test' containing target arrays
-        all_fns: Dictionary mapping metric names to callable functions
-        model_params: Optional model parameters dict (needed for confusion_matrix)
-
-    Returns:
-        dict: Dictionary with keys like 'train_metric_name', 'val_metric_name', 'test_metric_name'
-    """
-    results = {}
-
-    for phase in ["train", "val", "test"]:
-        X = X_splits[phase]
-        Y = Y_splits[phase]
-
-        # Flatten X if needed
-        X_flat = _flatten_baseline_features(X)
-
-        metrics = {}
-        for name, fn in all_fns.items():
-            predictions = _baseline_predictions_for_metric(model, X_flat, name)
-            metrics.update(
-                compute_all_metrics(predictions, Y, {name: fn}, model_params)
-            )
-
-        # Store with phase prefix
-        for metric_name, metric_value in metrics.items():
-            results[f"{phase}_{metric_name}"] = metric_value
-
-    return results
 
 
 def log_metrics_to_tensorboard(writer, metrics, model_name, phase, step):
@@ -226,7 +43,7 @@ def log_metrics_to_tensorboard(writer, metrics, model_name, phase, step):
         writer: TensorBoard SummaryWriter instance
         metrics: Dict of metrics to log (e.g., {"mse": 0.5, "corr": 0.8} or {"train_mse": 0.5, "val_mse": 0.6})
                  Can be None, in which case nothing is logged.
-        model_name: Name/namespace for the model (e.g., "model", "linear_regression", "logistic_regression")
+        model_name: Name/namespace for the model (e.g., "model")
         phase: Phase name (e.g., "train", "val", "test"). If None, will attempt to extract from metric names.
         step: Step number (epoch or fold number)
     """
@@ -583,6 +400,21 @@ def _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params: Training
     }
 
 
+def _normalize_full_targets(Y, tr_idx, va_idx, te_idx, training_params: TrainingParams):
+    target_splits = _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params)
+    if not training_params.normalize_targets:
+        return Y
+
+    normalized = torch.empty_like(Y)
+    for phase, indices in {
+        "train": tr_idx,
+        "val": va_idx,
+        "test": te_idx,
+    }.items():
+        normalized[_as_index_tensor(indices)] = target_splits[phase]
+    return normalized
+
+
 def _build_fold_loaders(
     neural_data,
     data_df,
@@ -616,6 +448,16 @@ def _as_index_tensor(indices, device=None):
     if torch.is_tensor(indices):
         return indices.to(device=device, dtype=torch.long)
     return torch.tensor(indices, dtype=torch.long, device=device)
+
+
+def _get_fold_indices_for_length(
+    n_examples: int,
+    data_df: pd.DataFrame,
+    task_config: TaskConfig,
+    training_params: TrainingParams,
+):
+    dummy = torch.empty((n_examples, 1), dtype=torch.float32)
+    return _get_fold_indices(dummy, data_df, task_config, training_params)
 
 
 def _create_optimizer(model, training_params: TrainingParams):
@@ -843,191 +685,6 @@ def _run_epoch(
     return result
 
 
-def _train_and_eval_baseline(
-    training_fn,
-    neural_data,
-    split_indices,
-    target_splits,
-    all_fns,
-    model_params,
-    baseline_params=None,
-    return_model=False,
-    **kwargs,
-):
-    tr_idx = split_indices["train"]
-    model = training_fn(
-        neural_data[tr_idx].cpu().numpy(),
-        target_splits["train"].cpu().numpy(),
-        baseline_params=baseline_params,
-        **kwargs,
-    )
-    X_splits = {
-        phase: neural_data[indices].cpu().numpy()
-        for phase, indices in split_indices.items()
-    }
-    Y_splits = {
-        phase: targets.cpu().numpy() for phase, targets in target_splits.items()
-    }
-    metrics = compute_baseline_metrics(model, X_splits, Y_splits, all_fns, model_params)
-    if return_model:
-        return metrics, model
-    return metrics
-
-
-def _train_enabled_baselines(
-    neural_data,
-    split_indices,
-    target_splits,
-    training_params,
-    all_fns,
-    model_params,
-    return_models=False,
-):
-    results = {}
-    models = {}
-
-    def _store_result(name, train_result):
-        if return_models:
-            metrics_dict, model = train_result
-            results[name] = metrics_dict
-            models[name] = model
-        else:
-            results[name] = train_result
-
-    if training_params.logistic_regression_baseline:
-        print("Training logistic regression baseline...")
-        _store_result(
-            "logistic_regression",
-            _train_and_eval_baseline(
-                train_logistic_regression,
-                neural_data,
-                split_indices,
-                target_splits,
-                all_fns,
-                model_params,
-                return_model=return_models,
-            ),
-        )
-    if training_params.ridge_logistic_regression_baseline:
-        print("Training ridge logistic regression baseline...")
-        _store_result(
-            "ridge_logistic_regression",
-            _train_and_eval_baseline(
-                train_ridge_logistic_regression,
-                neural_data,
-                split_indices,
-                target_splits,
-                all_fns,
-                model_params,
-                baseline_params=model_params,
-                return_model=return_models,
-            ),
-        )
-    if training_params.linear_regression_baseline:
-        print("Training linear regression baseline...")
-        _store_result(
-            "linear_regression",
-            _train_and_eval_baseline(
-                train_linear_regression,
-                neural_data,
-                split_indices,
-                target_splits,
-                all_fns,
-                model_params,
-                return_model=return_models,
-            ),
-        )
-    if training_params.ridge_regression_baseline:
-        print("Training ridge regression baseline...")
-        ridge_params = dict(model_params or {})
-        if "alphas" not in ridge_params and "alpha" not in ridge_params:
-            ridge_params["alpha"] = training_params.ridge_alpha
-        _store_result(
-            "ridge_regression",
-            _train_and_eval_baseline(
-                train_ridge_regression,
-                neural_data,
-                split_indices,
-                target_splits,
-                all_fns,
-                model_params,
-                baseline_params=ridge_params,
-                return_model=return_models,
-            ),
-        )
-    if return_models:
-        return results, models
-    return results
-
-
-def _append_baseline_results(all_baseline_results, fold_baseline_results):
-    for name, metrics_dict in fold_baseline_results.items():
-        all_baseline_results[name].append(metrics_dict)
-
-
-def _baseline_result_keys():
-    return (
-        "logistic_regression",
-        "ridge_logistic_regression",
-        "linear_regression",
-        "ridge_regression",
-    )
-
-
-def _init_baseline_results():
-    return {name: [] for name in _baseline_result_keys()}
-
-
-def _enabled_baseline_flags(training_params: TrainingParams):
-    return {
-        "logistic_regression": training_params.logistic_regression_baseline,
-        "ridge_logistic_regression": training_params.ridge_logistic_regression_baseline,
-        "linear_regression": training_params.linear_regression_baseline,
-        "ridge_regression": training_params.ridge_regression_baseline,
-    }
-
-
-def _baseline_only_enabled(model_spec: ModelSpec):
-    return model_spec.constructor_name == ""
-
-
-def _validate_baseline_only_config(
-    model_spec: ModelSpec, training_params: TrainingParams
-):
-    if not _baseline_only_enabled(model_spec):
-        return None
-
-    enabled = [
-        name
-        for name, is_enabled in _enabled_baseline_flags(training_params).items()
-        if is_enabled
-    ]
-    if len(enabled) != 1:
-        raise ValueError(
-            "Baseline-only mode requires exactly one enabled baseline among "
-            "logistic_regression_baseline, ridge_logistic_regression_baseline, "
-            "linear_regression_baseline, and ridge_regression_baseline. "
-            f"Found {len(enabled)}: {enabled}"
-        )
-    return enabled[0]
-
-
-def _record_baseline_only_fold_results(cv_results, baseline_metrics, metric_names):
-    conf_matrices = {}
-    for name in metric_names:
-        if name == "confusion_matrix":
-            conf_matrices = {
-                phase: baseline_metrics[f"{phase}_{name}"]
-                for phase in ("train", "val", "test")
-                if f"{phase}_{name}" in baseline_metrics
-            }
-            continue
-        for phase in ("train", "val", "test"):
-            cv_results[f"{phase}_{name}"].append(baseline_metrics[f"{phase}_{name}"])
-    cv_results["num_epochs"].append(0)
-    return conf_matrices
-
-
 def _save_checkpoint(model, model_path):
     if hasattr(model, "save_checkpoint") and callable(
         getattr(model, "save_checkpoint")
@@ -1158,13 +815,11 @@ def _record_fold_results(cv_results, history, test_mets, metric_names, best_epoc
     return conf_matrices
 
 
-def _log_fold_tensorboard_results(writer, test_mets, fold_baseline_results, fold):
+def _log_fold_tensorboard_results(writer, test_mets, fold):
     if writer is None:
         return
 
     log_metrics_to_tensorboard(writer, test_mets, "model", "test", fold)
-    for model_name, metrics_dict in fold_baseline_results.items():
-        log_metrics_to_tensorboard(writer, metrics_dict, model_name, None, fold)
     writer.close()
 
 
@@ -1214,80 +869,6 @@ def _maybe_compute_word_embedding_metrics(
     )
     for key, val in results.items():
         cv_results[key].append(val)
-
-
-def _maybe_compute_word_embedding_baseline_metrics(
-    cv_results,
-    embedding_metrics,
-    baseline_model,
-    neural_data,
-    target_splits,
-    data_df,
-    task_config,
-    tr_idx,
-    te_idx,
-    training_params,
-):
-    if embedding_metrics is None:
-        return
-
-    test_indices = _as_index_tensor(te_idx)
-    test_features = neural_data[test_indices]
-    test_targets = target_splits["test"]
-    adapted_model = BaselineTorchAdapter(baseline_model)
-    results = metrics.embedding_metrics.compute_word_embedding_task_metrics(
-        test_features,
-        test_targets,
-        adapted_model,
-        torch.device("cpu"),
-        data_df[task_config.data_params.word_column],
-        te_idx,
-        tr_idx,
-        training_params.top_k_thresholds,
-        training_params.min_train_freq_auc,
-        training_params.min_test_freq_auc,
-        preserve_ensemble=True,
-    )
-    for key, val in results.items():
-        cv_results[key].append(val)
-
-
-def _print_single_baseline_summary(title, baseline_results):
-    if not baseline_results:
-        return
-
-    print("\n" + "=" * 60)
-    print(title)
-    print("=" * 60)
-    for metric_name in baseline_results[0].keys():
-        values = [result[metric_name] for result in baseline_results]
-        if np.isscalar(values[0]) or (
-            isinstance(values[0], np.ndarray) and values[0].size == 1
-        ):
-            print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
-
-
-def _print_baseline_summaries(training_params, baseline_results):
-    if training_params.logistic_regression_baseline:
-        _print_single_baseline_summary(
-            "LOGISTIC REGRESSION BASELINE RESULTS",
-            baseline_results["logistic_regression"],
-        )
-    if training_params.ridge_logistic_regression_baseline:
-        _print_single_baseline_summary(
-            "RIDGE LOGISTIC REGRESSION BASELINE RESULTS",
-            baseline_results["ridge_logistic_regression"],
-        )
-    if training_params.linear_regression_baseline:
-        _print_single_baseline_summary(
-            "LINEAR REGRESSION BASELINE RESULTS",
-            baseline_results["linear_regression"],
-        )
-    if training_params.ridge_regression_baseline:
-        _print_single_baseline_summary(
-            f"RIDGE REGRESSION BASELINE RESULTS (alpha={training_params.ridge_alpha})",
-            baseline_results["ridge_regression"],
-        )
 
 
 def _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_metrics):
@@ -1342,9 +923,9 @@ def train_decoding_model(
     subject_channel_counts: list[int] = None,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    baseline_only_name = _validate_baseline_only_config(model_spec, training_params)
-    if baseline_only_name is None:
-        os.makedirs(checkpoint_dir, exist_ok=True)
+    if not model_spec.constructor_name:
+        raise ValueError("model_spec.constructor_name is required for neural training")
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     Y = _maybe_shuffle_targets(Y, training_params)
     fold_indices = _get_fold_indices(neural_data, data_df, task_config, training_params)
@@ -1361,56 +942,7 @@ def train_decoding_model(
     )
 
     models, histories = [], []
-    baseline_results = _init_baseline_results()
     conf_matrices = {}
-
-    if baseline_only_name is not None:
-        for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
-            _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
-            cv_results["fold_nums"].append(fold)
-            split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
-            target_splits = _normalize_fold_targets(
-                Y, tr_idx, va_idx, te_idx, training_params
-            )
-            fold_baseline_results, fold_baseline_models = _train_enabled_baselines(
-                neural_data,
-                split_indices,
-                target_splits,
-                training_params,
-                all_fns,
-                model_spec.params,
-                return_models=True,
-            )
-            _append_baseline_results(baseline_results, fold_baseline_results)
-            fold_conf_matrices = _record_baseline_only_fold_results(
-                cv_results,
-                fold_baseline_results[baseline_only_name],
-                metric_names,
-            )
-            if fold_conf_matrices:
-                conf_matrices = fold_conf_matrices
-            _maybe_compute_word_embedding_baseline_metrics(
-                cv_results,
-                embedding_metrics,
-                fold_baseline_models[baseline_only_name],
-                neural_data,
-                target_splits,
-                data_df,
-                task_config,
-                tr_idx,
-                te_idx,
-                training_params,
-            )
-
-        _print_baseline_summaries(training_params, baseline_results)
-        _print_main_cv_summary(
-            cv_results, metric_names, conf_matrices, embedding_metrics
-        )
-
-        if plot_results:
-            plot_cv_results(cv_results)
-
-        return models, histories, cv_results
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
         _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
@@ -1432,16 +964,6 @@ def train_decoding_model(
             target_splits,
             training_params,
         )
-
-        fold_baseline_results = _train_enabled_baselines(
-            neural_data,
-            split_indices,
-            target_splits,
-            training_params,
-            all_fns,
-            model_spec.params,
-        )
-        _append_baseline_results(baseline_results, fold_baseline_results)
 
         model, optimizer, scheduler = _build_model_optimizer_scheduler(
             model_spec,
@@ -1473,7 +995,7 @@ def train_decoding_model(
         if fold_conf_matrices:
             conf_matrices = fold_conf_matrices
 
-        _log_fold_tensorboard_results(writer, test_mets, fold_baseline_results, fold)
+        _log_fold_tensorboard_results(writer, test_mets, fold)
         _maybe_compute_word_embedding_metrics(
             cv_results,
             embedding_metrics,
@@ -1493,13 +1015,145 @@ def train_decoding_model(
         if plot_results:
             plot_training_history(history, fold=fold)
 
-    _print_baseline_summaries(training_params, baseline_results)
     _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_metrics)
 
     if plot_results:
         plot_cv_results(cv_results)
 
     return models, histories, cv_results
+
+
+def train_decoding_model_chunked(
+    chunk_store,
+    model_spec: ModelSpec,
+    task_name: str,
+    task_config: TaskConfig,
+    lag: int,
+    training_params: TrainingParams,
+    checkpoint_dir: str,
+    plot_results: bool = False,
+    write_to_tensorboard: bool = False,
+    tensorboard_dir: str = "event_logs",
+):
+    if not model_spec.constructor_name:
+        raise ValueError("model_spec.constructor_name is required for neural training")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    Y = _maybe_shuffle_targets(chunk_store.targets, training_params)
+    fold_indices = _get_fold_indices_for_length(
+        len(Y), chunk_store.data_df, task_config, training_params
+    )
+    fold_indices, fold_nums = _select_requested_folds(fold_indices, training_params)
+    _maybe_visualize_fold_distribution(Y, fold_indices, task_name, lag, training_params)
+
+    all_fns = setup_metrics_and_loss(training_params)
+    metric_names = all_fns.keys()
+    cv_results, embedding_metrics = _init_cv_results(
+        metric_names,
+        task_name,
+        training_params,
+        include_embedding_metrics=True,
+    )
+
+    models, histories = [], []
+    conf_matrices = {}
+
+    for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
+        print(f"Fold {fold}")
+        print(f"Train indices: {tr_idx}")
+        print(f"Validation indices: {va_idx}")
+        print(f"Test indices: {te_idx}")
+        print(f"Train size: {len(tr_idx)}")
+        print(f"Validation size: {len(va_idx)}")
+        print(f"Test size: {len(te_idx)}")
+        cv_results["fold_nums"].append(fold)
+
+        model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
+        writer = _create_tensorboard_writer(
+            write_to_tensorboard, tensorboard_dir, lag, fold
+        )
+
+        full_targets = _normalize_full_targets(
+            Y, tr_idx, va_idx, te_idx, training_params
+        )
+        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        loaders = {
+            phase: chunk_store.get_loader(
+                phase,
+                indices,
+                task_config,
+                full_targets,
+                training_params.batch_size,
+                shuffle=(phase == "train"),
+                seed=training_params.random_seed + lag * 1009 + fold * 9173,
+            )
+            for phase, indices in split_indices.items()
+        }
+
+        model, optimizer, scheduler = _build_model_optimizer_scheduler(
+            model_spec,
+            lag,
+            fold,
+            loaders,
+            training_params,
+            device,
+        )
+
+        history, test_mets, best_epoch = _train_fold(
+            model,
+            loaders,
+            optimizer,
+            scheduler,
+            model_path,
+            lag,
+            fold,
+            training_params,
+            all_fns,
+            metric_names,
+            model_spec.params,
+            device,
+            writer,
+        )
+        fold_conf_matrices = _record_fold_results(
+            cv_results, history, test_mets, metric_names, best_epoch
+        )
+        if fold_conf_matrices:
+            conf_matrices = fold_conf_matrices
+
+        _log_fold_tensorboard_results(writer, test_mets, fold)
+        _maybe_compute_word_embedding_metrics(
+            cv_results,
+            embedding_metrics,
+            loaders,
+            model,
+            device,
+            chunk_store.data_df,
+            task_config,
+            tr_idx,
+            te_idx,
+            training_params,
+        )
+
+        models.append(model)
+        histories.append(history)
+
+        if plot_results:
+            plot_training_history(history, fold=fold)
+
+    _print_main_cv_summary(cv_results, metric_names, conf_matrices, embedding_metrics)
+
+    if plot_results:
+        plot_cv_results(cv_results)
+
+    return models, histories, cv_results
+
+
+def _chunked_preprocessing_value(chunked_params, name, default=None):
+    if isinstance(chunked_params, dict):
+        return chunked_params.get(name, default)
+    return getattr(chunked_params, name, default)
 
 
 def run_training_over_lags(
@@ -1530,8 +1184,6 @@ def run_training_over_lags(
         already_read_lags = []
         existing_df = pd.DataFrame()
 
-    all_new_results = []
-
     from utils.dataset import RawNeuralDataset
 
     raw_dataset = RawNeuralDataset(
@@ -1551,28 +1203,60 @@ def run_training_over_lags(
         print("running lag:", lag)
         print("=" * 60)
 
-        (
-            neural_tensor,
-            targets_tensor,
-            data_df,
-            subject_channel_counts,
-        ) = raw_dataset.get_data_for_lag(lag)
+        chunked_params = getattr(data_params, "chunked_preprocessing", None)
+        if chunked_params is not None and _chunked_preprocessing_value(
+            chunked_params, "enabled", False
+        ):
+            chunk_store = raw_dataset.build_preprocessed_chunks(
+                lag,
+                num_chunks=_chunked_preprocessing_value(
+                    chunked_params, "num_chunks", 1
+                ),
+                cache_dir=_chunked_preprocessing_value(
+                    chunked_params, "cache_dir", ".cache/preprocessed_chunks"
+                ),
+            )
+            try:
+                print(
+                    "chunked preprocessing rows: "
+                    f"{len(chunk_store.data_df)}, chunks: {len(chunk_store.chunk_paths)}"
+                )
+                models, histories, cv_results = train_decoding_model_chunked(
+                    chunk_store,
+                    model_spec,
+                    task_name,
+                    task_config,
+                    lag,
+                    training_params=training_params,
+                    checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
+                    write_to_tensorboard=write_to_tensorboard,
+                    tensorboard_dir=tensorboard_dir,
+                )
+            finally:
+                chunk_store.cleanup()
+        else:
+            (
+                neural_tensor,
+                targets_tensor,
+                data_df,
+                subject_channel_counts,
+            ) = raw_dataset.get_data_for_lag(lag)
 
-        print(f"neural_tensor shape: {neural_tensor.shape}")
-        models, histories, cv_results = train_decoding_model(
-            neural_tensor,
-            targets_tensor,
-            data_df,
-            model_spec,
-            task_name,
-            task_config,
-            lag,
-            training_params=training_params,
-            checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-            write_to_tensorboard=write_to_tensorboard,
-            tensorboard_dir=tensorboard_dir,
-            subject_channel_counts=subject_channel_counts,
-        )
+            print(f"neural_tensor shape: {neural_tensor.shape}")
+            models, histories, cv_results = train_decoding_model(
+                neural_tensor,
+                targets_tensor,
+                data_df,
+                model_spec,
+                task_name,
+                task_config,
+                lag,
+                training_params=training_params,
+                checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
+                write_to_tensorboard=write_to_tensorboard,
+                tensorboard_dir=tensorboard_dir,
+                subject_channel_counts=subject_channel_counts,
+            )
 
         # Aggregate metrics
         lag_metrics = {}

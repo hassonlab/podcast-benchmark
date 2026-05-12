@@ -9,6 +9,7 @@ import yaml
 from dataclasses import asdict
 
 from core.config import (
+    ChunkedPreprocessingParams,
     DataParams,
     TrainingParams,
     ExperimentConfig,
@@ -91,6 +92,24 @@ class TestDictToConfig:
         assert params.preprocessing_fn_name == "test_preprocessor"
         # Check that defaults are preserved
         assert params.data_root == "data"
+
+    def test_nested_chunked_preprocessing_conversion(self):
+        params = dict_to_config(
+            {
+                "window_width": 1.0,
+                "chunked_preprocessing": {
+                    "enabled": True,
+                    "num_chunks": 8,
+                    "cache_dir": "tmp/chunks",
+                },
+            },
+            DataParams,
+        )
+
+        assert isinstance(params.chunked_preprocessing, ChunkedPreprocessingParams)
+        assert params.chunked_preprocessing.enabled is True
+        assert params.chunked_preprocessing.num_chunks == 8
+        assert params.chunked_preprocessing.cache_dir == "tmp/chunks"
 
     def test_nested_dict_conversion(self, sample_config_dict):
         """Test converting nested dictionary to ExperimentConfig."""

@@ -57,11 +57,9 @@ baselines/simple_models:
   word_embedding_decoding_task:
   - configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml
   - configs/baselines/word_embedding_decoding_task/ridge_regression/per_subject.yml
-  - configs/baselines/word_embedding_decoding_task/ridge_regression/per_region.yml
   whisper_embedding_decoding_task:
   - configs/baselines/whisper_embedding_decoding_task/ridge_regression/supersubject.yml
   - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_subject.yml
-  - configs/baselines/whisper_embedding_decoding_task/ridge_regression/per_region.yml
   gpt_surprise_task:
   - configs/baselines/gpt_surprise_task/ridge_regression/supersubject.yml
   - configs/baselines/gpt_surprise_task/ridge_regression/per_subject.yml

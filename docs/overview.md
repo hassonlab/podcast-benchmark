@@ -1,6 +1,6 @@
 # Repository Overview
 
-This repository provides a decoding suite for decoding language information from ECoG data collected during podcast listening. It supports configurable benchmark tasks, simple decoding baselines, and several foundation model integrations under a shared training and evaluation interface.
+This repository provides a decoding suite for decoding language information from ECoG data collected during podcast listening. It supports configurable benchmark tasks, neural decoding models, and several foundation model integrations under a shared training and evaluation interface.
 
 ## Main Flow
 
@@ -11,7 +11,7 @@ The main pipeline is:
 1. A config in `configs/` defines the task, data parameters, model, training settings, and output paths.
 2. A task in `tasks/` returns a DataFrame with event times and prediction targets.
 3. `utils/data_utils.py` loads subject ECoG data from `data/`.
-4. `utils/dataset.py` slices lagged neural windows and applies registered preprocessors.
+4. `utils/dataset.py` slices lagged neural windows and applies registered preprocessors. Large runs can opt into disk-backed preprocessing chunks with `data_params.chunked_preprocessing.enabled`.
 5. `utils/model_utils.py` builds the configured model from the registry.
 6. `utils/decoding_utils.py` trains and evaluates the model across folds and lags.
 7. Metrics from `metrics/` are written to result directories.
@@ -24,11 +24,11 @@ The main pipeline is:
 
 `core/config.py` defines the dataclasses used by YAML configs, including `ExperimentConfig`, `TaskConfig`, `DataParams`, `TrainingParams`, and `ModelSpec`.
 
-`configs/` contains experiment YAML files. `configs/foundation_models/` holds generated benchmark configs for foundation models and tasks. These configs run their ordered preprocessing pipelines directly, recomputing preprocessing on each run rather than using the disk-cache wrapper. BrainBERT and PopT configs declare STFT as an explicit preprocessor before foundation feature extraction. `configs/examples/` contains smaller examples.
+`configs/` contains experiment YAML files. `configs/foundation_models/` holds generated benchmark configs for foundation models and tasks. These configs run their ordered preprocessing pipelines directly, recomputing preprocessing on each run rather than using the disk-cache wrapper. Volume-level foundation configs opt into temporary chunked preprocessing so large lag tensors are not fully materialized after preprocessing. BrainBERT and PopT configs declare STFT as an explicit preprocessor before foundation feature extraction. `configs/examples/` contains smaller examples.
 
 `tasks/` defines decoding targets such as word embeddings, Whisper embeddings, sentence onset, content/non-content words, part of speech, LLM surprise, IU boundaries, volume level, and LLM decoding. Each task registers a data getter and task-specific config.
 
-`models/` contains model implementations and integrations. Foundation models such as `brainbert/`, `diver/`, and `popt/` live here alongside simple baselines such as `neural_conv_decoder/`, `linear_model/`, and `time_pooling_model/`. Shared helpers, decoders, config setters, and preprocessors are in the top-level `models/*.py` files. `models/shared_preprocessors.py` includes a `disk_cache_preprocessor` wrapper that caches the final output of one registered preprocessor or an ordered preprocessor pipeline under `.cache/preprocessors/` by default.
+`models/` contains model implementations and integrations. Foundation models such as `brainbert/`, `diver/`, and `popt/` live here alongside compact neural model families such as `neural_conv_decoder/`, `linear_model/`, and `time_pooling_model/`. Shared helpers, decoders, config setters, and preprocessors are in the top-level `models/*.py` files. `models/shared_preprocessors.py` includes a `disk_cache_preprocessor` wrapper that caches the final output of one registered preprocessor or an ordered preprocessor pipeline under `.cache/preprocessors/` by default.
 
 `metrics/` contains registered losses and evaluation metrics for regression, classification, embedding prediction, and language model decoding.
 
