@@ -14,9 +14,9 @@ This keeps the core benchmark surface controlled and comparable while still allo
 
 Models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported model or task into `main.py`.
 
-## Disk-Cached Preprocessor Pipelines
+## Foundation Preprocessor Pipelines
 
-Expensive preprocessing can be wrapped with the registered `disk_cache_preprocessor`. The cache stores the final output of a full ordered preprocessor pipeline, not intermediate stages, and keys entries by wrapped preprocessor names, implementation source hashes, normalized parameters, lag, selected event starts, ordered subject electrode names, subject channel counts, and cache mode. Checked-in foundation model configs use this wrapper around their full preprocessing path, while keeping `config_setter_name: foundation_feature_cache` so nested foundation model settings are still prepared before training. Model-specific steps such as BrainBERT/PopT STFT are declared as explicit preprocessor entries with their own params instead of hidden `DataParams` flags. This keeps repeated foundation feature extraction reproducible while invalidating automatically when implementation, parameters, selected rows, electrodes, lag, or mode changes.
+Foundation model configs list their preprocessing steps directly and recompute preprocessing on each run. They keep `config_setter_name: foundation_feature_cache` so nested foundation model settings are still prepared before training, but they do not wrap the pipeline with the registered `disk_cache_preprocessor`. Model-specific steps such as BrainBERT/PopT STFT are declared as explicit preprocessor entries with their own params instead of hidden `DataParams` flags. This keeps checked-in configs simple and avoids reusing stale on-disk preprocessing outputs.
 
 ## YAML Experiment Configuration
 
