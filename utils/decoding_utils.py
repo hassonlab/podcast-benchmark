@@ -626,8 +626,7 @@ def _run_epoch(
     corr_state = _init_streaming_corr_state(device) if accumulate_corr else None
 
     sums = {
-        name: None if name == "confusion_matrix" else 0.0
-        for name in batch_metric_names
+        name: None if name == "confusion_matrix" else 0.0 for name in batch_metric_names
     }
     sums["loss"] = 0.0
     grad_steps = training_params.grad_accumulation_steps
@@ -1087,7 +1086,7 @@ def train_decoding_model_chunked(
                 full_targets,
                 training_params.batch_size,
                 shuffle=(phase == "train"),
-                seed=training_params.random_seed + lag * 1009 + fold * 9173,
+                seed=training_params.random_seed + fold * 9173,
             )
             for phase, indices in split_indices.items()
         }
