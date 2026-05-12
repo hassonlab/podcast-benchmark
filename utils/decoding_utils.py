@@ -1081,7 +1081,6 @@ def train_decoding_model_chunked(
         split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
         loaders = {
             phase: chunk_store.get_loader(
-                phase,
                 indices,
                 task_config,
                 full_targets,
