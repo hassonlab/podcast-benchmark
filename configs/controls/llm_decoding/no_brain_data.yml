@@ -2,7 +2,7 @@ task_config:
   task_name: llm_decoding_task
   data_params:
     data_root: data
-    window_width: 0.625
+    window_width: 1.0
     electrode_file_path: processed_data/all_subject_sig.csv
   task_specific_config:
     no_brain_encoder: true

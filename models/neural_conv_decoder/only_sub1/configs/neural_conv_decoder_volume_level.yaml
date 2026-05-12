@@ -26,7 +26,7 @@ training_params:
 data_params:
   data_root: data
   subject_ids: [1]  # Subject 1 only
-  window_width: 0.625
+  window_width: 1.0
   preprocessing_fn_name: window_average_neural_data
   electrode_file_path: processed_data/all_subject_sig.csv
   preprocessor_params:

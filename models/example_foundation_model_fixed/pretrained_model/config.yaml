@@ -11,5 +11,5 @@ dropout: 0.1        # Dropout probability
 max_seq_len: 1000   # Maximum sequence length
 
 # Data parameters
-window_width: 0.625  # Window width in seconds
+window_width: 1.0  # Window width in seconds
 sample_rate: 512     # Sample rate (Hz)

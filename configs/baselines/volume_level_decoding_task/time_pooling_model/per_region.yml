@@ -7,7 +7,7 @@ task_config:
     data_root: data
     electrode_file_path: null
     channel_reg_ex: null
-    window_width: 0.2
+    window_width: 1.0
     preprocessing_fn_name: window_rms
     subject_ids:
     - 1

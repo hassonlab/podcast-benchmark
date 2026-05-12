@@ -7,7 +7,7 @@ task_config:
     electrode_file_path: null
     use_high_gamma: true
     channel_reg_ex: null
-    window_width: 0.2
+    window_width: 1.0
     subject_ids:
     - 1
     - 3

@@ -7,7 +7,7 @@ task_config:
     data_root: data
     electrode_file_path: null
     channel_reg_ex: null
-    window_width: 0.625
+    window_width: 1.0
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
       num_average_samples: 32
