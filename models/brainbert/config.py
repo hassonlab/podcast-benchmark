@@ -31,7 +31,7 @@ class TransformerConfig:
     checkpoint_file: str = "checkpoint.pth"
 
     # Data parameters (for preprocessing)
-    window_width: float = 0.625  # Window width in seconds for neural data
+    window_width: float = 1.0  # Window width in seconds for neural data
     sample_rate: int = 512  # Expected sample rate of input data
 
     def save(self, path: str):
