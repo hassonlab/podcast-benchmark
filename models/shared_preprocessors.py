@@ -1,9 +1,11 @@
 import copy
+import dataclasses
 import hashlib
 import inspect
 import json
 import os
 import tempfile
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Optional
 
@@ -233,7 +235,7 @@ def _build_cache_identity(
     selected_rows = context.get("selected_rows_df", context.get("selected_rows"))
     starts = []
     if selected_rows is not None and "start" in selected_rows:
-        starts = _normalize_for_json(selected_rows["start"].to_list())
+        starts = _normalize_start_times(selected_rows["start"].to_list())
 
     return {
         "version": 1,
@@ -257,6 +259,19 @@ def _build_cache_identity(
     }
 
 
+def _normalize_start_times(starts):
+    """Normalize event start times to millisecond precision for cache identity."""
+    normalized = []
+    for start in starts:
+        if start is None:
+            normalized.append(None)
+        else:
+            normalized.append(
+                float(Decimal(str(start)).quantize(Decimal("0.001"), ROUND_DOWN))
+            )
+    return _normalize_for_json(normalized)
+
+
 def _source_hash(fn) -> Optional[str]:
     try:
         source = inspect.getsource(fn)
@@ -266,6 +281,8 @@ def _source_hash(fn) -> Optional[str]:
 
 
 def _normalize_for_json(value):
+    if dataclasses.is_dataclass(value):
+        return _normalize_for_json(dataclasses.asdict(value))
     if isinstance(value, dict):
         return {
             str(key): _normalize_for_json(value[key])

@@ -10,6 +10,18 @@ from utils import data_utils
 from utils.model_utils import build_model_from_spec
 
 
+_FEATURE_CACHE_OMITTED_PARAM_KEYS = {
+    "output_dim",
+    "embedding_dim",
+    "output_activation",
+    "dropout",
+    "mlp_layer_sizes",
+    "freeze_foundation",
+    "frozen_upstream",
+    "num_frozen_layers",
+}
+
+
 def _as_model_spec(spec):
     if isinstance(spec, ModelSpec):
         return spec
@@ -217,6 +229,8 @@ def _configure_foundation_feature_params(
 ):
     params = dict(params or {})
     foundation_spec = _as_model_spec(params["foundation_model_spec"])
+    foundation_spec.feature_cache = True
+    foundation_spec.params["feature_cache"] = True
     foundation_setters = params.get("foundation_config_setter_name")
 
     if foundation_setters:
@@ -235,6 +249,11 @@ def _configure_foundation_feature_params(
             foundation_spec = experiment_config.model_spec
             experiment_config.model_spec = original_model_spec
 
+    foundation_spec.feature_cache = True
+    foundation_spec.params["feature_cache"] = True
+    for key in _FEATURE_CACHE_OMITTED_PARAM_KEYS:
+        foundation_spec.params.pop(key, None)
+
     input_fields = list(
         experiment_config.task_config.task_specific_config.input_fields or []
     )
@@ -251,11 +270,6 @@ def _configure_foundation_feature_params(
         experiment_config.model_spec.params.setdefault(
             "data_root", data_params.data_root
         )
-    for key in ("output_dim", "embedding_dim", "output_activation"):
-        if key in foundation_spec.params:
-            experiment_config.model_spec.params.setdefault(
-                key, foundation_spec.params[key]
-            )
     return experiment_config, params
 
 

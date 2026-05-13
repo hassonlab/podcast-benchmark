@@ -133,8 +133,12 @@ def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
     monkeypatch,
 ):
     def fake_foundation_setter(config, raws, task_df):
+        assert config.model_spec.feature_cache is True
+        assert config.model_spec.params["feature_cache"] is True
         config.model_spec.params["output_dim"] = 7
         config.model_spec.params["embedding_dim"] = 7
+        config.model_spec.params["output_activation"] = "sigmoid"
+        config.model_spec.params["dropout"] = 0.2
         return config
 
     monkeypatch.setitem(
@@ -191,7 +195,56 @@ def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
         "foundation_feature_cache",
     ]
     assert stft_params["freq_channel_cutoff"] == 40
-    assert foundation_params["foundation_model_spec"].params["output_dim"] == 7
+    nested_spec = foundation_params["foundation_model_spec"]
+    assert nested_spec.feature_cache is True
+    assert nested_spec.params["feature_cache"] is True
+    assert "output_dim" not in nested_spec.params
+    assert "embedding_dim" not in nested_spec.params
+    assert "output_activation" not in nested_spec.params
+    assert "dropout" not in nested_spec.params
     assert foundation_params["input_fields"] == []
-    assert result.model_spec.params["output_dim"] == 7
-    assert result.model_spec.params["embedding_dim"] == 7
+    assert "output_dim" not in result.model_spec.params
+    assert "embedding_dim" not in result.model_spec.params
+
+
+def test_foundation_feature_cache_config_setter_allows_missing_nested_output_dim(
+    monkeypatch,
+):
+    def fake_foundation_setter(config, raws, task_df):
+        assert config.model_spec.params.get("output_dim") is None
+        config.model_spec.params["input_channels"] = 40
+        return config
+
+    monkeypatch.setitem(
+        registry.config_setter_registry,
+        "fake_cache_only_config_setter",
+        fake_foundation_setter,
+    )
+
+    config = ExperimentConfig(
+        model_spec=ModelSpec(constructor_name="probe_model", params={"output_dim": 1}),
+        task_config=TaskConfig(
+            task_name="fake_task",
+            data_params=DataParams(
+                preprocessing_fn_name=["foundation_feature_cache"],
+                preprocessor_params=[
+                    {
+                        "mode": "normal",
+                        "foundation_config_setter_name": "fake_cache_only_config_setter",
+                        "foundation_model_spec": {
+                            "constructor_name": "fake_foundation_cache_model",
+                            "params": {"output_dim": None},
+                        },
+                    }
+                ],
+            ),
+        ),
+    )
+
+    result = set_foundation_feature_cache_config(config, raws=[], task_df=None)
+    foundation_params = result.task_config.data_params.preprocessor_params[0]
+    nested_spec = foundation_params["foundation_model_spec"]
+
+    assert nested_spec.feature_cache is True
+    assert nested_spec.params == {"feature_cache": True, "input_channels": 40}
+    assert result.model_spec.params["output_dim"] == 1

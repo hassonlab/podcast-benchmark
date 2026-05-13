@@ -3,7 +3,9 @@ import pytest
 import numpy as np
 
 import core.registry as registry
+from core.config import ModelSpec
 from models.shared_preprocessors import (
+    _build_cache_identity,
     disk_cache_preprocessor,
     window_rms_preprocessor,
     log_transform_preprocessor,
@@ -240,6 +242,69 @@ class TestDiskCachePreprocessor:
         np.testing.assert_allclose(first, (data + 1.0) * 2.0)
         np.testing.assert_allclose(second, (data * 2.0) + 1.0)
         assert calls == {"add": 2, "scale": 2}
+
+    def test_model_spec_params_normalize_for_deterministic_identity(self):
+        spec = ModelSpec(
+            constructor_name="fake_foundation",
+            params={"feature_cache": True, "model_dim": 128},
+            feature_cache=True,
+        )
+
+        identity_a = _build_cache_identity(
+            names=["foundation_feature_cache"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[{"foundation_model_spec": spec}],
+            mode="normal",
+            context=_cache_context(),
+        )
+        identity_b = _build_cache_identity(
+            names=["foundation_feature_cache"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[
+                {
+                    "foundation_model_spec": {
+                        "constructor_name": "fake_foundation",
+                        "params": {"model_dim": 128, "feature_cache": True},
+                        "feature_cache": True,
+                        "per_subject_feature_concat": False,
+                        "sub_models": {},
+                        "checkpoint_path": None,
+                        "model_data_getter": None,
+                    }
+                }
+            ],
+            mode="normal",
+            context=_cache_context(),
+        )
+
+        assert identity_a["pipeline"][0]["params"] == identity_b["pipeline"][0]["params"]
+
+    def test_selected_row_start_identity_uses_millisecond_precision(self):
+        identity_a = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2349, 2.0009]),
+        )
+        identity_b = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2341, 2.0001]),
+        )
+        identity_c = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2354, 2.0014]),
+        )
+
+        assert identity_a["selected_rows_start"] == [1.234, 2.0]
+        assert identity_a["selected_rows_start"] == identity_b["selected_rows_start"]
+        assert identity_a["selected_rows_start"] != identity_c["selected_rows_start"]
 
     def test_unknown_wrapped_preprocessor_raises_clear_value_error(self, tmp_path):
         data = np.ones((3, 3, 2), dtype=np.float32)

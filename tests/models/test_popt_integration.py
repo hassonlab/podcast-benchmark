@@ -257,3 +257,29 @@ def test_popt_config_setter_requires_explicit_stft_preprocessor():
 
     with pytest.raises(ValueError, match="requires an explicit 'stft_preprocessing'"):
         set_finetuning_config(config, [StubRaw()], None)
+
+
+def test_popt_feature_cache_config_setter_does_not_inject_head_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="popt_finetune",
+            params={"feature_cache": True, "output_dim": None},
+            feature_cache=True,
+        ),
+        task_config=TaskConfig(
+            task_name="content_noncontent_task",
+            data_params=DataParams(
+                target_sr=1000,
+                preprocessing_fn_name=["stft_preprocessing", "foundation_feature_cache"],
+                preprocessor_params=[{"freq_channel_cutoff": 24}, {}],
+            ),
+        ),
+        training_params=TrainingParams(batch_size=6),
+    )
+
+    result = set_finetuning_config(config, [StubRaw()], None)
+
+    assert result.model_spec.params["input_channels"] == 24
+    assert result.model_spec.params["output_dim"] is None
+    assert "embedding_dim" not in result.model_spec.params
+    assert "output_activation" not in result.model_spec.params

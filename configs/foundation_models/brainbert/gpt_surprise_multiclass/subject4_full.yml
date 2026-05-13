@@ -21,28 +21,28 @@ task_config:
     channel_reg_ex: null
     per_subject_electrodes: null
     preprocessing_fn_name:
-    - stft_preprocessing
-    - foundation_feature_cache
+    - disk_cache_preprocessor
     preprocessor_params:
-    - freq_channel_cutoff: 40
-      nperseg: 400
-      noverlap: 350
-      normalizing: zscore
-    - mode: normal
-      batch_size: 4
-      foundation_config_setter_name: brainbert_finetune
-      foundation_model_spec:
-        constructor_name: brainbert_finetune
-        params:
-          dropout: 0.0
-          freeze_foundation: true
-          mlp_layer_sizes: []
-          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
-          output_dim: 3
-          temporal_patches_to_keep: 3
-        feature_cache: false
-        per_subject_feature_concat: false
-        sub_models: {}
+    - base_preprocessing_fn_name:
+      - stft_preprocessing
+      - foundation_feature_cache
+      base_preprocessor_params:
+      - freq_channel_cutoff: 40
+        nperseg: 400
+        noverlap: 350
+        normalizing: zscore
+      - mode: normal
+        batch_size: 4
+        foundation_config_setter_name: brainbert_finetune
+        foundation_model_spec:
+          constructor_name: brainbert_finetune
+          params:
+            model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+            temporal_patches_to_keep: 3
+            feature_cache: true
+          feature_cache: true
+          per_subject_feature_concat: false
+          sub_models: {}
   task_name: gpt_surprise_multiclass_task
   task_specific_config:
     content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv

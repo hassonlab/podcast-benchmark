@@ -525,7 +525,10 @@ def create_diver_finetuning_model(model_params):
     adapter_path = _resolve_diver_adapter_path(model_params)
     if adapter_path is not None:
         model_params["adapter_path"] = adapter_path
-    output_dim = model_params["output_dim"]
+    feature_cache = model_params.get("feature_cache", False)
+    output_dim = model_params.get("output_dim")
+    if output_dim is None:
+        output_dim = 1
     task_name = model_params.get("task_name", "word_embedding")
     subject_id = model_params.get("subject_id", 1)
     
@@ -698,6 +701,9 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
 
     # 2. Get task information from podcast-benchmark
     model_params = diver_model_spec.params
+    feature_cache = diver_model_spec.feature_cache or model_params.get(
+        "feature_cache", False
+    )
     task_name = model_params.get("task_name") or experiment_config.task_config.task_name
     model_params["task_name"] = task_name
     subject_id = model_params.get("subject_id", 1)
@@ -718,11 +724,13 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
         experiment_config.model_spec.params["data_root"] = data_params.data_root
 
     # 4. Determine output_dim (podcast-benchmark task mapping)
-    if "output_dim" not in model_params or model_params["output_dim"] is None:
+    if not feature_cache and (
+        "output_dim" not in model_params or model_params["output_dim"] is None
+    ):
         num_targets = _default_output_dim_for_task(task_name, task_specific_config) or 50
         model_params["output_dim"] = num_targets
     else:
-        num_targets = model_params["output_dim"]
+        num_targets = model_params.get("output_dim") or 1
 
     # 5. Create task_info_dict using podcast-benchmark information
     task_info_dict = get_podcast_task_info(
@@ -737,17 +745,19 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     # 6. Store for model constructor
     model_params["_task_info_dict"] = task_info_dict
 
-    losses = experiment_config.training_params.losses or []
-    if not losses and experiment_config.training_params.loss_name:
-        losses = [experiment_config.training_params.loss_name]
-    model_params["_training_losses"] = losses
-    model_params["_loss_name"] = experiment_config.training_params.loss_name
-    model_params["output_activation"] = _resolve_output_activation(model_params)
+    if not feature_cache:
+        losses = experiment_config.training_params.losses or []
+        if not losses and experiment_config.training_params.loss_name:
+            losses = [experiment_config.training_params.loss_name]
+        model_params["_training_losses"] = losses
+        model_params["_loss_name"] = experiment_config.training_params.loss_name
+        model_params["output_activation"] = _resolve_output_activation(model_params)
 
     if model_params.get("ft_mup") and experiment_config.training_params.optimizer == "AdamW":
         experiment_config.training_params.optimizer = "MuAdamW"
 
     # 7. Copy output_dim to embedding_dim (same as BrainBERT/PopT)
-    model_params["embedding_dim"] = model_params["output_dim"]
+    if not feature_cache:
+        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

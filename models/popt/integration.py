@@ -679,7 +679,10 @@ def create_finetuning_decoder(model_params):
         - use_brainbert: Whether to use BrainBERT for time sequence processing (optional, default: True)
         - brainbert_model_dir: Path to BrainBERT pretrained model directory (optional)
     """
-    output_dim = model_params.get("output_dim", 1)
+    feature_cache = model_params.get("feature_cache", False)
+    output_dim = model_params.get("output_dim")
+    if output_dim is None:
+        output_dim = 1
     frozen_upstream = model_params.get("frozen_upstream", False) or model_params.get(
         "freeze_foundation", False
     )
@@ -842,6 +845,7 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         raise ValueError("Could not find PopT model spec.")
 
     model_params = target_spec.params
+    feature_cache = target_spec.feature_cache or model_params.get("feature_cache", False)
     data_params = experiment_config.task_config.data_params
     task_name = experiment_config.task_config.task_name
     task_specific_config = experiment_config.task_config.task_specific_config
@@ -898,24 +902,25 @@ def set_finetuning_config(experiment_config, raws, _df_word):
                 window_width = None
         data_params.window_width = window_width or 1.0
 
-    if model_params.get("output_dim") is None:
+    if not feature_cache and model_params.get("output_dim") is None:
         output_dim = _default_output_dim_for_task(task_name, task_specific_config)
         if output_dim is not None:
             model_params["output_dim"] = output_dim
 
-    losses = experiment_config.training_params.losses or []
-    if not losses and experiment_config.training_params.loss_name:
-        losses = [experiment_config.training_params.loss_name]
-    model_params["_training_losses"] = losses
-    model_params["_loss_name"] = experiment_config.training_params.loss_name
-    model_params["output_activation"] = _resolve_output_activation(model_params)
+    if not feature_cache:
+        losses = experiment_config.training_params.losses or []
+        if not losses and experiment_config.training_params.loss_name:
+            losses = [experiment_config.training_params.loss_name]
+        model_params["_training_losses"] = losses
+        model_params["_loss_name"] = experiment_config.training_params.loss_name
+        model_params["output_activation"] = _resolve_output_activation(model_params)
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
     if use_lip_coords:
         model_params.setdefault(
             "popt_position_encoding", "multi_subj_position_encoding"
         )
-    if model_params.get("output_dim") is not None:
+    if not feature_cache and model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config
