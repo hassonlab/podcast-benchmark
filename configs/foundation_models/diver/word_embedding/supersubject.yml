@@ -15,6 +15,7 @@ task_config:
     preprocessor_params:
     - base_preprocessing_fn_name:
       - foundation_feature_cache
+      update_cache_with_missing: true
       base_preprocessor_params:
       - mode: normal
         batch_size: 4

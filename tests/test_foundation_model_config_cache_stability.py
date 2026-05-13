@@ -26,6 +26,19 @@ def _foundation_feature_cache_params(config):
                 yield wrapped_param
 
 
+def _disk_cache_preprocessor_params(config):
+    data_params = config.get("task_config", {}).get("data_params", {})
+    names = data_params.get("preprocessing_fn_name") or []
+    params = data_params.get("preprocessor_params") or []
+    if isinstance(names, str):
+        names = [names]
+        params = [params]
+
+    for name, preprocessor_params in zip(names, params):
+        if name == "disk_cache_preprocessor":
+            yield preprocessor_params
+
+
 def test_foundation_feature_cache_configs_are_family_stable_except_mode():
     omitted_nested_keys = {
         "output_dim",
@@ -60,3 +73,19 @@ def test_foundation_feature_cache_configs_are_family_stable_except_mode():
             f"{family} foundation_feature_cache params differ across configs: "
             f"{list(identities.values())[:3]}"
         )
+
+
+def test_foundation_disk_cache_updates_missing_rows_except_volume_level():
+    for config_path in sorted(FOUNDATION_CONFIG_ROOT.glob("**/*.yml")):
+        config = yaml.safe_load(config_path.read_text())
+        is_volume_level = (
+            "volume_level" in config_path.parts
+            or config.get("task_config", {}).get("task_name")
+            == "volume_level_decoding_task"
+        )
+
+        for params in _disk_cache_preprocessor_params(config):
+            if is_volume_level:
+                assert "update_cache_with_missing" not in params
+            else:
+                assert params["update_cache_with_missing"] is True
