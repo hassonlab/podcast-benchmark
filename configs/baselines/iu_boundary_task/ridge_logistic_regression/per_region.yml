@@ -32,3 +32,4 @@ model_spec:
     activation: sigmoid
 trial_name: ridge_logistic_regression_iu_boundary_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

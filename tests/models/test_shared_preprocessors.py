@@ -1,9 +1,14 @@
+import hashlib
+import json
+
 import pytest
 
 import numpy as np
 
 import core.registry as registry
+from core.config import ModelSpec
 from models.shared_preprocessors import (
+    _build_cache_identity,
     disk_cache_preprocessor,
     window_rms_preprocessor,
     log_transform_preprocessor,
@@ -21,6 +26,17 @@ def _cache_context(starts=None, channel_names=None, counts=None, lag=0):
         "subject_channel_names": channel_names or [["A1", "A2"], ["B1"]],
         "subject_channel_counts": counts or [2, 1],
     }
+
+
+def _cache_files(cache_dir):
+    return sorted(cache_dir.glob("*.npz"))
+
+
+def _cache_path(cache_dir, identity):
+    cache_key = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return cache_dir / f"{cache_key}.npz"
 
 
 class TestDiskCachePreprocessor:
@@ -119,10 +135,6 @@ class TestDiskCachePreprocessor:
         [
             (_cache_context(lag=0), _cache_context(lag=100)),
             (
-                _cache_context(starts=[1.0, 2.0, 3.0]),
-                _cache_context(starts=[1.0, 2.5, 3.0]),
-            ),
-            (
                 _cache_context(channel_names=[["A1", "A2"], ["B1"]]),
                 _cache_context(channel_names=[["A2", "A1"], ["B1"]]),
             ),
@@ -153,6 +165,43 @@ class TestDiskCachePreprocessor:
 
         np.testing.assert_allclose(result, data + 2.0)
         assert calls["count"] == 2
+
+    def test_selected_row_starts_share_cache_path_and_recompute_missing_rows(
+        self, tmp_path, monkeypatch
+    ):
+        calls = []
+
+        def encode_start(data, params, selected_rows_df=None, **context):
+            starts = selected_rows_df["start"].to_list()
+            calls.append(starts)
+            return np.asarray(starts, dtype=np.float32)[:, None]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_start_identity",
+            encode_start,
+        )
+        params = {
+            "base_preprocessing_fn_name": "cache_test_start_identity",
+            "cache_dir": str(tmp_path),
+        }
+
+        disk_cache_preprocessor(
+            np.zeros((3, 2), dtype=np.float32),
+            params,
+            **_cache_context(starts=[1.0, 2.0, 3.0]),
+        )
+        result = disk_cache_preprocessor(
+            np.zeros((3, 2), dtype=np.float32),
+            params,
+            **_cache_context(starts=[1.0, 2.5, 3.0]),
+        )
+
+        np.testing.assert_allclose(
+            result, np.array([[1.0], [2.5], [3.0]], dtype=np.float32)
+        )
+        assert calls == [[1.0, 2.0, 3.0], [2.5]]
+        assert len(_cache_files(tmp_path)) == 1
 
     def test_changing_wrapped_preprocessor_params_causes_miss(
         self, tmp_path, monkeypatch
@@ -240,6 +289,260 @@ class TestDiskCachePreprocessor:
         np.testing.assert_allclose(first, (data + 1.0) * 2.0)
         np.testing.assert_allclose(second, (data * 2.0) + 1.0)
         assert calls == {"add": 2, "scale": 2}
+
+    def test_changing_wrapped_preprocessor_source_causes_miss(
+        self, tmp_path, monkeypatch
+    ):
+        calls = {"one": 0, "two": 0}
+
+        def add_one(data, params):
+            calls["one"] += 1
+            return data + 1.0
+
+        def add_two(data, params):
+            calls["two"] += 1
+            return data + 2.0
+
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_source_change",
+            "cache_dir": str(tmp_path),
+        }
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_source_change", add_one
+        )
+        first = disk_cache_preprocessor(data, params, **_cache_context())
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry, "cache_test_source_change", add_two
+        )
+        second = disk_cache_preprocessor(data, params, **_cache_context())
+
+        np.testing.assert_allclose(first, data + 1.0)
+        np.testing.assert_allclose(second, data + 2.0)
+        assert calls == {"one": 1, "two": 1}
+        assert len(_cache_files(tmp_path)) == 2
+
+    def test_changing_mode_causes_miss(self, tmp_path, monkeypatch):
+        calls = {"count": 0}
+
+        def add_call_count(data, params):
+            calls["count"] += 1
+            return data + calls["count"]
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_mode_change",
+            add_call_count,
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_mode_change",
+            "cache_dir": str(tmp_path),
+        }
+
+        first = disk_cache_preprocessor(
+            data, {**params, "mode": "normal"}, **_cache_context()
+        )
+        second = disk_cache_preprocessor(
+            data, {**params, "mode": "chunked"}, **_cache_context()
+        )
+
+        np.testing.assert_allclose(first, data + 1.0)
+        np.testing.assert_allclose(second, data + 2.0)
+        assert calls["count"] == 2
+        assert len(_cache_files(tmp_path)) == 2
+
+    def test_model_spec_params_normalize_for_deterministic_identity(self):
+        spec = ModelSpec(
+            constructor_name="fake_foundation",
+            params={"feature_cache": True, "model_dim": 128},
+            feature_cache=True,
+        )
+
+        identity_a = _build_cache_identity(
+            names=["foundation_feature_cache"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[{"foundation_model_spec": spec}],
+            mode="normal",
+            context=_cache_context(),
+        )
+        identity_b = _build_cache_identity(
+            names=["foundation_feature_cache"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[
+                {
+                    "foundation_model_spec": {
+                        "constructor_name": "fake_foundation",
+                        "params": {"model_dim": 128, "feature_cache": True},
+                        "feature_cache": True,
+                        "per_subject_feature_concat": False,
+                        "sub_models": {},
+                        "checkpoint_path": None,
+                        "model_data_getter": None,
+                    }
+                }
+            ],
+            mode="normal",
+            context=_cache_context(),
+        )
+
+        assert identity_a["pipeline"][0]["params"] == identity_b["pipeline"][0]["params"]
+
+    def test_cache_identity_excludes_selected_row_starts(self):
+        identity_a = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2349, 2.0009]),
+        )
+        identity_b = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2341, 2.0001]),
+        )
+        identity_c = _build_cache_identity(
+            names=["cache_test"],
+            wrapped_fns=[lambda data, params: data],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(starts=[1.2354, 2.0014]),
+        )
+
+        assert identity_a["version"] == 2
+        assert "selected_rows_start" not in identity_a
+        assert identity_a == identity_b == identity_c
+
+    def test_partial_cache_reuse_computes_only_missing_rows_without_updating_cache(
+        self, tmp_path, monkeypatch
+    ):
+        calls = []
+
+        def encode_start(data, params, selected_rows_df=None, **context):
+            starts = selected_rows_df["start"].to_list()
+            calls.append(starts)
+            return np.asarray(starts, dtype=np.float32)[:, None] * 10.0
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_partial_reuse",
+            encode_start,
+        )
+        params = {
+            "base_preprocessing_fn_name": "cache_test_partial_reuse",
+            "cache_dir": str(tmp_path),
+        }
+
+        disk_cache_preprocessor(
+            np.zeros((3, 2), dtype=np.float32),
+            params,
+            **_cache_context(starts=[1.0, 2.0, 4.0]),
+        )
+        result = disk_cache_preprocessor(
+            np.zeros((4, 2), dtype=np.float32),
+            params,
+            **_cache_context(starts=[1.0, 2.0, 3.0, 4.0]),
+        )
+
+        np.testing.assert_allclose(
+            result, np.array([[10.0], [20.0], [30.0], [40.0]], dtype=np.float32)
+        )
+        assert calls == [[1.0, 2.0, 4.0], [3.0]]
+        cache_files = _cache_files(tmp_path)
+        assert len(cache_files) == 1
+        with np.load(cache_files[0]) as cached:
+            np.testing.assert_allclose(cached["starts"], [1.0, 2.0, 4.0])
+
+    def test_partial_cache_reuse_can_update_existing_cache_with_missing_rows(
+        self, tmp_path, monkeypatch
+    ):
+        calls = []
+
+        def encode_start(data, params, selected_rows_df=None, **context):
+            starts = selected_rows_df["start"].to_list()
+            calls.append(starts)
+            return np.asarray(starts, dtype=np.float32)[:, None] * 10.0
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_partial_update",
+            encode_start,
+        )
+        params = {
+            "base_preprocessing_fn_name": "cache_test_partial_update",
+            "cache_dir": str(tmp_path),
+        }
+        update_params = {
+            **params,
+            "update_cache_with_missing": True,
+        }
+
+        disk_cache_preprocessor(
+            np.zeros((3, 2), dtype=np.float32),
+            params,
+            **_cache_context(starts=[1.0, 2.0, 4.0]),
+        )
+        cache_files = _cache_files(tmp_path)
+        assert len(cache_files) == 1
+        cache_path = cache_files[0]
+
+        result = disk_cache_preprocessor(
+            np.zeros((4, 2), dtype=np.float32),
+            update_params,
+            **_cache_context(starts=[1.0, 2.0, 3.0, 4.0]),
+        )
+
+        np.testing.assert_allclose(
+            result, np.array([[10.0], [20.0], [30.0], [40.0]], dtype=np.float32)
+        )
+        assert calls == [[1.0, 2.0, 4.0], [3.0]]
+        assert _cache_files(tmp_path) == [cache_path]
+        with np.load(cache_path) as cached:
+            np.testing.assert_allclose(cached["starts"], [1.0, 2.0, 3.0, 4.0])
+            np.testing.assert_allclose(
+                cached["data"],
+                np.array([[10.0], [20.0], [30.0], [40.0]], dtype=np.float32),
+            )
+
+    def test_legacy_v1_cache_file_is_ignored(self, tmp_path, monkeypatch):
+        calls = {"count": 0}
+
+        def add_one(data, params):
+            calls["count"] += 1
+            return data + 1.0
+
+        monkeypatch.setitem(
+            registry.data_preprocessor_registry,
+            "cache_test_legacy_ignored",
+            add_one,
+        )
+        data = np.ones((3, 3, 2), dtype=np.float32)
+        params = {
+            "base_preprocessing_fn_name": "cache_test_legacy_ignored",
+            "cache_dir": str(tmp_path),
+        }
+        identity = _build_cache_identity(
+            names=["cache_test_legacy_ignored"],
+            wrapped_fns=[add_one],
+            wrapped_params=[None],
+            mode="normal",
+            context=_cache_context(),
+        )
+        legacy_metadata = json.dumps({**identity, "version": 1}, sort_keys=True)
+        np.savez_compressed(
+            _cache_path(tmp_path, identity),
+            starts=np.asarray([1.0, 2.0, 3.0], dtype=np.float64),
+            data=data + 99.0,
+            metadata=legacy_metadata,
+        )
+
+        result = disk_cache_preprocessor(data, params, **_cache_context())
+
+        np.testing.assert_allclose(result, data + 1.0)
+        assert calls["count"] == 1
 
     def test_unknown_wrapped_preprocessor_raises_clear_value_error(self, tmp_path):
         data = np.ones((3, 3, 2), dtype=np.float32)

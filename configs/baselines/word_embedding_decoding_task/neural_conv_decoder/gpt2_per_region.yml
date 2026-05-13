@@ -48,3 +48,4 @@ training_params:
   - pairwise_accuracy
 trial_name: ensemble_model_10_gpt2_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

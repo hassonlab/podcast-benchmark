@@ -408,7 +408,10 @@ def create_finetuning_decoder(model_params):
         - input_channels: Number of input channels (optional, will be set by config setter)
         - output_activation: Output activation function (optional, auto-determined if not provided)
     """
-    output_dim = model_params.get("output_dim", 1)
+    feature_cache = model_params.get("feature_cache", False)
+    output_dim = model_params.get("output_dim")
+    if output_dim is None:
+        output_dim = 1
     frozen_upstream = model_params.get("frozen_upstream", False) or model_params.get(
         "freeze_foundation", False
     )
@@ -474,7 +477,7 @@ def create_finetuning_decoder(model_params):
         finetune_model = build_model(finetune_cfg, upstream)
 
         hidden_dim = getattr(upstream_cfg, "hidden_dim", 768)
-        if not num_electrodes:
+        if not feature_cache and not num_electrodes:
             if mlp_layer_sizes:
                 finetune_model.linear_out = MLPDecoder(
                     input_dim=hidden_dim,
@@ -529,6 +532,7 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         raise ValueError("Could not find brainbert_finetune model spec.")
 
     model_params = target_spec.params
+    feature_cache = target_spec.feature_cache or model_params.get("feature_cache", False)
     data_params = experiment_config.task_config.data_params
     task_name = experiment_config.task_config.task_name
     task_specific_config = experiment_config.task_config.task_specific_config
@@ -567,24 +571,25 @@ def set_finetuning_config(experiment_config, raws, _df_word):
                 window_width = None
         data_params.window_width = window_width or 1.0
 
-    if model_params.get("output_dim") is None:
+    if not feature_cache and model_params.get("output_dim") is None:
         output_dim = _default_output_dim_for_task(task_name, task_specific_config)
         if output_dim is not None:
             model_params["output_dim"] = output_dim
 
-    losses = experiment_config.training_params.losses or []
-    if not losses and experiment_config.training_params.loss_name:
-        losses = [experiment_config.training_params.loss_name]
-    model_params["_training_losses"] = losses
-    model_params["_loss_name"] = experiment_config.training_params.loss_name
-    model_params["output_activation"] = _resolve_output_activation(
-        model_params, model_params.get("output_dim", 1)
-    )
+    if not feature_cache:
+        losses = experiment_config.training_params.losses or []
+        if not losses and experiment_config.training_params.loss_name:
+            losses = [experiment_config.training_params.loss_name]
+        model_params["_training_losses"] = losses
+        model_params["_loss_name"] = experiment_config.training_params.loss_name
+        model_params["output_activation"] = _resolve_output_activation(
+            model_params, model_params.get("output_dim", 1)
+        )
 
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
     model_params.setdefault("temporal_patches_to_keep", 10)
-    if model_params.get("output_dim") is not None:
+    if not feature_cache and model_params.get("output_dim") is not None:
         model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

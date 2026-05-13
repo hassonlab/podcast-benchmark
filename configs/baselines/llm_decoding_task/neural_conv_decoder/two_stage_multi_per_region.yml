@@ -55,6 +55,7 @@ tasks:
   checkpoint_dir: checkpoints/llm_two_stage/embedding_pretrain
   tensorboard_dir: event_logs/llm_two_stage/embedding_pretrain
   run_mode: per_region
+  atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz
 - trial_name: llm_token_finetune_per_region
   config_setter_name: neural_conv
   task_config:
@@ -83,7 +84,7 @@ tasks:
     epochs: 50
     learning_rate: 0.0001
     weight_decay: 0.0
-    early_stopping_patience: 15
+    early_stopping_patience: 10
     losses:
     - cross_entropy
     metrics: []
@@ -101,6 +102,7 @@ tasks:
   checkpoint_dir: checkpoints/llm_two_stage/token_finetune
   tensorboard_dir: event_logs/llm_two_stage/token_finetune
   run_mode: per_region
+  atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz
 shared_params:
   training_params.n_folds: 5
   training_params.min_lag: -1000

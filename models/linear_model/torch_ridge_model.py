@@ -25,7 +25,7 @@ class TorchLinearModel(nn.Module):
         bias: bool = True,
         activation: str = "linear",
     ):
-        super(TorchRidgeModel, self).__init__()
+        super(TorchLinearModel, self).__init__()
         self.input_channels = int(input_channels)
         self.output_dim = int(output_dim)
         self.activation = activation

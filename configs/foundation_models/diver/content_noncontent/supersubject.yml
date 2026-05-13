@@ -10,28 +10,31 @@ task_config:
     do_drop_bads: true
     window_width: 1.0
     preprocessing_fn_name:
-    - foundation_feature_cache
+    - disk_cache_preprocessor
     preprocessor_params:
-    - mode: normal
-      batch_size: 4
-      foundation_config_setter_name: diver_finetune
-      foundation_model_spec:
-        constructor_name: diver_finetune
-        params:
-          foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-          patch_sampling_rate: 500
-          patch_size: 50
-          d_model: 256
-          e_layer: 12
-          ft_config: flatten_linear
-          deepspeed_pth_format: true
-          output_dim: 1
-          freeze_foundation: true
-          mup_weights: true
-          ft_mup: false
-        feature_cache: false
-        per_subject_feature_concat: false
-        sub_models: {}
+    - base_preprocessing_fn_name:
+      - foundation_feature_cache
+      update_cache_with_missing: true
+      base_preprocessor_params:
+      - mode: normal
+        batch_size: 4
+        foundation_config_setter_name: diver_finetune
+        foundation_model_spec:
+          constructor_name: diver_finetune
+          params:
+            foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+            patch_sampling_rate: 500
+            patch_size: 50
+            d_model: 256
+            e_layer: 12
+            ft_config: flatten_linear
+            deepspeed_pth_format: true
+            mup_weights: true
+            ft_mup: false
+            feature_cache: true
+          feature_cache: true
+          per_subject_feature_concat: false
+          sub_models: {}
   task_specific_config:
     content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
