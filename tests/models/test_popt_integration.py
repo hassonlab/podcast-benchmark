@@ -213,18 +213,15 @@ def test_popt_config_setter_uses_explicit_nested_stft_params():
         task_config=TaskConfig(
             data_params=DataParams(
                 target_sr=1000,
-                preprocessing_fn_name=["disk_cache_preprocessor"],
+                preprocessing_fn_name=[
+                    "stft_preprocessing",
+                    "foundation_feature_cache",
+                ],
                 preprocessor_params=[
+                    {"freq_channel_cutoff": 24},
                     {
-                        "base_preprocessing_fn_name": [
-                            "stft_preprocessing",
-                            "foundation_feature_cache",
-                        ],
-                        "base_preprocessor_params": [
-                            {"freq_channel_cutoff": 24},
-                            {"mode": "normal"},
-                        ],
-                    }
+                        "mode": "normal",
+                    },
                 ],
             ),
         ),
@@ -232,10 +229,9 @@ def test_popt_config_setter_uses_explicit_nested_stft_params():
     )
 
     result = set_finetuning_config(config, [StubRaw()], None)
-    wrapper_params = result.task_config.data_params.preprocessor_params[0]
-    stft_params = wrapper_params["base_preprocessor_params"][0]
+    stft_params = result.task_config.data_params.preprocessor_params[0]
 
-    assert wrapper_params["base_preprocessing_fn_name"] == [
+    assert result.task_config.data_params.preprocessing_fn_name == [
         "stft_preprocessing",
         "foundation_feature_cache",
     ]

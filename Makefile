@@ -2,10 +2,11 @@
 .ONESHELL:-
 
 USR := $(shell whoami | head -c 2)
-DT := $(shell date +"%Y%m%d-%H:%M:%S")
+DT := $(shell date +"%Y%m%d-%H%M%S")
 
 PREFIX = decoder-training
-JOB_NAME ?= "$(PREFIX)-$(USR)-$(DT)"
+CONFIG_JOB_TAG := $(if $(CONFIG),$(subst /,-,$(patsubst %.yaml,%,$(patsubst %.yml,%,$(patsubst configs/%,%,$(CONFIG))))),manual)
+JOB_NAME ?= "$(PREFIX)-$(CONFIG_JOB_TAG)-$(USR)-$(DT)"
 
 # To run locally
 CMD = python
@@ -55,7 +56,7 @@ train-all:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
 		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config"; \
@@ -77,7 +78,7 @@ train-all-supersubjects:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
 		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config"; \
@@ -99,7 +100,7 @@ train-all-per-subjects:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		subjects="$(SUBJECTS)"; \
 		for subject in $$subjects; do \
@@ -134,7 +135,7 @@ train-all-subject-groups:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for subject_spec in $$subject_specs; do \
 			subject_group=$${subject_spec%%|*}; \
@@ -169,7 +170,7 @@ train-all-per-regions:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for region in $$regions; do \
 			if [ "$$is_multi" = "1" ]; then \
@@ -203,7 +204,7 @@ train-all-region-groups:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for region_spec in $$region_specs; do \
 			region_group=$${region_spec%%|*}; \
