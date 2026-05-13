@@ -47,3 +47,4 @@ model_spec:
     num_models: 10
     embedding_dim: 768
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

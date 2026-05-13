@@ -34,3 +34,4 @@ model_spec:
     activation: linear
 trial_name: ridge_regression_gpt_surprise_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

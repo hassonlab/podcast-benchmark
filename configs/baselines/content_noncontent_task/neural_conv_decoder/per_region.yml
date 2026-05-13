@@ -51,3 +51,4 @@ model_spec:
     output_activation: sigmoid
   sub_models: {}
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz
