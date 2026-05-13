@@ -9,32 +9,28 @@ task_config:
     use_lip_coords: true
     window_width: 1.0
     preprocessing_fn_name:
-    - disk_cache_preprocessor
+    - stft_preprocessing
+    - foundation_feature_cache
     preprocessor_params:
-    - base_preprocessing_fn_name:
-      - stft_preprocessing
-      - foundation_feature_cache
-      update_cache_with_missing: true
-      base_preprocessor_params:
-      - freq_channel_cutoff: 40
-        nperseg: 400
-        noverlap: 350
-        normalizing: zscore
-      - mode: per_subject_feature_concat
-        batch_size: 4
-        foundation_config_setter_name: popt_finetune
-        foundation_model_spec:
-          constructor_name: popt_finetune
-          params:
-            model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
-            brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
-            use_lip_coords: true
-            use_brainbert: true
-            max_coord_value: 5000
-            feature_cache: true
+    - freq_channel_cutoff: 40
+      nperseg: 400
+      noverlap: 350
+      normalizing: zscore
+    - mode: per_subject_feature_concat
+      batch_size: 4
+      foundation_config_setter_name: popt_finetune
+      foundation_model_spec:
+        constructor_name: popt_finetune
+        params:
+          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
+          brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+          use_lip_coords: true
+          use_brainbert: true
+          max_coord_value: 5000
           feature_cache: true
-          per_subject_feature_concat: false
-          sub_models: {}
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
   task_specific_config:
     pos_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:

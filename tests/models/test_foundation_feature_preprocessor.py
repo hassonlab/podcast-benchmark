@@ -129,7 +129,7 @@ def test_legacy_two_argument_preprocessors_still_work_with_context():
     np.testing.assert_array_equal(result, data + 3)
 
 
-def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
+def test_foundation_feature_cache_config_setter_updates_direct_preprocessor(
     monkeypatch,
 ):
     def fake_foundation_setter(config, raws, task_df):
@@ -156,26 +156,21 @@ def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
             task_name="fake_task",
             data_params=DataParams(
                 data_root="data",
-                preprocessing_fn_name=["disk_cache_preprocessor"],
+                preprocessing_fn_name=[
+                    "stft_preprocessing",
+                    "foundation_feature_cache",
+                ],
                 preprocessor_params=[
                     {
-                        "base_preprocessing_fn_name": [
-                            "stft_preprocessing",
-                            "foundation_feature_cache",
-                        ],
-                        "base_preprocessor_params": [
-                            {
-                                "freq_channel_cutoff": 40,
-                            },
-                            {
-                                "mode": "normal",
-                                "foundation_config_setter_name": "fake_foundation_config_setter",
-                                "foundation_model_spec": {
-                                    "constructor_name": "fake_foundation_cache_model",
-                                    "params": {},
-                                },
-                            }
-                        ],
+                        "freq_channel_cutoff": 40,
+                    },
+                    {
+                        "mode": "normal",
+                        "foundation_config_setter_name": "fake_foundation_config_setter",
+                        "foundation_model_spec": {
+                            "constructor_name": "fake_foundation_cache_model",
+                            "params": {},
+                        },
                     }
                 ],
             ),
@@ -183,14 +178,10 @@ def test_foundation_feature_cache_config_setter_updates_disk_cache_wrapper(
     )
 
     result = set_foundation_feature_cache_config(config, raws=[], task_df=None)
-    wrapper_params = result.task_config.data_params.preprocessor_params[0]
-    stft_params = wrapper_params["base_preprocessor_params"][0]
-    foundation_params = wrapper_params["base_preprocessor_params"][1]
+    stft_params = result.task_config.data_params.preprocessor_params[0]
+    foundation_params = result.task_config.data_params.preprocessor_params[1]
 
     assert result.task_config.data_params.preprocessing_fn_name == [
-        "disk_cache_preprocessor"
-    ]
-    assert wrapper_params["base_preprocessing_fn_name"] == [
         "stft_preprocessing",
         "foundation_feature_cache",
     ]
