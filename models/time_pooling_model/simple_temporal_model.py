@@ -83,7 +83,7 @@ class SimpleTemporalModel(nn.Module):
 def simple_temporal_model(model_params):
     return SimpleTemporalModel(
         input_channels=model_params["input_channels"],
-        output_dim=model_params.get("embedding_dim", 1),
+        output_dim=model_params.get("output_dim", model_params.get("embedding_dim", 1)),
         hidden_dim=model_params.get("hidden_dim", 128),
         dropout=model_params.get("dropout", 0.2),
         output_activation=model_params.get("output_activation", None),

@@ -18,7 +18,7 @@ Models, tasks, preprocessors, metrics, config setters, and model data getters ar
 
 Foundation model configs list their ordered preprocessing steps directly and do not wrap them with `disk_cache_preprocessor`. They keep `config_setter_name: foundation_feature_cache` so nested foundation model settings are still prepared before training. Model-specific steps such as BrainBERT/PopT STFT are declared as explicit preprocessor entries with their own params instead of hidden `DataParams` flags.
 
-Nested foundation specs used by `foundation_feature_cache` are feature-extraction-only specs. They set `feature_cache: true` and omit task-specific head/training parameters such as `output_dim`, `embedding_dim`, decoder activation, dropout, MLP sizes, and freeze controls. This keeps feature-cache identities stable across benchmark tasks within the same foundation model family; the downstream `mlp_probe_decoder` remains responsible for task-specific output shape and activation.
+Nested foundation specs used by `foundation_feature_cache` are feature-extraction-only specs. They set `feature_cache: true` and omit task-specific head/training parameters such as `output_dim`, decoder activation, dropout, MLP sizes, and freeze controls. Legacy `embedding_dim` values are stripped when encountered. This keeps feature-cache identities stable across benchmark tasks within the same foundation model family; the downstream `mlp_probe_decoder` remains responsible for task-specific output shape and activation.
 
 ## Chunked Preprocessing For Large Runs
 

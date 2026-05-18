@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import re
 import shutil
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -162,7 +163,22 @@ def write_per_subject(run_dirs: Sequence[Path], output_dir: Path, label: str) ->
             "and subject_*/lag_performance.csv files"
         )
     if any(has_root_csv):
-        write_super_subject(run_dirs, output_dir, label)
+        subject_dirs = []
+        for run_dir in run_dirs:
+            match = re.search(r"subject[_-]?(\d+)", run_dir.name)
+            if match:
+                subject_dirs.append((f"subject_{int(match.group(1))}", run_dir))
+        if len(subject_dirs) == len(run_dirs):
+            prepare_output_dir(output_dir)
+            for subject, run_dir in sorted(subject_dirs):
+                subject_dir = output_dir / subject
+                subject_dir.mkdir(parents=True, exist_ok=True)
+                pd.read_csv(run_dir / "lag_performance.csv").to_csv(
+                    subject_dir / "lag_performance.csv",
+                    index=False,
+                )
+        else:
+            write_super_subject(run_dirs, output_dir, label)
     else:
         write_entity_condition(run_dirs, output_dir, "subject_", label)
 

@@ -460,7 +460,7 @@ Apply multiple config setters in sequence:
 config_setter_name: set_input_channels
 
 # Multiple setters (applied in order)
-config_setter_name: [set_input_channels, set_embedding_dim, initialize_model]
+config_setter_name: [set_input_channels, set_output_dim, initialize_model]
 ```
 
 This is useful when you need to:

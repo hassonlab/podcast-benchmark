@@ -4,7 +4,7 @@ model_params:
   conv_filters: 128
   dropout: 0.2
   num_models: 10
-  embedding_dim: 50
+  output_dim: 50
 training_params:
   batch_size: 32
   epochs: 100

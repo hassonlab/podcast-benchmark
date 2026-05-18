@@ -24,6 +24,7 @@ from core import registry
 from models.shared_decoders import MLPProbeDecoder as MLPDecoder
 from models.stft_config import configure_explicit_stft_preprocessor
 
+
 @registry.register_config_setter("set_sample_rate_for_stft")
 def set_sample_rate_for_stft(experiment_config, raws, _df_word):
     """
@@ -845,7 +846,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         raise ValueError("Could not find PopT model spec.")
 
     model_params = target_spec.params
-    feature_cache = target_spec.feature_cache or model_params.get("feature_cache", False)
+    feature_cache = target_spec.feature_cache or model_params.get(
+        "feature_cache", False
+    )
     data_params = experiment_config.task_config.data_params
     task_name = experiment_config.task_config.task_name
     task_specific_config = experiment_config.task_config.task_specific_config
@@ -871,7 +874,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         data_params,
         sample_rate=int(sample_rate),
         model_name="PopT finetuning",
-        extra_defaults={"batch_size": experiment_config.training_params.batch_size or 4},
+        extra_defaults={
+            "batch_size": experiment_config.training_params.batch_size or 4
+        },
     )
     data_params.use_lip_coords = use_lip_coords
 
@@ -920,7 +925,5 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         model_params.setdefault(
             "popt_position_encoding", "multi_subj_position_encoding"
         )
-    if not feature_cache and model_params.get("output_dim") is not None:
-        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

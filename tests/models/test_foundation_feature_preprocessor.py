@@ -136,7 +136,6 @@ def test_foundation_feature_cache_config_setter_updates_direct_preprocessor(
         assert config.model_spec.feature_cache is True
         assert config.model_spec.params["feature_cache"] is True
         config.model_spec.params["output_dim"] = 7
-        config.model_spec.params["embedding_dim"] = 7
         config.model_spec.params["output_activation"] = "sigmoid"
         config.model_spec.params["dropout"] = 0.2
         return config
@@ -171,7 +170,7 @@ def test_foundation_feature_cache_config_setter_updates_direct_preprocessor(
                             "constructor_name": "fake_foundation_cache_model",
                             "params": {},
                         },
-                    }
+                    },
                 ],
             ),
         ),
@@ -190,12 +189,10 @@ def test_foundation_feature_cache_config_setter_updates_direct_preprocessor(
     assert nested_spec.feature_cache is True
     assert nested_spec.params["feature_cache"] is True
     assert "output_dim" not in nested_spec.params
-    assert "embedding_dim" not in nested_spec.params
     assert "output_activation" not in nested_spec.params
     assert "dropout" not in nested_spec.params
     assert foundation_params["input_fields"] == []
     assert "output_dim" not in result.model_spec.params
-    assert "embedding_dim" not in result.model_spec.params
 
 
 def test_foundation_feature_cache_config_setter_allows_missing_nested_output_dim(

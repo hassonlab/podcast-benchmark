@@ -19,6 +19,7 @@ from core import registry
 # PYTHON PATH SETUP
 # =============================================================================
 
+
 # Add DIVER-1 module to Python path (lazy loading - only when needed)
 # This allows imports like "from models.diver import DIVER" to work correctly
 # Note: We don't add it at module import time to avoid importing DIVER-1's
@@ -31,17 +32,19 @@ def _setup_diver1_path():
         sys.path.insert(0, diver1_dir)
     return diver1_dir
 
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
+
 def get_podcast_task_info(
-    task_name: str, 
-    subject_id: int, 
+    task_name: str,
+    subject_id: int,
     patch_sampling_rate: int = 500,
     num_channels: int = None,
     num_targets: int = None,
-    window_width: float = None
+    window_width: float = None,
 ):
     """
     Get task info dict for Podcast task using podcast-benchmark's information.
@@ -53,7 +56,7 @@ def get_podcast_task_info(
         num_channels: Number of channels (from actual data via set_input_channels)
         num_targets: Number of output targets (from config output_dim)
         window_width: Window width in seconds (from data_params.window_width)
-    
+
     Returns:
         task_info_dict: Dictionary with task information for DIVER model
     """
@@ -79,53 +82,54 @@ def get_podcast_task_info(
             "volume_level_decoding_task": 1,
         }
         num_targets = num_targets_map.get(task_name, 50)
-    
+
     # Build task_info_dict using podcast-benchmark's values
     task_info = {
-        'target_dynamics': 'discrete',  # Podcast tasks are always discrete
-        'consistent_channels': True,  # Podcast uses consistent channels per subject
-        'num_channels': num_channels,  # From actual data (set_input_channels)
-        'num_seconds': window_width or 0.5,  # From data_params.window_width
-        'num_targets': num_targets,  # From config output_dim
-        'patch_sampling_rate': patch_sampling_rate,
+        "target_dynamics": "discrete",  # Podcast tasks are always discrete
+        "consistent_channels": True,  # Podcast uses consistent channels per subject
+        "num_channels": num_channels,  # From actual data (set_input_channels)
+        "num_seconds": window_width or 0.5,  # From data_params.window_width
+        "num_targets": num_targets,  # From config output_dim
+        "patch_sampling_rate": patch_sampling_rate,
     }
-    
+
     return task_info
 
 
 def create_diver1_params(model_params: dict):
     """
     Convert Podcast benchmark's model_params dict to DIVER-1's params object.
-    
+
     Args:
         model_params: Podcast benchmark's model_params dictionary
-        
+
     Returns:
         params: argparse.Namespace-like object (expected by DIVER-1)
     """
+
     class Params:
         def __init__(self, d):
             for k, v in d.items():
                 setattr(self, k, v)
-    
+
     params_dict = {
-        'foundation_dir': model_params.get("foundation_dir", None),
-        'patch_size': model_params.get("patch_size", 500),
-        'width': model_params.get("width") or model_params.get("d_model", 512),
-        'depth': model_params.get("depth") or model_params.get("e_layer", 12),
-        'mup_weights': model_params.get("mup_weights", False),
-        'ft_mup': model_params.get("ft_mup", False),
-        'ft_config': model_params.get("ft_config", "flatten_linear"),
-        'deepspeed_pth_format': model_params.get("deepspeed_pth_format", True),
-        'model_dir': model_params.get("model_dir")
+        "foundation_dir": model_params.get("foundation_dir", None),
+        "patch_size": model_params.get("patch_size", 500),
+        "width": model_params.get("width") or model_params.get("d_model", 512),
+        "depth": model_params.get("depth") or model_params.get("e_layer", 12),
+        "mup_weights": model_params.get("mup_weights", False),
+        "ft_mup": model_params.get("ft_mup", False),
+        "ft_config": model_params.get("ft_config", "flatten_linear"),
+        "deepspeed_pth_format": model_params.get("deepspeed_pth_format", True),
+        "model_dir": model_params.get("model_dir")
         or (
             os.path.dirname(model_params["foundation_dir"])
             if model_params.get("foundation_dir")
             else None
         ),
-        'num_mlp_layers': model_params.get("num_mlp_layers", 2),
-        'load_adapter_weights': model_params.get("load_adapter_weights", False),
-        'adapter_path': model_params.get("adapter_path", None),
+        "num_mlp_layers": model_params.get("num_mlp_layers", 2),
+        "load_adapter_weights": model_params.get("load_adapter_weights", False),
+        "adapter_path": model_params.get("adapter_path", None),
     }
 
     for key, value in model_params.items():
@@ -133,7 +137,7 @@ def create_diver1_params(model_params: dict):
             params_dict[key] = value
 
     params = Params(params_dict)
-    
+
     return params
 
 
@@ -196,23 +200,28 @@ def _candidate_diver_strategy_dirs(model_params):
     if strategy_base_dir:
         return [strategy_base_dir]
 
-    local_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pretrained_model")
+    local_base = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "pretrained_model"
+    )
     reference_base = os.path.join(
         os.path.dirname(os.path.abspath(__file__)).replace(
-            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip"
+            "/podcast-benchmark/models/diver",
+            "/references_podcast/podcast-benchmark/models/diverclip",
         ),
         "pretrained_model",
     )
     reference_flatten_diveronly = os.path.join(
         os.path.dirname(os.path.abspath(__file__)).replace(
-            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip_flatten"
+            "/podcast-benchmark/models/diver",
+            "/references_podcast/podcast-benchmark/models/diverclip_flatten",
         ),
         "pretrained_model",
         "diveronly",
     )
     reference_attn_diveronly = os.path.join(
         os.path.dirname(os.path.abspath(__file__)).replace(
-            "/podcast-benchmark/models/diver", "/references_podcast/podcast-benchmark/models/diverclip_attn"
+            "/podcast-benchmark/models/diver",
+            "/references_podcast/podcast-benchmark/models/diverclip_attn",
         ),
         "pretrained_model",
         "diveronly",
@@ -276,7 +285,9 @@ def _resolve_diver_foundation_dir(model_params):
             if os.path.exists(candidate):
                 return candidate
 
-    raise FileNotFoundError(f"Could not resolve DIVER pretrained checkpoint for strategy='{strategy}'")
+    raise FileNotFoundError(
+        f"Could not resolve DIVER pretrained checkpoint for strategy='{strategy}'"
+    )
 
 
 def _resolve_diver_adapter_path(model_params):
@@ -295,10 +306,15 @@ def _resolve_diver_adapter_path(model_params):
     return None
 
 
-def create_data_info_list(batch_size: int, num_channels: int, channel_names: list = None, xyz_id: np.ndarray = None):
+def create_data_info_list(
+    batch_size: int,
+    num_channels: int,
+    channel_names: list = None,
+    xyz_id: np.ndarray = None,
+):
     """
     Create data_info_list for DIVER model forward pass.
-    
+
     Args:
         batch_size: Batch size
         num_channels: Number of channels
@@ -307,11 +323,11 @@ def create_data_info_list(batch_size: int, num_channels: int, channel_names: lis
                 If provided, will be included in each sample's data_info_dict.
                 Podcast Benchmark uses consistent channel order, so the same xyz_id
                 can be used for all samples in a batch.
-    
+
     Returns:
         data_info_list: List of dicts, one per sample
                         Each dict contains 'num_channels', 'modality', and optionally 'channel_names' and 'xyz_id'
-    
+
     Note:
         This matches the original DIVER-1 implementation where each sample has a data_info_dict
         with 'xyz_id' for PositionalEncoding3D and 'modality' for ChannelTypeEmbedding.
@@ -321,14 +337,14 @@ def create_data_info_list(batch_size: int, num_channels: int, channel_names: lis
     data_info_list = []
     for _ in range(batch_size):
         sample_info = {
-            'num_channels': num_channels,
-            'modality': 'iEEG',  # Required by ChannelTypeEmbedding (available_channel_types = ['EEG','iEEG'])
+            "num_channels": num_channels,
+            "modality": "iEEG",  # Required by ChannelTypeEmbedding (available_channel_types = ['EEG','iEEG'])
         }
         if channel_names is not None:
-            sample_info['channel_names'] = channel_names
+            sample_info["channel_names"] = channel_names
         if xyz_id is not None:
             # Include xyz_id for PositionalEncoding3D (required by DIVER-1)
-            sample_info['xyz_id'] = xyz_id  # [num_channels, 3]
+            sample_info["xyz_id"] = xyz_id  # [num_channels, 3]
         data_info_list.append(sample_info)
     return data_info_list
 
@@ -337,15 +353,18 @@ def create_data_info_list(batch_size: int, num_channels: int, channel_names: lis
 # DIVER DECODER CLASS
 # =============================================================================
 
+
 class DIVERDecoder(nn.Module):
     """
     DIVER model decoder for Podcast benchmark.
-    
+
     Wraps DIVER-1's FineTuneModel to match Podcast benchmark interface.
     Handles data format conversion and output activation.
     """
-    
-    def __init__(self, diver_model, output_activation: str = "linear", output_dim: int = None):
+
+    def __init__(
+        self, diver_model, output_activation: str = "linear", output_dim: int = None
+    ):
         """
         Args:
             diver_model: DIVER FineTuneModel instance (flatten_linear_finetune or flatten_mlp_finetune)
@@ -361,8 +380,8 @@ class DIVERDecoder(nn.Module):
         self.output_dim = output_dim
 
     def _get_data_info_list(self, x, **kwargs):
-        xyz_id = kwargs.get('xyz_id', None)
-        data_info_list = kwargs.get('data_info_list', None)
+        xyz_id = kwargs.get("xyz_id", None)
+        data_info_list = kwargs.get("data_info_list", None)
         batch_size = x.shape[0]
         num_channels = x.shape[1]
 
@@ -372,11 +391,13 @@ class DIVERDecoder(nn.Module):
                 coords = xyz_id[i]
                 if torch.is_tensor(coords):
                     coords = coords.cpu().numpy()
-                data_info_list.append({
-                    'num_channels': num_channels,
-                    'modality': 'iEEG',
-                    'xyz_id': coords,
-                })
+                data_info_list.append(
+                    {
+                        "num_channels": num_channels,
+                        "modality": "iEEG",
+                        "xyz_id": coords,
+                    }
+                )
         elif data_info_list is None:
             data_info_list = create_data_info_list(batch_size, num_channels)
         return data_info_list
@@ -443,7 +464,7 @@ class DIVERDecoder(nn.Module):
         Returns:
             Output tensor [batch_size, output_dim] (probabilities if activation applied)
         """
-        if kwargs.get('return_feature_emb_instead_of_projection', False):
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
             return self.encode_features(x, **kwargs)
 
         features = self.encode_features(x, **kwargs)
@@ -453,6 +474,7 @@ class DIVERDecoder(nn.Module):
 # =============================================================================
 # MODEL CONSTRUCTOR
 # =============================================================================
+
 
 @registry.register_model_data_getter("diver_data_info")
 def get_diver_data_info(task_df, raws, model_params):
@@ -494,11 +516,13 @@ def get_diver_data_info(task_df, raws, model_params):
     return task_df, ["xyz_id"]
 
 
-@registry.register_model_constructor("diver_finetune", required_data_getter="diver_data_info")
+@registry.register_model_constructor(
+    "diver_finetune", required_data_getter="diver_data_info"
+)
 def create_diver_finetuning_model(model_params):
     """
     Create DIVER finetuning model using DIVER-1's finetune_model classes.
-    
+
     Expected model_params:
         - foundation_dir: Path to pretrained weights file (required)
         - output_dim: Output dimension (required)
@@ -531,7 +555,7 @@ def create_diver_finetuning_model(model_params):
         output_dim = 1
     task_name = model_params.get("task_name", "word_embedding")
     subject_id = model_params.get("subject_id", 1)
-    
+
     # Optional parameters with defaults
     patch_sampling_rate = model_params.get("patch_sampling_rate", 500)
     patch_size = model_params.get("patch_size", 500)
@@ -546,26 +570,26 @@ def create_diver_finetuning_model(model_params):
     width = model_params.get("width", d_model)
     depth = model_params.get("depth", e_layer)
     num_mlp_layers = model_params.get("num_mlp_layers", 2)
-    
+
     # Get task_info_dict from model_params (set by config setter)
     task_info_dict = model_params.get("_task_info_dict")
     if task_info_dict is None:
         # Fallback: construct from available information
         num_channels = model_params.get("input_channels")
         window_width = model_params.get("window_width", 0.5)
-        
+
         task_info_dict = get_podcast_task_info(
             task_name=task_name,
             subject_id=subject_id,
             patch_sampling_rate=patch_sampling_rate,
             num_channels=num_channels,
             num_targets=output_dim,
-            window_width=window_width
+            window_width=window_width,
         )
-    
+
     # Create params object for DIVER-1
     params = create_diver1_params(model_params)
-    
+
     # Setup DIVER-1 path and import model classes
     # Note: We need to handle the conflict between podcast-benchmark's 'models' and 'utils' packages
     # (already loaded in main.py) and DIVER-1's 'models' and 'utils' packages.
@@ -573,22 +597,26 @@ def create_diver_finetuning_model(model_params):
     # import DIVER-1's modules, create the model, then restore them. This allows DIVER-1's internal imports
     # (models.diver, utils.mup_utils, etc.) to work correctly during model creation.
     diver1_dir = _setup_diver1_path()
-    
+
     # Save the original 'models' and 'utils' modules and their submodules
     original_modules = {}
     modules_to_remove = []
-    
+
     # Collect all modules starting with 'models.' or 'utils.'
     for module_name in list(sys.modules.keys()):
-        if module_name == 'models' or module_name == 'utils' or \
-           module_name.startswith('models.') or module_name.startswith('utils.'):
+        if (
+            module_name == "models"
+            or module_name == "utils"
+            or module_name.startswith("models.")
+            or module_name.startswith("utils.")
+        ):
             original_modules[module_name] = sys.modules[module_name]
             modules_to_remove.append(module_name)
-    
+
     # Remove all collected modules from sys.modules
     for module_name in modules_to_remove:
         del sys.modules[module_name]
-    
+
     try:
         # Import DIVER modules
         from models.finetune_model import flatten_linear_finetune, flatten_mlp_finetune
@@ -599,7 +627,9 @@ def create_diver_finetuning_model(model_params):
         if getattr(params, "ft_mup", False):
             # Define builder (same as existing logic)
             def _full_finetune_builder(w: int, d: int):
-                class _P: pass
+                class _P:
+                    pass
+
                 p = _P()
                 for k, v in params.__dict__.items():
                     setattr(p, k, v)
@@ -618,8 +648,10 @@ def create_diver_finetuning_model(model_params):
             if getattr(params, "patch_size", None) == 50:
                 identifier += "_patch50"
 
-            save_dir = getattr(params, "model_dir", None) or os.path.dirname(foundation_dir)
-            
+            save_dir = getattr(params, "model_dir", None) or os.path.dirname(
+                foundation_dir
+            )
+
             base_shapes_path = diver1_mup_utils.ensure_base_shapes(
                 model_builder=_full_finetune_builder,
                 identifier=identifier,
@@ -651,35 +683,37 @@ def create_diver_finetuning_model(model_params):
                 device="cpu",
                 deepspeed_pth_format=params.deepspeed_pth_format,
             )
-    
-    
+
     finally:
         # Restore all original modules AFTER model creation is complete
         # This ensures podcast-benchmark's code continues to work correctly
         for module_name, module_obj in original_modules.items():
             sys.modules[module_name] = module_obj
-    
+
     # Move to device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     diver_model.to(device)
-    
+
     # Freeze backbone if requested
-    if freeze_foundation and hasattr(diver_model, 'backbone'):
+    if freeze_foundation and hasattr(diver_model, "backbone"):
         for p in diver_model.backbone.parameters():
             p.requires_grad = False
         print("DIVER backbone frozen")
-    
+
     output_activation = _resolve_output_activation(model_params)
-    
+
     # Wrap in DIVERDecoder for Podcast benchmark interface
-    decoder = DIVERDecoder(diver_model, output_activation=output_activation, output_dim=output_dim)
-    
+    decoder = DIVERDecoder(
+        diver_model, output_activation=output_activation, output_dim=output_dim
+    )
+
     return decoder
 
 
 # =============================================================================
 # CONFIG SETTER
 # =============================================================================
+
 
 @registry.register_config_setter("diver_finetune")
 def set_diver_finetuning_config(experiment_config, raws, _df_word):
@@ -713,7 +747,7 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
 
     # 3. Get window_width from data_params
     data_params = experiment_config.task_config.data_params
-    window_width = getattr(data_params, 'window_width', None)
+    window_width = getattr(data_params, "window_width", None)
     if window_width is None or window_width <= 0:
         window_width = 0.5
         print(f"DIVER: Using default window_width={window_width}")
@@ -727,7 +761,9 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
     if not feature_cache and (
         "output_dim" not in model_params or model_params["output_dim"] is None
     ):
-        num_targets = _default_output_dim_for_task(task_name, task_specific_config) or 50
+        num_targets = (
+            _default_output_dim_for_task(task_name, task_specific_config) or 50
+        )
         model_params["output_dim"] = num_targets
     else:
         num_targets = model_params.get("output_dim") or 1
@@ -739,7 +775,7 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
         patch_sampling_rate=patch_sampling_rate,
         num_channels=num_channels,
         num_targets=num_targets,
-        window_width=window_width
+        window_width=window_width,
     )
 
     # 6. Store for model constructor
@@ -753,11 +789,10 @@ def set_diver_finetuning_config(experiment_config, raws, _df_word):
         model_params["_loss_name"] = experiment_config.training_params.loss_name
         model_params["output_activation"] = _resolve_output_activation(model_params)
 
-    if model_params.get("ft_mup") and experiment_config.training_params.optimizer == "AdamW":
+    if (
+        model_params.get("ft_mup")
+        and experiment_config.training_params.optimizer == "AdamW"
+    ):
         experiment_config.training_params.optimizer = "MuAdamW"
-
-    # 7. Copy output_dim to embedding_dim (same as BrainBERT/PopT)
-    if not feature_cache:
-        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config
