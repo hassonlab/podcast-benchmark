@@ -133,10 +133,13 @@ def compute_all_metrics(predictions, groundtruth, all_fns, model_params=None):
             # Special handling for confusion matrix
             if model_params is None:
                 continue
-            if model_params.get("embedding_dim") == 1:
+            output_dim = model_params.get(
+                "output_dim", model_params.get("embedding_dim")
+            )
+            if output_dim == 1:
                 num_classes = 2
             else:
-                num_classes = model_params.get("embedding_dim")
+                num_classes = output_dim
             val = fn(predictions, groundtruth, num_classes)
             metrics_dict[name] = (
                 val.detach().cpu().numpy() if torch.is_tensor(val) else np.array(val)

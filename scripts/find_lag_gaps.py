@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,7 @@ SCOPE_TO_RUN_MODE = {
 
 @dataclass(frozen=True)
 class Gap:
+    model: str
     task: str
     scope: str
     entity: str
@@ -64,7 +66,15 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=None,
+        help=(
+            "Model section under results to check. Repeatable, e.g. "
+            "--model brainbert --model diver. Defaults to baseline."
+        ),
+    )
     parser.add_argument("--min-lag", type=int, default=DEFAULT_MIN_LAG)
     parser.add_argument("--max-lag", type=int, default=DEFAULT_MAX_LAG)
     parser.add_argument("--step", type=int, default=DEFAULT_STEP)
@@ -127,9 +137,28 @@ def expected_lags(min_lag: int, max_lag: int, step: int) -> tuple[int, ...]:
     return tuple(range(min_lag, max_lag + 1, step))
 
 
-def csvs_for_scope(run_dir: Path, scope: str) -> list[tuple[str, Path]]:
+def entity_for_root_csv(run_dir: Path, scope: str) -> str:
     if scope == "super_subject":
-        return [("super_subject", run_dir / "lag_performance.csv")]
+        return "super_subject"
+
+    subject_match = re.search(r"subject[_-]?(\d+)", run_dir.name)
+    if subject_match:
+        return f"subject_{subject_match.group(1)}"
+
+    region_match = re.search(r"region[_-]?([A-Za-z0-9]+)", run_dir.name)
+    if region_match:
+        return f"region_{region_match.group(1).lower()}"
+
+    return run_dir.name
+
+
+def csvs_for_scope(run_dir: Path, scope: str) -> list[tuple[str, Path]]:
+    root_csv = run_dir / "lag_performance.csv"
+    if root_csv.exists():
+        return [(entity_for_root_csv(run_dir, scope), root_csv)]
+
+    if scope == "super_subject":
+        return [("super_subject", root_csv)]
 
     csvs = []
     for csv_path in sorted(run_dir.glob("*/lag_performance.csv")):
@@ -139,50 +168,60 @@ def csvs_for_scope(run_dir: Path, scope: str) -> list[tuple[str, Path]]:
 
 def find_gaps(
     config: Mapping,
-    model: str,
+    models: Sequence[str],
     root: Path,
     expected: Sequence[int],
     ignored: set[int],
 ) -> tuple[list[Gap], list[str]]:
-    result_config = config.get("results", {}).get(model)
-    if result_config is None:
-        raise KeyError(f"No results.{model!r} section found in config")
-
     expected_set = set(expected) - ignored
     gaps: list[Gap] = []
     issues: list[str] = []
 
-    for task, scopes in result_config.items():
-        for scope, paths in scopes.items():
-            entity_lags: dict[str, set[int]] = defaultdict(set)
-            for raw_path in as_list(paths):
-                run_dir = resolve_path(raw_path, root)
-                if not run_dir.exists():
-                    issues.append(f"{task} | {scope} | missing directory: {raw_path}")
-                    continue
+    for model in models:
+        result_config = config.get("results", {}).get(model)
+        if result_config is None:
+            raise KeyError(f"No results.{model!r} section found in config")
 
-                csvs = csvs_for_scope(run_dir, scope)
-                existing_csvs = [(entity, csv_path) for entity, csv_path in csvs if csv_path.exists()]
-                if not existing_csvs:
-                    issues.append(f"{task} | {scope} | no lag_performance.csv files under {raw_path}")
-                    continue
-
-                for entity, csv_path in existing_csvs:
-                    entity_lags[entity].update(read_lags(csv_path))
-
-            for entity, lags in sorted(entity_lags.items()):
-                present = lags & expected_set
-                missing = tuple(sorted(expected_set - lags))
-                if missing:
-                    gaps.append(
-                        Gap(
-                            task=task,
-                            scope=scope,
-                            entity=entity,
-                            missing=missing,
-                            present_count=len(present),
+        for task, scopes in result_config.items():
+            for scope, paths in scopes.items():
+                entity_lags: dict[str, set[int]] = defaultdict(set)
+                for raw_path in as_list(paths):
+                    run_dir = resolve_path(raw_path, root)
+                    if not run_dir.exists():
+                        issues.append(
+                            f"{model} | {task} | {scope} | missing directory: {raw_path}"
                         )
-                    )
+                        continue
+
+                    csvs = csvs_for_scope(run_dir, scope)
+                    existing_csvs = [
+                        (entity, csv_path)
+                        for entity, csv_path in csvs
+                        if csv_path.exists()
+                    ]
+                    if not existing_csvs:
+                        issues.append(
+                            f"{model} | {task} | {scope} | no lag_performance.csv files under {raw_path}"
+                        )
+                        continue
+
+                    for entity, csv_path in existing_csvs:
+                        entity_lags[entity].update(read_lags(csv_path))
+
+                for entity, lags in sorted(entity_lags.items()):
+                    present = lags & expected_set
+                    missing = tuple(sorted(expected_set - lags))
+                    if missing:
+                        gaps.append(
+                            Gap(
+                                model=model,
+                                task=task,
+                                scope=scope,
+                                entity=entity,
+                                missing=missing,
+                                present_count=len(present),
+                            )
+                        )
 
     return gaps, issues
 
@@ -224,14 +263,14 @@ def print_gap_report(gaps: Sequence[Gap], total_expected: int, step: int) -> Non
         print("No missing lags found.")
         return
 
-    by_task_scope: dict[tuple[str, str], list[Gap]] = defaultdict(list)
+    by_task_scope: dict[tuple[str, str, str], list[Gap]] = defaultdict(list)
     for gap in gaps:
-        by_task_scope[(gap.task, gap.scope)].append(gap)
+        by_task_scope[(gap.model, gap.task, gap.scope)].append(gap)
 
-    for task, scope in sorted(by_task_scope):
-        print(f"\n[{task} | {scope}]")
+    for model, task, scope in sorted(by_task_scope):
+        print(f"\n[{model} | {task} | {scope}]")
         grouped: dict[tuple[int, ...], list[Gap]] = defaultdict(list)
-        for gap in by_task_scope[(task, scope)]:
+        for gap in by_task_scope[(model, task, scope)]:
             grouped[gap.missing].append(gap)
         for missing, members in sorted(grouped.items(), key=lambda item: (len(item[0]), item[0])):
             entities = ", ".join(sorted((gap.entity for gap in members), key=entity_sort_key))
@@ -350,9 +389,17 @@ def make_commands(
     config_issues: list[str] = []
 
     for gap in gaps:
+        if gap.model != DEFAULT_MODEL:
+            config_issues.append(
+                f"{gap.model} | {gap.task} | {gap.scope} | command suggestions only support {DEFAULT_MODEL}"
+            )
+            continue
+
         config = choose_config(candidates, gap.task, gap.scope)
         if config is None:
-            config_issues.append(f"{gap.task} | {gap.scope} | no matching baseline config")
+            config_issues.append(
+                f"{gap.model} | {gap.task} | {gap.scope} | no matching baseline config"
+            )
             continue
 
         for start, end in lag_ranges(gap.missing, step):
@@ -386,10 +433,11 @@ def main() -> int:
     args = parse_args()
     root = Path.cwd()
     config = load_yaml(args.config)
+    models = args.model or [DEFAULT_MODEL]
     expected = expected_lags(args.min_lag, args.max_lag, args.step)
     ignored = set(args.ignore_lag)
 
-    gaps, issues = find_gaps(config, args.model, root, expected, ignored)
+    gaps, issues = find_gaps(config, models, root, expected, ignored)
     print_gap_report(gaps, len(set(expected) - ignored), args.step)
 
     if issues:

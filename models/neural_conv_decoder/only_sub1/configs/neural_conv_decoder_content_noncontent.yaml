@@ -5,7 +5,7 @@ model_params:
   conv_filters: 128
   dropout: 0.2
   num_models: 1
-  embedding_dim: 1 #this is output dimension of the decoder
+  output_dim: 1 #this is output dimension of the decoder
   output_activation: sigmoid
 
 training_params:

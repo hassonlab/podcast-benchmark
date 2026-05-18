@@ -30,6 +30,8 @@ The main pipeline is:
 
 `models/` contains model implementations and integrations. Foundation models such as `brainbert/`, `diver/`, and `popt/` live here alongside compact neural model families such as `neural_conv_decoder/`, `linear_model/`, and `time_pooling_model/`. Shared helpers, decoders, config setters, and preprocessors are in the top-level `models/*.py` files. `models/shared_preprocessors.py` includes a `disk_cache_preprocessor` wrapper that caches the final output of one registered preprocessor or an ordered preprocessor pipeline under `.cache/preprocessors/` by default. Its `update_cache_with_missing` option defaults to `false`; when enabled, missing rows computed during partial reuse are merged back into the same canonical cache file.
 
+Model configs use `model_params.output_dim` for decoder output size across regression, classification, and embedding targets.
+
 `metrics/` contains registered losses and evaluation metrics for regression, classification, embedding prediction, and language model decoding.
 
 `utils/` contains shared runtime utilities: data loading, lagged dataset construction, fold creation, model construction, config parsing, training, plotting, atlas/region helpers, and module auto-loading.

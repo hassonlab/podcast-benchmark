@@ -244,8 +244,10 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
 
     original_modules = {}
     for name in list(sys.modules.keys()):
-        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
-            "utils."
+        if (
+            name in ("models", "utils")
+            or name.startswith("models.")
+            or name.startswith("utils.")
         ):
             original_modules[name] = sys.modules[name]
             del sys.modules[name]
@@ -258,7 +260,9 @@ def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
         try:
             upstream.load_state_dict(states, strict=True)
         except Exception:
-            upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
+            upstream.load_state_dict(
+                _remap_state_dict_to_reference(states), strict=False
+            )
         upstream.to(device)
         return upstream
     finally:
@@ -303,9 +307,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
 
         if self.num_electrodes is not None and self.hidden_dim is not None:
             input_dim = (
-                self.num_electrodes
-                * self.temporal_patches_to_keep
-                * self.hidden_dim
+                self.num_electrodes * self.temporal_patches_to_keep * self.hidden_dim
             )
             if mlp_layer_sizes:
                 layers = []
@@ -332,7 +334,9 @@ class ReferenceBrainBERTDecoder(nn.Module):
             )
 
         batch_size, num_channels, time_steps, freq_channels = x.shape
-        inputs = x.contiguous().view(batch_size * num_channels, time_steps, freq_channels)
+        inputs = x.contiguous().view(
+            batch_size * num_channels, time_steps, freq_channels
+        )
         pad_mask = None
 
         if self.projector is not None:
@@ -382,7 +386,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
 
     def forward(self, x, **kwargs):
         features = self.encode_features(x, **kwargs)
-        if kwargs.get('return_feature_emb_instead_of_projection', False):
+        if kwargs.get("return_feature_emb_instead_of_projection", False):
             return features
         return self.forward_from_features(features, **kwargs)
 
@@ -390,6 +394,7 @@ class ReferenceBrainBERTDecoder(nn.Module):
 # =============================================================================
 # PATTERN 2: FINETUNING (TRAINABLE MODEL)
 # =============================================================================
+
 
 @registry.register_model_constructor("brainbert_finetune")
 def create_finetuning_decoder(model_params):
@@ -426,7 +431,8 @@ def create_finetuning_decoder(model_params):
 
     if random_init:
         if not any(
-            model_params.get(k) is not None for k in ("model_dim", "num_layers", "num_heads")
+            model_params.get(k) is not None
+            for k in ("model_dim", "num_layers", "num_heads")
         ):
             raise ValueError(
                 "BrainBERT random init requires model_dim, num_layers, and num_heads in model_params."
@@ -438,11 +444,14 @@ def create_finetuning_decoder(model_params):
         upstream_cfg = _get_upstream_cfg_from_checkpoint(ckpt)
         if upstream_cfg is None:
             if any(
-                model_params.get(k) is not None for k in ("model_dim", "num_layers", "num_heads")
+                model_params.get(k) is not None
+                for k in ("model_dim", "num_layers", "num_heads")
             ):
                 upstream_cfg = _model_params_to_upstream_cfg(model_params)
             elif config_dir:
-                upstream_cfg = _config_dict_to_upstream_cfg(_load_config_yaml(config_dir))
+                upstream_cfg = _config_dict_to_upstream_cfg(
+                    _load_config_yaml(config_dir)
+                )
             else:
                 raise ValueError(
                     "BrainBERT checkpoint has no model_cfg and no config.yaml/model_params were provided."
@@ -450,8 +459,10 @@ def create_finetuning_decoder(model_params):
 
     original_modules = {}
     for name in list(sys.modules.keys()):
-        if name in ("models", "utils") or name.startswith("models.") or name.startswith(
-            "utils."
+        if (
+            name in ("models", "utils")
+            or name.startswith("models.")
+            or name.startswith("utils.")
         ):
             original_modules[name] = sys.modules[name]
             del sys.modules[name]
@@ -465,7 +476,9 @@ def create_finetuning_decoder(model_params):
             try:
                 upstream.load_state_dict(states, strict=True)
             except Exception:
-                upstream.load_state_dict(_remap_state_dict_to_reference(states), strict=False)
+                upstream.load_state_dict(
+                    _remap_state_dict_to_reference(states), strict=False
+                )
 
         finetune_cfg = _dict_to_cfg(
             {
@@ -511,6 +524,7 @@ def create_finetuning_decoder(model_params):
 # CONFIG SETTERS
 # =============================================================================
 
+
 @registry.register_config_setter("brainbert_finetune")
 def set_finetuning_config(experiment_config, raws, _df_word):
     """
@@ -532,7 +546,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         raise ValueError("Could not find brainbert_finetune model spec.")
 
     model_params = target_spec.params
-    feature_cache = target_spec.feature_cache or model_params.get("feature_cache", False)
+    feature_cache = target_spec.feature_cache or model_params.get(
+        "feature_cache", False
+    )
     data_params = experiment_config.task_config.data_params
     task_name = experiment_config.task_config.task_name
     task_specific_config = experiment_config.task_config.task_specific_config
@@ -554,7 +570,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         model_name="BrainBERT finetuning",
     )
 
-    foundation_dir = model_params.get("foundation_dir") or model_params.get("checkpoint_path")
+    foundation_dir = model_params.get("foundation_dir") or model_params.get(
+        "checkpoint_path"
+    )
     model_dir = model_params.get("model_dir")
     config_dir = None
     if foundation_dir and os.path.isfile(foundation_dir):
@@ -589,7 +607,5 @@ def set_finetuning_config(experiment_config, raws, _df_word):
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
     model_params.setdefault("temporal_patches_to_keep", 10)
-    if not feature_cache and model_params.get("output_dim") is not None:
-        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config
