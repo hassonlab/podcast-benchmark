@@ -35,6 +35,7 @@ task_config:
     model_name: gpt2
     cache_dir: ./model_cache
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   epochs: 100
   learning_rate: 1.0e-05

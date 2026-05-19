@@ -37,6 +37,7 @@ task_config:
     embedding_layer: 24
     embedding_pca_dim: 50
 training_params:
+  tensorboard_logging: false
   normalize_targets: true
   batch_size: 4
   epochs: 100

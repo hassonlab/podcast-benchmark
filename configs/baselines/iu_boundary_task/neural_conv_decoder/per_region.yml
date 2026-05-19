@@ -25,6 +25,7 @@ task_config:
     negative_margin_s: 0.5
     iu_boundaries_csv_path: processed_data/iu_boundaries.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 32
   epochs: 50
   learning_rate: 0.001

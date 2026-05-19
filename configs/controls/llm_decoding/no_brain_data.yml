@@ -7,6 +7,7 @@ task_config:
   task_specific_config:
     no_brain_encoder: true
 training_params:
+  tensorboard_logging: false
   batch_size: 16
   epochs: 50
   learning_rate: 0.01

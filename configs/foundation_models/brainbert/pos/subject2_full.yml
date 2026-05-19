@@ -44,6 +44,7 @@ task_config:
   task_specific_config:
     pos_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: roc_auc_multiclass
   early_stopping_patience: 10

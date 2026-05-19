@@ -49,6 +49,7 @@ task_config:
   task_specific_config:
     embedding_pca_dim: 50
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: cosine_sim
   early_stopping_patience: 10

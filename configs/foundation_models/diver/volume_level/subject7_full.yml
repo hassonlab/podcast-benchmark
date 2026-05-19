@@ -59,6 +59,7 @@ task_config:
     window_size: 200.0
     zero_phase: true
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: r2
   early_stopping_patience: 10

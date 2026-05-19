@@ -24,6 +24,7 @@ task_config:
     encoder_forward_kwargs:
       preserve_ensemble: true
 training_params:
+  tensorboard_logging: false
   batch_size: 16
   epochs: 50
   learning_rate: 0.0001

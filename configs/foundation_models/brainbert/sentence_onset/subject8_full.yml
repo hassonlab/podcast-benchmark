@@ -46,6 +46,7 @@ task_config:
     negatives_per_positive: 5
     sentence_csv_path: processed_data/all_sentences_podcast.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: f1_logits
   early_stopping_patience: 10

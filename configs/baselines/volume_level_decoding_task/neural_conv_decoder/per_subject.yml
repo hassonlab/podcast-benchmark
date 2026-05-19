@@ -31,6 +31,7 @@ task_config:
     window_size: 200.0
     hop_size: 100.0
 training_params:
+  tensorboard_logging: false
   min_lag: -1000
   max_lag: 1250
   lag_step_size: 250

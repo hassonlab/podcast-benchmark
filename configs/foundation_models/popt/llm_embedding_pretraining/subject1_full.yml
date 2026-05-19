@@ -53,6 +53,7 @@ task_config:
     prepend_space: true
     transcript_path: data/stimuli/podcast_transcript.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: mse
   early_stopping_patience: 10

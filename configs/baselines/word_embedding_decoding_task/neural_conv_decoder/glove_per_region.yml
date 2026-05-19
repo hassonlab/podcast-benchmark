@@ -25,6 +25,7 @@ task_config:
     embedding_type: glove
     embedding_layer: 24
 training_params:
+  tensorboard_logging: false
   batch_size: 32
   epochs: 100
   learning_rate: 0.001

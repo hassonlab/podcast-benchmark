@@ -24,6 +24,7 @@ task_config:
   task_specific_config:
     embedding_pca_dim: 50
 training_params:
+  tensorboard_logging: false
   batch_size: 32
   epochs: 100
   learning_rate: 0.001
