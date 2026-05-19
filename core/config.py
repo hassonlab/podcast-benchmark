@@ -141,7 +141,7 @@ class TrainingParams:
     # Whether to visualize fold class distribution before training.
     visualize_fold_distribution: bool = False
     # If true writes training logs to Tensorboard.
-    tensorboard_logging: bool = True
+    tensorboard_logging: bool = False
     # If true, normalizes targets (Y) to zero mean and unit variance using training set statistics.
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
