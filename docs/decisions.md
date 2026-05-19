@@ -26,6 +26,8 @@ Nested foundation specs used by `foundation_feature_cache` are feature-extractio
 
 The chunk files are temporary run artifacts, not persistent caches. They are deleted in a `finally` block after each lag so failures do not leave normal runs pinned to stale preprocessing output. Preprocessors that need whole-lag statistics should keep this mode disabled because each chunk is preprocessed independently.
 
+DIVER volume-level lag sweeps can still create too much concurrent cache and scratch pressure when every lag batch is submitted independently. The dedicated Slurm helper submits those batches with `--dependency=singleton` and stable per-config job names, so each config advances through lag batches serially while different configs can still run in parallel.
+
 ## Neural-Only Training Loop
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.

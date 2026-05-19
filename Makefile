@@ -21,6 +21,13 @@ SUBJECT_BATCH_SIZE ?=
 REGION_BATCH_SIZE ?=
 TASKS ?= word_embedding_decoding_task,sentence_onset_task,gpt_surprise_task,gpt_surprise_multiclass_task,content_noncontent_task,pos_task,llm_decoding_task,whisper_embedding_decoding_task,iu_boundary_task,volume_level_decoding_task
 CONFIG_OVERRIDES ?=
+MIN_LAG ?=
+MAX_LAG ?=
+LAG_STEP ?=
+LAGS_PER_JOB ?=
+CONFIGS ?=
+SBATCH_FLAGS ?=
+DRY_RUN ?=
 
 # Specify a single config to use.
 # Usage:
@@ -222,6 +229,24 @@ train-all-region-groups:
 
 train-all-per-region-groups: train-all-region-groups
 
+# Submit DIVER volume-level lag batches with at most one active job per config.
+# Uses Slurm singleton dependencies with stable per-config job names.
+# Usage:
+#   make train-diver-volume-lags-sequential
+#   make train-diver-volume-lags-sequential MIN_LAG=-1000 MAX_LAG=1000 LAG_STEP=100 LAGS_PER_JOB=2
+#   make train-diver-volume-lags-sequential SBATCH_FLAGS='-p debug'
+#   make train-diver-volume-lags-sequential DRY_RUN=1
+train-diver-volume-lags-sequential:
+	@MIN_LAG="$(MIN_LAG)" \
+	MAX_LAG="$(MAX_LAG)" \
+	LAG_STEP="$(LAG_STEP)" \
+	LAGS_PER_JOB="$(LAGS_PER_JOB)" \
+	CONFIGS="$(CONFIGS)" \
+	SBATCH_FLAGS="$(SBATCH_FLAGS)" \
+	CONFIG_OVERRIDES="$(CONFIG_OVERRIDES)" \
+	DRY_RUN="$(DRY_RUN)" \
+	./submit_diver_volume_lags.sh
+
 # Development and testing targets
 setup:
 	./setup.sh
@@ -269,4 +294,4 @@ test:
 clean-env:
 	rm -rf decoding_env test_env
 
-.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups
+.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups train-diver-volume-lags-sequential
