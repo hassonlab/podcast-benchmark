@@ -1088,7 +1088,7 @@ def train_decoding_model_chunked(
                 full_targets,
                 training_params.batch_size,
                 shuffle=(phase == "train"),
-                seed=training_params.random_seed + lag * 1009 + fold * 9173,
+                seed=training_params.random_seed + fold * 9173,
             )
             for phase, indices in split_indices.items()
         }
