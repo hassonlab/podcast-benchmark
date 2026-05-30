@@ -30,6 +30,8 @@ Chunk files are written through temporary filenames and atomically moved into pl
 
 DIVER volume-level lag sweeps can still create too much concurrent cache and scratch pressure when every lag batch is submitted independently. The dedicated Slurm helper submits those batches with `--dependency=singleton` and stable per-config job names, so each config advances through lag batches serially while different configs can still run in parallel.
 
+DIVER volume-level configs currently leave chunked preprocessing disabled by default. This keeps the feature tensor in RAM and avoids writing per-lag chunk caches; enable chunked preprocessing only for runs where memory pressure is a larger constraint than scratch pressure.
+
 ## Neural-Only Training Loop
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
