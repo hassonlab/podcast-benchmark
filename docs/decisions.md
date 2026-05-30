@@ -26,6 +26,8 @@ Nested foundation specs used by `foundation_feature_cache` are feature-extractio
 
 The chunk files are temporary run artifacts, not persistent caches. They are deleted in a `finally` block after each lag so failures do not leave normal runs pinned to stale preprocessing output. Preprocessors that need whole-lag statistics should keep this mode disabled because each chunk is preprocessed independently.
 
+Chunk files are written through temporary filenames and atomically moved into place only after a successful write, so partial `.npz` files from quota or I/O failures are tracked and removed. Cluster submissions through `submit.sh` override the chunk cache to a job-local temporary directory and install a shell cleanup trap, reducing shared scratch pressure when Slurm terminates a job before Python cleanup can finish.
+
 DIVER volume-level lag sweeps can still create too much concurrent cache and scratch pressure when every lag batch is submitted independently. The dedicated Slurm helper submits those batches with `--dependency=singleton` and stable per-config job names, so each config advances through lag batches serially while different configs can still run in parallel.
 
 ## Neural-Only Training Loop

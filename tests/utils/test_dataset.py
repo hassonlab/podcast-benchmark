@@ -522,6 +522,22 @@ class TestRawNeuralDataset:
 
         assert not list(tmp_path.glob("*.npz"))
 
+    def test_chunk_write_failure_removes_partial_temp_file(
+        self, mock_raw, task_df_in_bounds, tmp_path, monkeypatch
+    ):
+        def fail_savez(path, *args, **kwargs):
+            Path(path).write_bytes(b"partial")
+            raise OSError("disk quota exceeded")
+
+        monkeypatch.setattr(np, "savez", fail_savez)
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, 0.5)
+
+        with pytest.raises(OSError, match="disk quota exceeded"):
+            ds.build_preprocessed_chunks(0, num_chunks=3, cache_dir=str(tmp_path))
+
+        assert not list(tmp_path.glob("*.npz"))
+        assert not list(tmp_path.glob(".*.npz"))
+
 
 class TestChunkedPreprocessedLoader:
     def _write_chunk(self, path, data, targets, row_positions):
