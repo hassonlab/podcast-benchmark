@@ -292,22 +292,34 @@ class RawNeuralDataset:
                         subject_channel_counts=subject_channel_counts,
                     )
 
-                chunk_path = (
-                    cache_path / f"lag_{lag}_chunk_{chunk_idx}_{os.getpid()}.npz"
+                chunk_path = cache_path / (
+                    f"lag_{lag}_chunk_{chunk_idx}_{os.getpid()}.npz"
                 )
+                temp_chunk_path = cache_path / (
+                    f".lag_{lag}_chunk_{chunk_idx}_{os.getpid()}.tmp.npz"
+                )
+                chunk_paths.append(temp_chunk_path)
                 np.savez(
-                    chunk_path,
+                    temp_chunk_path,
                     data=np.asarray(neural, dtype=np.float32),
                     targets=all_targets[row_positions],
                     row_positions=row_positions,
                 )
-                chunk_paths.append(chunk_path)
+                os.replace(temp_chunk_path, chunk_path)
+                chunk_paths[-1] = chunk_path
                 chunk_row_positions.append(row_positions)
                 del neural
         except Exception:
             for chunk_path in chunk_paths:
                 try:
                     chunk_path.unlink()
+                except FileNotFoundError:
+                    pass
+            for temp_chunk_path in cache_path.glob(
+                f".lag_{lag}_chunk_*_{os.getpid()}.tmp.npz"
+            ):
+                try:
+                    temp_chunk_path.unlink()
                 except FileNotFoundError:
                     pass
             raise

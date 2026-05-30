@@ -54,6 +54,6 @@ Model configs use `model_params.output_dim` for decoder output size across regre
 
 `mkdocs.yml` configures the documentation site built from `docs/`.
 
-`Makefile`, `setup.sh`, and `submit.sh` provide setup and execution conveniences for local or cluster workflows. `submit_diver_volume_lags.sh` submits DIVER volume-level lag batches with Slurm singleton dependencies so each config runs one lag batch at a time.
+`Makefile`, `setup.sh`, and `submit.sh` provide setup and execution conveniences for local or cluster workflows. `submit.sh` gives chunked preprocessing a job-local temporary cache directory and removes it on shell exit. `submit_diver_volume_lags.sh` submits DIVER volume-level lag batches with Slurm singleton dependencies so each config runs one lag batch at a time.
 
 `training_matrix.yaml` describes benchmark training coverage across models, tasks, and run modes.
