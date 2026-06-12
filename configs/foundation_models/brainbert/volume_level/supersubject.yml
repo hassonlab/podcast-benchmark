@@ -39,7 +39,7 @@ task_config:
     zero_phase: true
     allow_resample_audio: true
     window_size: 200.0
-    hop_size: 25.0
+    hop_size: 100.0
 training_params:
   tensorboard_logging: false
   batch_size: 4
