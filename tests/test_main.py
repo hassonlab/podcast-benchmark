@@ -24,6 +24,19 @@ class FixedDatetime:
         return "2026-04-23-12-34-56"
 
 
+class PickableRaw:
+    def __init__(self, name, ch_names):
+        self.name = name
+        self.ch_names = list(ch_names)
+
+    def copy(self):
+        return PickableRaw(self.name, self.ch_names)
+
+    def pick(self, picks):
+        self.ch_names = [ch for ch in self.ch_names if ch in picks]
+        return self
+
+
 @pytest.fixture
 def base_experiment_config(tmp_path):
     return ExperimentConfig(
@@ -195,8 +208,8 @@ def test_run_single_task_per_region_mode_splits_runs_by_region(
 ):
     base_experiment_config.run_mode = RunMode.PER_REGION
     raws = [
-        SimpleNamespace(name="raw-2", ch_names=["A1", "A2", "X9"]),
-        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+        PickableRaw(name="raw-2", ch_names=["A1", "A2", "X9"]),
+        PickableRaw(name="raw-5", ch_names=["B1"]),
     ]
     _configure_common_mocks(monkeypatch, raws, task_df)
 
@@ -250,7 +263,12 @@ def test_run_single_task_per_region_mode_splits_runs_by_region(
         2: ["A1"],
         5: ["B1"],
     }
-    assert first_args[1] == raws
+    first_raws = first_args[1]
+    assert [raw.ch_names for raw in first_raws] == [["A1"], ["B1"]]
+    assert first_raws[0] is not raws[0]
+    assert first_raws[1] is not raws[1]
+    assert setter_calls[0][2] == first_raws
+    assert getter_calls[0] == first_raws
 
     second_args, second_kwargs = training_calls[1]
     assert second_kwargs["output_dir"].endswith(
@@ -260,7 +278,13 @@ def test_run_single_task_per_region_mode_splits_runs_by_region(
     assert second_kwargs["task_config"].data_params.per_subject_electrodes == {
         2: ["A2"]
     }
-    assert second_args[1] == [raws[0]]
+    second_raws = second_args[1]
+    assert [raw.ch_names for raw in second_raws] == [["A2"]]
+    assert second_raws[0] is not raws[0]
+    assert second_raws[0] is not first_raws[0]
+    assert setter_calls[1][2] == second_raws
+    assert getter_calls[1] == second_raws
+    assert [raw.ch_names for raw in raws] == [["A1", "A2", "X9"], ["B1"]]
 
 
 def test_run_single_task_per_region_mode_filters_regions(
@@ -269,8 +293,8 @@ def test_run_single_task_per_region_mode_filters_regions(
     base_experiment_config.run_mode = RunMode.PER_REGION
     base_experiment_config.regions = ["Frontal/Opercular"]
     raws = [
-        SimpleNamespace(name="raw-2", ch_names=["A1", "A2", "X9"]),
-        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+        PickableRaw(name="raw-2", ch_names=["A1", "A2", "X9"]),
+        PickableRaw(name="raw-5", ch_names=["B1"]),
     ]
     _configure_common_mocks(monkeypatch, raws, task_df)
 
@@ -307,7 +331,9 @@ def test_run_single_task_per_region_mode_filters_regions(
     )
     assert list(kwargs["task_config"].data_params.subject_ids) == [2]
     assert kwargs["task_config"].data_params.per_subject_electrodes == {2: ["A2"]}
-    assert args[1] == [raws[0]]
+    assert [raw.ch_names for raw in args[1]] == [["A2"]]
+    assert args[1][0] is not raws[0]
+    assert raws[0].ch_names == ["A1", "A2", "X9"]
 
 
 def test_run_single_task_per_region_mode_rejects_unknown_region(

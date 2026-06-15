@@ -1,3 +1,4 @@
+import gc
 import time
 
 import numpy as np
@@ -159,29 +160,37 @@ def foundation_feature_cache(
         )
 
     start_time = time.time()
-    if mode == "normal":
-        features = _encode_normal(model, data_tensor, model_inputs, batch_size, device)
-    elif mode == "per_subject_feature_concat":
-        features = _encode_per_subject_concat(
-            model,
-            data_tensor,
-            model_inputs,
-            subject_channel_counts,
-            batch_size,
-            device,
-        )
-    else:
-        raise ValueError(
-            "foundation_feature_cache mode must be 'normal' or "
-            f"'per_subject_feature_concat', got {mode!r}."
-        )
+    try:
+        if mode == "normal":
+            features = _encode_normal(
+                model, data_tensor, model_inputs, batch_size, device
+            )
+        elif mode == "per_subject_feature_concat":
+            features = _encode_per_subject_concat(
+                model,
+                data_tensor,
+                model_inputs,
+                subject_channel_counts,
+                batch_size,
+                device,
+            )
+        else:
+            raise ValueError(
+                "foundation_feature_cache mode must be 'normal' or "
+                f"'per_subject_feature_concat', got {mode!r}."
+            )
 
-    print(
-        "Cached foundation features: "
-        f"{tuple(data_tensor.shape)} -> {tuple(features.shape)} "
-        f"in {time.time() - start_time:.2f}s"
-    )
-    return features.numpy().astype(np.float32, copy=False)
+        print(
+            "Cached foundation features: "
+            f"{tuple(data_tensor.shape)} -> {tuple(features.shape)} "
+            f"in {time.time() - start_time:.2f}s"
+        )
+        return features.numpy().astype(np.float32, copy=False)
+    finally:
+        del model, model_inputs, data_tensor
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
 
 def _iter_preprocessor_entries(data_params):

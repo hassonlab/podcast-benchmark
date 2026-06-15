@@ -303,7 +303,9 @@ def _build_run_units(experiment_config: ExperimentConfig, base_raws):
             region_subject_ids = []
             for subject_id, raw in zip(subject_ids, base_raws):
                 if subject_id in region_subjects:
-                    region_raws.append(raw)
+                    region_raws.append(
+                        raw.copy().pick(region_subjects[subject_id])
+                    )
                     region_subject_ids.append(subject_id)
 
             if not region_raws:

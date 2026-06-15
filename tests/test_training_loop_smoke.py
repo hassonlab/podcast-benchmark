@@ -21,6 +21,7 @@ import models.foundation_feature_preprocessor  # noqa: F401 - registers preproce
 import models.shared_preprocessors  # noqa: F401 - registers disk cache preprocessor
 import models.shared_decoders  # noqa: F401 - registers shared probe
 from utils import data_utils
+from utils import decoding_utils
 from utils.decoding_utils import run_training_over_lags
 
 SMOKE_STATS = {"preprocessor_calls": 0, "foundation_encode_calls": 0}
@@ -153,6 +154,40 @@ def test_run_training_over_lags_smoke_with_preprocessor(tmp_path):
     assert (checkpoint_dir / "lag_0" / "best_model_fold1.pt").exists()
     assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
     assert SMOKE_STATS["preprocessor_calls"] == 1
+
+
+def test_run_training_over_lags_releases_memory_after_each_lag(
+    tmp_path, monkeypatch
+):
+    cleanup_calls = []
+    monkeypatch.setattr(
+        decoding_utils,
+        "_release_accelerator_memory",
+        lambda: cleanup_calls.append(True),
+    )
+
+    output_dir = tmp_path / "multi_lag_results"
+    checkpoint_dir = tmp_path / "multi_lag_checkpoints"
+    run_training_over_lags(
+        [0, 1],
+        _fake_raws(),
+        _task_df(),
+        preprocessing_fns=None,
+        model_spec=ModelSpec(
+            constructor_name="smoke_flatten_regressor",
+            params={"output_dim": 1},
+        ),
+        task_name="smoke_task",
+        training_params=_training_params(),
+        task_config=_task_config(DataParams(window_width=0.004)),
+        output_dir=str(output_dir),
+        checkpoint_dir=str(checkpoint_dir),
+        write_to_tensorboard=False,
+    )
+
+    result = pd.read_csv(output_dir / "lag_performance.csv")
+    assert result["lags"].tolist() == [0, 1]
+    assert cleanup_calls == [True, True]
 
 
 def test_run_training_over_lags_smoke_with_chunked_preprocessing(tmp_path):

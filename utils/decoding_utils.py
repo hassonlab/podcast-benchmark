@@ -1,4 +1,5 @@
 from typing import Optional
+import gc
 import os
 import math
 import matplotlib.pyplot as plt
@@ -1157,6 +1158,12 @@ def _chunked_preprocessing_value(chunked_params, name, default=None):
     return getattr(chunked_params, name, default)
 
 
+def _release_accelerator_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def run_training_over_lags(
     lags,
     raws: list[mne.io.Raw],
@@ -1290,6 +1297,14 @@ def run_training_over_lags(
             [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
         )
         existing_df.to_csv(filename, index=False)
+
+        # Do not retain fold models and lag-sized tensors while preprocessing the
+        # next lag. Foundation feature extraction temporarily loads another large
+        # model, so overlapping these objects can exceed host or accelerator RAM.
+        del models, histories, cv_results, lag_metrics
+        if "neural_tensor" in locals():
+            del neural_tensor, targets_tensor, data_df, subject_channel_counts
+        _release_accelerator_memory()
 
 
 def check_model_train_eval_and_requires_grads(
