@@ -32,7 +32,8 @@ task_config:
         per_subject_feature_concat: false
         sub_models: {}
     chunked_preprocessing:
-      enabled: false
+      enabled: true
+      num_chunks: 5
   task_specific_config:
     audio_path: stimuli/podcast.wav
     target_sr: 512

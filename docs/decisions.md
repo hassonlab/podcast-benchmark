@@ -30,7 +30,7 @@ Chunk files are written through temporary filenames and atomically moved into pl
 
 DIVER volume-level lag sweeps can still create too much concurrent cache and scratch pressure when every lag batch is submitted independently. The dedicated Slurm helper submits those batches with `--dependency=singleton` and stable per-config job names, so each config advances through lag batches serially while different configs can still run in parallel.
 
-DIVER volume-level configs currently leave chunked preprocessing disabled by default. This keeps the feature tensor in RAM and avoids writing per-lag chunk caches; enable chunked preprocessing only for runs where memory pressure is a larger constraint than scratch pressure.
+DIVER volume-level configs use five temporary preprocessing chunks by default. This bounds peak memory while keeping each chunk large enough to avoid excessive disk-backed loader overhead; cluster submissions place these chunks in job-local temporary storage.
 
 ## Neural-Only Training Loop
 
