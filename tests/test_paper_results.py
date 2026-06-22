@@ -23,6 +23,7 @@ from scripts.generate_paper_results import (
     best_region_lag_rows,
     brain_map_colormap,
     brain_map_metric_config,
+    combine_lag_dataframes,
     configured_model_order,
     create_grouped_task_figure,
     draw_grouped_task_backgrounds,
@@ -73,6 +74,19 @@ def test_loads_current_style_super_subject(tmp_path):
     loaded = load_current_style_run(run_dir)
 
     assert loaded.to_dict("records") == [{"lags": 0, "score": 0.5}]
+
+
+def test_combine_lag_dataframes_keeps_latest_configured_duplicate_lag():
+    first = pd.DataFrame({"lags": [-100, 0], "score": [0.1, 0.2]})
+    second = pd.DataFrame({"lags": [0, 100], "score": [0.9, 1.0]})
+
+    combined = combine_lag_dataframes([first, second], "model/task/condition")
+
+    assert combined.to_dict("records") == [
+        {"lags": -100, "score": 0.1},
+        {"lags": 0, "score": 0.9},
+        {"lags": 100, "score": 1.0},
+    ]
 
 
 def test_half_peak_profile_exact_crossing_on_symmetric_curve():

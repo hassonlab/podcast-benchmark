@@ -256,14 +256,11 @@ def combine_lag_dataframes(frames: Sequence[pd.DataFrame], label: str) -> pd.Dat
     if "lags" not in combined.columns:
         return combined
 
-    duplicated_lags = combined.loc[combined["lags"].duplicated(), "lags"].unique()
-    if len(duplicated_lags):
-        duplicate_text = ", ".join(str(lag) for lag in sorted(duplicated_lags))
-        raise ValueError(
-            f"Multiple configured result directories for {label} contain duplicate "
-            f"lags: {duplicate_text}"
-        )
-    return combined.sort_values("lags").reset_index(drop=True)
+    return (
+        combined.drop_duplicates(subset="lags", keep="last")
+        .sort_values("lags")
+        .reset_index(drop=True)
+    )
 
 
 def average_subject_lag_dataframes(
