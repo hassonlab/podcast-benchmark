@@ -10,6 +10,7 @@ JOB_NAME ?= "$(PREFIX)-$(CONFIG_JOB_TAG)-$(USR)-$(DT)"
 
 # To run locally
 CMD = python
+PYTHON ?= python
 # To batch on slurm
 # CMD = sbatch --job-name=$(JOB_NAME) submit.sh
 
@@ -247,6 +248,19 @@ train-diver-volume-lags-sequential:
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
 
+# Submit all reruns affected by rebuilding df_word_onset_with_pos_class.csv.
+# Every job receives a unique trial name containing its model, task, run unit, and lag range.
+# Usage:
+#   make submit-word-label-reruns DRY_RUN=1
+#   make submit-word-label-reruns
+#   make submit-word-label-reruns SBATCH_FLAGS='-p gpu --time=24:00:00'
+submit-word-label-reruns:
+	@args=""; \
+	if [ -n "$(DRY_RUN)" ]; then args="$$args --dry-run"; fi; \
+	$(PYTHON) scripts/submit_word_label_reruns.py \
+		--sbatch-flags "$(SBATCH_FLAGS)" \
+		$$args
+
 # Development and testing targets
 setup:
 	./setup.sh
@@ -294,4 +308,4 @@ test:
 clean-env:
 	rm -rf decoding_env test_env
 
-.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups train-diver-volume-lags-sequential
+.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups train-diver-volume-lags-sequential submit-word-label-reruns
