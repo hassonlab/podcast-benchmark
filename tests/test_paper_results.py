@@ -300,7 +300,7 @@ def test_load_results_combines_per_subject_path_lists_by_disjoint_subjects(tmp_p
     assert np.allclose(df["score"].tolist(), [0.6])
 
 
-def test_load_results_rejects_duplicate_per_subject_lags(tmp_path):
+def test_load_results_keeps_latest_configured_duplicate_per_subject_lag(tmp_path):
     first_run = tmp_path / "subjects_first"
     second_run = tmp_path / "subjects_second"
     write_lag_csv(first_run / "subject_1" / "lag_performance.csv", [{"lags": 0, "score": 0.4}])
@@ -315,8 +315,10 @@ def test_load_results_rejects_duplicate_per_subject_lags(tmp_path):
         }
     }
 
-    with pytest.raises(ValueError, match="baseline/task/per_subject/subject_1"):
-        load_results(config)
+    loaded = load_results(config)
+
+    df = loaded["per_subject"]["task"]["baseline"]
+    assert df.to_dict("records") == [{"lags": 0, "score": 0.8}]
 
 
 def test_discovers_per_region_specs_from_existing_results_dictionary():
@@ -424,7 +426,7 @@ def test_loads_per_region_results_combines_configured_path_lists_by_region_and_l
     assert model_results["EAC"].to_dict("records") == [{"lags": 0, "score": 0.7}]
 
 
-def test_loads_per_region_results_rejects_duplicate_region_lags(tmp_path):
+def test_loads_per_region_results_keeps_latest_configured_duplicate_lag(tmp_path):
     first_run = tmp_path / "regions_first"
     second_run = tmp_path / "regions_second"
     write_lag_csv(
@@ -445,8 +447,11 @@ def test_loads_per_region_results_rejects_duplicate_region_lags(tmp_path):
         }
     }
 
-    with pytest.raises(ValueError, match="baseline/task/per_region/MTG"):
-        load_per_region_results(config)
+    loaded = load_per_region_results(config)
+
+    assert loaded["task"]["baseline"]["MTG"].to_dict("records") == [
+        {"lags": 0, "score": 0.6}
+    ]
 
 
 def test_configured_model_order_follows_results_order_and_appends_unknown():

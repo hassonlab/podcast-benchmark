@@ -1,0 +1,114 @@
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz
+checkpoint_dir: checkpoints
+config_setter_name:
+- neural_conv
+format_fields: null
+model_spec:
+  checkpoint_path: null
+  constructor_name: ensemble_pitom_model
+  feature_cache: false
+  model_data_getter: null
+  params:
+    conv_filters: 128
+    dropout: 0.2
+    embedding_dim: 5
+    num_models: 10
+    output_activation: softmax
+  per_subject_feature_concat: false
+  sub_models: {}
+output_dir: results
+regions:
+- EAC
+- IFG
+- ITG
+- MTG
+- PC
+- PRC
+- RIGHT
+- TP
+- TPJ
+run_mode: per_region
+task_config:
+  data_params:
+    channel_reg_ex: null
+    chunked_preprocessing:
+      cache_dir: .cache/preprocessed_chunks
+      enabled: false
+      num_chunks: 1
+    data_root: data
+    do_drop_bads: true
+    electrode_file_path: null
+    per_subject_electrodes: null
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 8
+    signal_unit: null
+    subject_ids:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    target_sr: null
+    task_params: {}
+    use_high_gamma: true
+    use_lip_coords: false
+    window_width: 1.0
+    word_column: null
+  task_name: pos_task
+  task_specific_config:
+    input_fields: null
+    pos_path: processed_data/df_word_onset_with_pos_class.csv
+    required_config_setter_names: null
+tensorboard_dir: event_logs
+training_params:
+  batch_size: 32
+  clip_grad_norm: 0.0
+  cosine_eta_min_factor: 0.01
+  cudnn_deterministic: false
+  early_stopping_metric: roc_auc_multiclass
+  early_stopping_patience: 10
+  epochs: 100
+  fold_ids: null
+  fold_type: sequential_folds
+  grad_accumulation_steps: 1
+  lag: null
+  lag_step_size: 25
+  learning_rate: 0.001
+  loss_name: null
+  loss_weights:
+  - 1.0
+  losses:
+  - cross_entropy
+  lr_scheduler: null
+  max_lag: 1025
+  metrics:
+  - roc_auc_multiclass
+  - f1
+  - confusion_matrix
+  min_lag: -1000
+  min_test_freq_auc: -1
+  min_train_freq_auc: 5
+  n_folds: 5
+  normalize_targets: false
+  optimizer: AdamW
+  random_seed: 42
+  scheduler_params:
+    factor: 0.5
+    min_lr: 1e-6
+    patience: 10
+  shuffle_targets: false
+  smaller_is_better: false
+  tensorboard_logging: false
+  top_k_thresholds:
+  - 1
+  - 5
+  - 10
+  use_lr_scheduler: true
+  visualize_fold_distribution: false
+  weight_decay: 0.0001
+trial_name: baseline_pos_per_region

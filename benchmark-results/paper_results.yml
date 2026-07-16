@@ -17,12 +17,36 @@ plotting:
   - super_subject
   - per_subject
   lag_plot_xlim:
-  - -800
-  - 800
+  - -1000
+  - 1000
   lag_curve_models:
   - baseline
+  - linear
+  - brainbert
+  - diver
+  - popt
   valid_best_lags:
+  - -1000
+  - -900
+  - -800
+  - -700
+  - -600
+  - -500
+  - -400
+  - -300
+  - -200
+  - -100
   - 0
+  - 100
+  - 200
+  - 300
+  - 400
+  - 500
+  - 600
+  - 700
+  - 800
+  - 900
+  - 1000
   best_lag_model_bar_textures:
     baseline: ///
     linear: ///
@@ -37,27 +61,6 @@ plotting:
     ignore_right_hemisphere: true
     colormaps:
       default: hot
-    bounds:
-      content_noncontent:
-        min: 0.55
-      gpt_surprise:
-        min: 0.0
-      gpt_surprise_multiclass:
-        min: 0.5
-      iu_boundary:
-        min: 0.7
-      llm_decoding:
-        min: -4.3
-      pos:
-        min: 0.5
-      sentence_onset:
-        min: 0.75
-      volume_level:
-        min: 0.2
-      whisper_embedding:
-        min: 0.5
-      word_embedding:
-        min: 0.6
   include_error_bars: true
   check_best_lag_significance: false
   correct_best_lag_significance: false
@@ -87,7 +90,7 @@ plotting:
     llm_embedding_pretraining: LLM Embedding Pretraining
     pos: Part of Speech
     sentence_onset: Sentence Onset
-    volume_level: Audio Intensity
+    volume_level: Audio Envelope
     whisper_embedding: Whisper Embedding
     word_embedding: Word Embedding
   model_display_names:
@@ -137,7 +140,7 @@ metrics:
     higher_is_better: true
     label: Correlation
     min: 0.0
-    max: 0.7
+    max: 0.9
   whisper_embedding:
     column: test_pairwise_accuracy_mean
     higher_is_better: true
@@ -152,137 +155,143 @@ metrics:
     chance_level: 0.5
     min: 0.49
     max: 0.95
+cleaning:
+  lag_bounds:
+    diver:
+      volume_level:
+        min: -1000
+        max: 1000
 results:
   linear:
     content_noncontent:
-      per_subject: benchmark-results/linear/content_noncontent/per_subject
-      super_subject: benchmark-results/linear/content_noncontent/super_subject
-    gpt_surprise_multiclass:
-      per_subject: benchmark-results/linear/gpt_surprise_multiclass/per_subject
-      super_subject: benchmark-results/linear/gpt_surprise_multiclass/super_subject
+      per_subject: test-results/linear/content_noncontent/per_subject
+      super_subject: test-results/linear/content_noncontent/super_subject
     iu_boundary:
-      per_subject: benchmark-results/linear/iu_boundary/per_subject
-      super_subject: benchmark-results/linear/iu_boundary/super_subject
+      per_subject: test-results/linear/iu_boundary/per_subject
+      super_subject: test-results/linear/iu_boundary/super_subject
     sentence_onset:
-      per_subject: benchmark-results/linear/sentence_onset/per_subject
-      super_subject: benchmark-results/linear/sentence_onset/super_subject
-    whisper_embedding:
-      super_subject: benchmark-results/linear/whisper_embedding/super_subject
-      per_subject: benchmark-results/linear/whisper_embedding/per_subject
+      per_subject: test-results/linear/sentence_onset/per_subject
+      super_subject: test-results/linear/sentence_onset/super_subject
     word_embedding:
-      super_subject: benchmark-results/linear/word_embedding/super_subject
-      per_subject: benchmark-results/linear/word_embedding/per_subject
-    volume_level:
-      per_subject: benchmark-results/linear/volume_level/per_subject
-      super_subject: benchmark-results/linear/volume_level/super_subject
+      per_subject: test-results/linear/word_embedding/per_subject
+      super_subject: test-results/linear/word_embedding/super_subject
+    whisper_embedding:
+      per_subject: test-results/linear/whisper_embedding/per_subject
+      super_subject: test-results/linear/whisper_embedding/super_subject
     pos:
-      per_subject: benchmark-results/linear/pos/per_subject
-      super_subject: benchmark-results/linear/pos/super_subject
+      per_subject: test-results/linear/pos/per_subject
+      super_subject: test-results/linear/pos/super_subject
+    volume_level:
+      per_subject: test-results/linear/volume_level/per_subject
+      super_subject: test-results/linear/volume_level/super_subject
+    gpt_surprise_multiclass:
+      per_subject: test-results/linear/gpt_surprise_multiclass/per_subject
+      super_subject: test-results/linear/gpt_surprise_multiclass/super_subject
   baseline:
     content_noncontent:
-      per_subject: benchmark-results/baseline/content_noncontent/per_subject
-      per_region: benchmark-results/baseline/content_noncontent/per_region
-      super_subject: benchmark-results/baseline/content_noncontent/super_subject
+      per_region: test-results/baseline/content_noncontent/per_region
+      per_subject: test-results/baseline/content_noncontent/per_subject
+      super_subject: test-results/baseline/content_noncontent/super_subject
     gpt_surprise_multiclass:
-      per_subject: benchmark-results/baseline/gpt_surprise_multiclass/per_subject
-      per_region: benchmark-results/baseline/gpt_surprise_multiclass/per_region
-      super_subject: benchmark-results/baseline/gpt_surprise_multiclass/super_subject
+      per_region: test-results/baseline/gpt_surprise_multiclass/per_region
+      per_subject: test-results/baseline/gpt_surprise_multiclass/per_subject
+      super_subject: test-results/baseline/gpt_surprise_multiclass/super_subject
     iu_boundary:
-      per_subject: benchmark-results/baseline/iu_boundary/per_subject
-      per_region: benchmark-results/baseline/iu_boundary/per_region
-      super_subject: benchmark-results/baseline/iu_boundary/super_subject
-    sentence_onset:
-      per_subject: benchmark-results/baseline/sentence_onset/per_subject
-      per_region: benchmark-results/baseline/sentence_onset/per_region
-      super_subject: benchmark-results/baseline/sentence_onset/super_subject
-    whisper_embedding:
-      per_subject: benchmark-results/baseline/whisper_embedding/per_subject
-      per_region: benchmark-results/baseline/whisper_embedding/per_region
-      super_subject: benchmark-results/baseline/whisper_embedding/super_subject
-    word_embedding:
-      per_subject: benchmark-results/baseline/word_embedding/per_subject
-      per_region: benchmark-results/baseline/word_embedding/per_region
-      super_subject: benchmark-results/baseline/word_embedding/super_subject
+      per_region: test-results/baseline/iu_boundary/per_region
+      per_subject: test-results/baseline/iu_boundary/per_subject
+      super_subject: test-results/baseline/iu_boundary/super_subject
     volume_level:
-      per_subject: benchmark-results/baseline/volume_level/per_subject
-      per_region: benchmark-results/baseline/volume_level/per_region
-      super_subject: benchmark-results/baseline/volume_level/super_subject
+      per_region: test-results/baseline/volume_level/per_region
+      per_subject: test-results/baseline/volume_level/per_subject
+      super_subject: test-results/baseline/volume_level/super_subject
     pos:
-      per_subject: benchmark-results/baseline/pos/per_subject
-      per_region: benchmark-results/baseline/pos/per_region
-      super_subject: benchmark-results/baseline/pos/super_subject
+      per_region: test-results/baseline/pos/per_region
+      per_subject: test-results/baseline/pos/per_subject
+      super_subject: test-results/baseline/pos/super_subject
+    sentence_onset:
+      per_region: test-results/baseline/sentence_onset/per_region
+      per_subject: test-results/baseline/sentence_onset/per_subject
+      super_subject: test-results/baseline/sentence_onset/super_subject
+    whisper_embedding:
+      per_region: test-results/baseline/whisper_embedding/per_region
+      per_subject: test-results/baseline/whisper_embedding/per_subject
+      super_subject: test-results/baseline/whisper_embedding/super_subject
+    word_embedding:
+      per_region: test-results/baseline/word_embedding/per_region
+      per_subject: test-results/baseline/word_embedding/per_subject
+      super_subject: test-results/baseline/word_embedding/super_subject
   popt:
     content_noncontent:
-      per_subject: benchmark-results/popt/content_noncontent/per_subject
-      super_subject: benchmark-results/popt/content_noncontent/super_subject
+      per_subject: test-results/popt/content_noncontent/per_subject
+      super_subject: test-results/popt/content_noncontent/super_subject
     gpt_surprise_multiclass:
-      per_subject: benchmark-results/popt/gpt_surprise_multiclass/per_subject
-      super_subject: benchmark-results/popt/gpt_surprise_multiclass/super_subject
+      per_subject: test-results/popt/gpt_surprise_multiclass/per_subject
+      super_subject: test-results/popt/gpt_surprise_multiclass/super_subject
     iu_boundary:
-      per_subject: benchmark-results/popt/iu_boundary/per_subject
-      super_subject: benchmark-results/popt/iu_boundary/super_subject
+      per_subject: test-results/popt/iu_boundary/per_subject
+      super_subject: test-results/popt/iu_boundary/super_subject
     pos:
-      per_subject: benchmark-results/popt/pos/per_subject
-      super_subject: benchmark-results/popt/pos/super_subject
+      per_subject: test-results/popt/pos/per_subject
+      super_subject: test-results/popt/pos/super_subject
     sentence_onset:
-      per_subject: benchmark-results/popt/sentence_onset/per_subject
-      super_subject: benchmark-results/popt/sentence_onset/super_subject
-    whisper_embedding:
-      per_subject: benchmark-results/popt/whisper_embedding/per_subject
-      super_subject: benchmark-results/popt/whisper_embedding/super_subject
+      per_subject: test-results/popt/sentence_onset/per_subject
+      super_subject: test-results/popt/sentence_onset/super_subject
     volume_level:
-      per_subject: benchmark-results/popt/volume_level/per_subject
-      super_subject: benchmark-results/popt/volume_level/super_subject
+      per_subject: test-results/popt/volume_level/per_subject
+      super_subject: test-results/popt/volume_level/super_subject
+    whisper_embedding:
+      per_subject: test-results/popt/whisper_embedding/per_subject
+      super_subject: test-results/popt/whisper_embedding/super_subject
     word_embedding:
-      per_subject: benchmark-results/popt/word_embedding/per_subject
-      super_subject: benchmark-results/popt/word_embedding/super_subject
+      per_subject: test-results/popt/word_embedding/per_subject
+      super_subject: test-results/popt/word_embedding/super_subject
   brainbert:
     content_noncontent:
-      per_subject: benchmark-results/brainbert/content_noncontent/per_subject
-      super_subject: benchmark-results/brainbert/content_noncontent/super_subject
+      per_subject: test-results/brainbert/content_noncontent/per_subject
+      super_subject: test-results/brainbert/content_noncontent/super_subject
     gpt_surprise_multiclass:
-      per_subject: benchmark-results/brainbert/gpt_surprise_multiclass/per_subject
-      super_subject: benchmark-results/brainbert/gpt_surprise_multiclass/super_subject
+      per_subject: test-results/brainbert/gpt_surprise_multiclass/per_subject
+      super_subject: test-results/brainbert/gpt_surprise_multiclass/super_subject
     iu_boundary:
-      per_subject: benchmark-results/brainbert/iu_boundary/per_subject
-      super_subject: benchmark-results/brainbert/iu_boundary/super_subject
+      per_subject: test-results/brainbert/iu_boundary/per_subject
+      super_subject: test-results/brainbert/iu_boundary/super_subject
     pos:
-      per_subject: benchmark-results/brainbert/pos/per_subject
-      super_subject: benchmark-results/brainbert/pos/super_subject
+      per_subject: test-results/brainbert/pos/per_subject
+      super_subject: test-results/brainbert/pos/super_subject
     sentence_onset:
-      per_subject: benchmark-results/brainbert/sentence_onset/per_subject
-      super_subject: benchmark-results/brainbert/sentence_onset/super_subject
-    whisper_embedding:
-      per_subject: benchmark-results/brainbert/whisper_embedding/per_subject
-      super_subject: benchmark-results/brainbert/whisper_embedding/super_subject
-    word_embedding:
-      per_subject: benchmark-results/brainbert/word_embedding/per_subject
-      super_subject: benchmark-results/brainbert/word_embedding/super_subject
+      per_subject: test-results/brainbert/sentence_onset/per_subject
+      super_subject: test-results/brainbert/sentence_onset/super_subject
     volume_level:
-      per_subject: benchmark-results/brainbert/volume_level/per_subject
-      super_subject: benchmark-results/brainbert/volume_level/super_subject
+      per_subject: test-results/brainbert/volume_level/per_subject
+      super_subject: test-results/brainbert/volume_level/super_subject
+    whisper_embedding:
+      per_subject: test-results/brainbert/whisper_embedding/per_subject
+      super_subject: test-results/brainbert/whisper_embedding/super_subject
+    word_embedding:
+      per_subject: test-results/brainbert/word_embedding/per_subject
+      super_subject: test-results/brainbert/word_embedding/super_subject
   diver:
     content_noncontent:
-      per_subject: benchmark-results/diver/content_noncontent/per_subject
-      super_subject: benchmark-results/diver/content_noncontent/super_subject
+      per_subject: test-results/diver/content_noncontent/per_subject
+      super_subject: test-results/diver/content_noncontent/super_subject
     gpt_surprise_multiclass:
-      per_subject: benchmark-results/diver/gpt_surprise_multiclass/per_subject
-      super_subject: benchmark-results/diver/gpt_surprise_multiclass/super_subject
+      per_subject: test-results/diver/gpt_surprise_multiclass/per_subject
+      super_subject: test-results/diver/gpt_surprise_multiclass/super_subject
     iu_boundary:
-      per_subject: benchmark-results/diver/iu_boundary/per_subject
-      super_subject: benchmark-results/diver/iu_boundary/super_subject
+      per_subject: test-results/diver/iu_boundary/per_subject
+      super_subject: test-results/diver/iu_boundary/super_subject
     pos:
-      per_subject: benchmark-results/diver/pos/per_subject
-      super_subject: benchmark-results/diver/pos/super_subject
+      per_subject: test-results/diver/pos/per_subject
+      super_subject: test-results/diver/pos/super_subject
     sentence_onset:
-      per_subject: benchmark-results/diver/sentence_onset/per_subject
-      super_subject: benchmark-results/diver/sentence_onset/super_subject
-    whisper_embedding:
-      per_subject: benchmark-results/diver/whisper_embedding/per_subject
-      super_subject: benchmark-results/diver/whisper_embedding/super_subject
-    word_embedding:
-      per_subject: benchmark-results/diver/word_embedding/per_subject
-      super_subject: benchmark-results/diver/word_embedding/super_subject
+      per_subject: test-results/diver/sentence_onset/per_subject
+      super_subject: test-results/diver/sentence_onset/super_subject
     volume_level:
-      per_subject: benchmark-results/diver/volume_level/per_subject
-      super_subject: benchmark-results/diver/volume_level/super_subject
+      per_subject: test-results/diver/volume_level/per_subject
+      super_subject: test-results/diver/volume_level/super_subject
+    whisper_embedding:
+      per_subject: test-results/diver/whisper_embedding/per_subject
+      super_subject: test-results/diver/whisper_embedding/super_subject
+    word_embedding:
+      per_subject: test-results/diver/word_embedding/per_subject
+      super_subject: test-results/diver/word_embedding/super_subject

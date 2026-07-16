@@ -39,3 +39,5 @@ The shared training loop no longer runs auxiliary sklearn/Himalaya baseline esti
 ## YAML Experiment Configuration
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.
+
+Paper-result consolidation may use explicit model/task lag bounds under `cleaning.lag_bounds`. Filtering is performed before coverage validation and runnable-config generation so a deliberately narrower analysis range does not require rewriting source result CSVs.
