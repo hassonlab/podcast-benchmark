@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.build_word_labels import build_parser, sentence_of, surprise_classes
+from scripts.build_word_labels import build_parser, sentence_of, surprise_classes, tag_by_sentence
 
 
 def sentences(*texts):
@@ -47,3 +47,24 @@ def test_surprise_classes_use_mean_plus_or_minus_sample_std():
 
     # mean=5 and sample std=sqrt(13), so only 0 and 10 lie outside mean +/- std.
     assert result.tolist() == [0, 1, 1, 1, 2]
+
+
+def test_tag_by_sentence_uses_spacy_tags_and_first_token_ownership():
+    class Token:
+        def __init__(self, idx, tag):
+            self.idx = idx
+            self.tag_ = tag
+
+    class FakeNLP:
+        def pipe(self, texts):
+            assert list(texts) == ["Intro", "don't stop"]
+            return iter([
+                [Token(0, "NN")],
+                [Token(0, "VB"), Token(2, "RB"), Token(6, "VB")],
+            ])
+
+    words = np.array(["Intro", "don't", "stop"])
+
+    result = tag_by_sentence(words, np.array([-1, 0, 0]), nlp=FakeNLP())
+
+    assert result.tolist() == ["NN", "VB", "VB"]

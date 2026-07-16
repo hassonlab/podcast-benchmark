@@ -6,7 +6,7 @@ same row by construction.
 
 Two things are done better than a naive re-tag:
 
-  * Words are tagged **one sentence at a time**, by globally aligning the text in
+  * Words are tagged with spaCy **one sentence at a time**, by globally aligning the text in
     `processed_data/all_sentences_podcast.csv` to the transcript. Timestamp spans overlap and
     differ slightly through rounding, so text establishes linguistic sentence membership while
     omitted transcript words are tagged in separate contiguous runs. The transcript has only 2
@@ -16,6 +16,7 @@ Two things are done better than a naive re-tag:
     (-sum log2 p), which is the probability of the whole word rather than of its first token.
 
 Usage:
+    python -m spacy download en_core_web_sm  # once per environment
     python scripts/build_word_labels.py
     python scripts/build_word_labels.py --out /path/to/word_labels.csv
 """
@@ -120,18 +121,25 @@ def sentence_of(words, sentences):
     return sid
 
 
-def tag_by_sentence(words, sid):
-    """POS-tag each sentence separately, so the tagger sees real sentence boundaries.
+def tag_by_sentence(words, sid, nlp=None, model="en_core_web_sm"):
+    """POS-tag each sentence separately with spaCy.
 
-    The tokenizer splits clitics (`don't` -> `do` + `n't`), so tokens and words are NOT 1:1.
-    Here every token remembers which word emitted it (`owner`), and a word takes the
-    tag of its own first token.
+    spaCy can split a transcript word into multiple tokens (`don't` -> `do` + `n't`), so
+    tokens and transcript words are not necessarily 1:1. Character offsets retain the word
+    that emitted each token, and a word takes the detailed Penn tag of its first token.
     """
-    import nltk
-    from nltk.tokenize import TreebankWordTokenizer
+    if nlp is None:
+        import spacy
 
-    tk = TreebankWordTokenizer()
-    tags = np.empty(len(words), dtype=object)
+        try:
+            nlp = spacy.load(model, disable=["ner"])
+        except OSError as exc:
+            raise RuntimeError(
+                f"spaCy model {model!r} is not installed; run "
+                f"`python -m spacy download {model}`"
+            ) from exc
+
+    tags = np.full(len(words), None, dtype=object)
     # Keep each contiguous run of unannotated transcript words separate. Combining all -1 words
     # would invent tagger context between unrelated parts of the podcast.
     tag_groups = sid.copy()
@@ -140,18 +148,24 @@ def tag_by_sentence(words, sid):
         run = np.cumsum(np.r_[True, np.diff(outside) != 1])
         tag_groups[outside] = -run
 
+    groups = []
     for s in np.unique(tag_groups):
         idx = np.where(tag_groups == s)[0]
-        toks, owner = [], []
-        for i in idx:
-            sub = tk.tokenize(clean(words[i])) or [clean(words[i])]
-            toks += sub
-            owner += [i] * len(sub)
+        parts = [clean(words[i]) for i in idx]
+        starts = np.cumsum([0] + [len(part) + 1 for part in parts[:-1]])
+        ends = starts + np.array([len(part) for part in parts])
+        groups.append((idx, starts, ends, " ".join(parts)))
+
+    for (idx, starts, ends, _), doc in zip(groups, nlp.pipe(g[-1] for g in groups)):
         seen = set()
-        for (_, tg), o in zip(nltk.pos_tag(toks), owner):
-            if o not in seen:  # the word's first token carries its tag
-                tags[o] = tg
-                seen.add(o)
+        for token in doc:
+            local_idx = int(np.searchsorted(ends, token.idx, side="right"))
+            if local_idx >= len(idx) or token.idx < starts[local_idx]:
+                continue
+            owner = idx[local_idx]
+            if owner not in seen:  # the word's first token carries its tag
+                tags[owner] = token.tag_
+                seen.add(owner)
     assert all(t is not None for t in tags), "every word must receive a tag"
     return tags
 
