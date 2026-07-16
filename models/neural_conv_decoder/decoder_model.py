@@ -229,7 +229,7 @@ class Decoder_Mlp(nn.Module):
 def pitom_model(model_params):
     return PitomModel(
         input_channels=model_params["input_channels"],
-        output_dim=model_params["embedding_dim"],
+        output_dim=model_params.get("output_dim", model_params.get("embedding_dim")),
         conv_filters=model_params["conv_filters"],
         dropout=model_params["dropout"],
         output_activation=model_params.get("output_activation", "tanh"),
@@ -241,7 +241,7 @@ def ensemble_pitom_model(model_params):
     return EnsemblePitomModel(
         num_models=model_params["num_models"],
         input_channels=model_params["input_channels"],
-        output_dim=model_params["embedding_dim"],
+        output_dim=model_params.get("output_dim", model_params.get("embedding_dim")),
         conv_filters=model_params["conv_filters"],
         dropout=model_params["dropout"],
         output_activation=model_params.get("output_activation", "tanh"),
@@ -252,7 +252,7 @@ def ensemble_pitom_model(model_params):
 def decoder_mlp(model_params):
     return Decoder_Mlp(
         input_channels=model_params["input_channels"],
-        output_dim=model_params["embedding_dim"],
+        output_dim=model_params.get("output_dim", model_params.get("embedding_dim")),
         input_timesteps=model_params["input_timesteps"],
         dropout=model_params["dropout"],
         output_activation=model_params.get("output_activation", "tanh"),

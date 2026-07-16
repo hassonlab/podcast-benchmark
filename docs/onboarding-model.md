@@ -79,7 +79,7 @@ def ensemble_pitom_model(params):
     return EnsemblePitomModel(
         num_models=params['num_models'],
         input_channels=params['input_channels'],
-        output_dim=params['embedding_dim'],
+        output_dim=params['output_dim'],
         conv_filters=params['conv_filters'],
         dropout=params['dropout']
     )
@@ -402,7 +402,7 @@ def config_setter(
 config_setter_name: my_model
 
 # Multiple setters (applied in order)
-config_setter_name: [set_input_channels, set_embedding_dim, initialize_model]
+config_setter_name: [set_input_channels, set_output_dim, initialize_model]
 ```
 
 This is useful for:

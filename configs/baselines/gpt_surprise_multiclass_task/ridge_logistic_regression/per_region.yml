@@ -21,7 +21,6 @@ training_params:
   - roc_auc_multiclass
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
-  ridge_logistic_regression_baseline: true
   tensorboard_logging: false
   weight_decay: 0.001
   learning_rate: 0.05
@@ -33,3 +32,4 @@ model_spec:
     activation: softmax
 trial_name: ridge_logistic_regression_gpt_surprise_multiclass_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

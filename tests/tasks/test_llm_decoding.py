@@ -97,7 +97,7 @@ class TestLLMDecodingConfigSetter:
             ),
             model_spec=ModelSpec(
                 constructor_name="ensemble_pitom_model",
-                params={"embedding_dim": 768},
+                params={"output_dim": 768},
             ),
         )
 
@@ -224,9 +224,7 @@ class TestLLMDecodingTokenAlignment:
         temp_file.close()
         return temp_file.name
 
-    def create_task_config(
-        self, transcript_path, max_context=8, max_target_tokens=4
-    ):
+    def create_task_config(self, transcript_path, max_context=8, max_target_tokens=4):
         """Helper to create a TaskConfig with proper structure."""
         return TaskConfig(
             task_name="llm_decoding",

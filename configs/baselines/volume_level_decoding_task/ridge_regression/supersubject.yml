@@ -1,3 +1,5 @@
+config_setter_name:
+- set_input_channels
 task_config:
   task_name: volume_level_decoding_task
   data_params:
@@ -5,8 +7,10 @@ task_config:
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: true
     channel_reg_ex: null
-    window_width: 0.2
-    preprocessing_fn_name: window_rms
+    window_width: 1.0
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 16
   task_specific_config:
     audio_path: stimuli/podcast.wav
     cutoff_hz: 8.0
@@ -31,7 +35,6 @@ training_params:
   - corr
   early_stopping_metric: r2
   smaller_is_better: false
-  ridge_regression_baseline: true
   tensorboard_logging: false
   weight_decay: 0.001
   learning_rate: 0.05
@@ -39,6 +42,7 @@ model_spec:
   constructor_name: 'torch_linear_model'
   params:
     output_dim: 1
+    num_timepoints: 6
     bias: true
     activation: linear
 trial_name: ridge_regression_volume_level_supersubject

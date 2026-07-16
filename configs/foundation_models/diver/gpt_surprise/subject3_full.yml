@@ -1,18 +1,13 @@
-config_setter_name: diver_finetune
+config_setter_name: foundation_feature_cache
 model_spec:
-  constructor_name: diver_finetune
+  constructor_name: mlp_probe_decoder
   params:
-    d_model: 256
-    deepspeed_pth_format: true
-    e_layer: 12
-    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-    freeze_foundation: true
-    ft_config: flatten_linear
-    ft_mup: false
-    mup_weights: true
+    layer_sizes:
+    - 1
+    dropout: 0.0
+    use_layer_norm: true
     output_dim: 1
-    patch_sampling_rate: 500
-    patch_size: 50
+    embedding_dim: 1
   sub_models: {}
 task_config:
   data_params:
@@ -27,10 +22,33 @@ task_config:
     - 3
     channel_reg_ex: null
     per_subject_electrodes: null
+    preprocessing_fn_name:
+    - foundation_feature_cache
+    preprocessor_params:
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: diver_finetune
+      foundation_model_spec:
+        constructor_name: diver_finetune
+        params:
+          d_model: 256
+          deepspeed_pth_format: true
+          e_layer: 12
+          foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+          ft_config: flatten_linear
+          ft_mup: false
+          mup_weights: true
+          patch_sampling_rate: 500
+          patch_size: 50
+          feature_cache: true
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
   task_name: gpt_surprise_task
   task_specific_config:
     content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: mse
   early_stopping_patience: 10

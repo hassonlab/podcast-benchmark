@@ -952,13 +952,16 @@ class TestPartialFormat:
 
     def test_format_complex_path(self):
         """Test formatting a complex file path."""
-        template = "{base_dir}/experiments/{experiment}/lag_{lag}/fold_{fold}/checkpoint.pt"
-        result = partial_format(
-            template,
-            base_dir="/home/user/data",
-            experiment="exp_001"
+        template = (
+            "{base_dir}/experiments/{experiment}/lag_{lag}/fold_{fold}/checkpoint.pt"
         )
-        assert result == "/home/user/data/experiments/exp_001/lag_{lag}/fold_{fold}/checkpoint.pt"
+        result = partial_format(
+            template, base_dir="/home/user/data", experiment="exp_001"
+        )
+        assert (
+            result
+            == "/home/user/data/experiments/exp_001/lag_{lag}/fold_{fold}/checkpoint.pt"
+        )
 
     def test_format_consecutive_variables(self):
         """Test formatting with consecutive variables."""
@@ -974,7 +977,7 @@ class TestInterpolatePrevCheckpointDir:
         """Test interpolating prev_checkpoint_dir in a simple checkpoint path."""
         spec = ModelSpec(
             constructor_name="test_model",
-            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+            checkpoint_path="{prev_checkpoint_dir}/model.pt",
         )
 
         result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
@@ -987,18 +990,20 @@ class TestInterpolatePrevCheckpointDir:
         """Test that other format variables like {lag} and {fold} are preserved."""
         spec = ModelSpec(
             constructor_name="test_model",
-            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
+            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt",
         )
 
         result = interpolate_prev_checkpoint_dir(spec, "checkpoints/pretrain/run_123")
 
-        assert result.checkpoint_path == "checkpoints/pretrain/run_123/lag_{lag}/best_model_fold{fold}.pt"
+        assert (
+            result.checkpoint_path
+            == "checkpoints/pretrain/run_123/lag_{lag}/best_model_fold{fold}.pt"
+        )
 
     def test_interpolate_without_prev_checkpoint_dir_variable(self):
         """Test that paths without {prev_checkpoint_dir} are unchanged."""
         spec = ModelSpec(
-            constructor_name="test_model",
-            checkpoint_path="/absolute/path/model.pt"
+            constructor_name="test_model", checkpoint_path="/absolute/path/model.pt"
         )
 
         result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
@@ -1007,10 +1012,7 @@ class TestInterpolatePrevCheckpointDir:
 
     def test_interpolate_with_none_checkpoint_path(self):
         """Test handling of None checkpoint_path."""
-        spec = ModelSpec(
-            constructor_name="test_model",
-            checkpoint_path=None
-        )
+        spec = ModelSpec(constructor_name="test_model", checkpoint_path=None)
 
         result = interpolate_prev_checkpoint_dir(spec, "/path/to/prev")
 
@@ -1020,72 +1022,87 @@ class TestInterpolatePrevCheckpointDir:
         """Test that ValueError is raised when prev_checkpoint_dir is needed but not provided."""
         spec = ModelSpec(
             constructor_name="test_model",
-            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+            checkpoint_path="{prev_checkpoint_dir}/model.pt",
         )
 
-        with pytest.raises(ValueError, match="no previous checkpoint directory available"):
+        with pytest.raises(
+            ValueError, match="no previous checkpoint directory available"
+        ):
             interpolate_prev_checkpoint_dir(spec, None)
 
     def test_interpolate_raises_on_empty_prev_checkpoint_dir(self):
         """Test that ValueError is raised when prev_checkpoint_dir is empty string."""
         spec = ModelSpec(
             constructor_name="test_model",
-            checkpoint_path="{prev_checkpoint_dir}/model.pt"
+            checkpoint_path="{prev_checkpoint_dir}/model.pt",
         )
 
-        with pytest.raises(ValueError, match="no previous checkpoint directory available"):
+        with pytest.raises(
+            ValueError, match="no previous checkpoint directory available"
+        ):
             interpolate_prev_checkpoint_dir(spec, "")
 
     def test_interpolate_recursive_sub_models(self):
         """Test that sub_models are recursively processed."""
         encoder_spec = ModelSpec(
             constructor_name="encoder",
-            checkpoint_path="{prev_checkpoint_dir}/encoder.pt"
+            checkpoint_path="{prev_checkpoint_dir}/encoder.pt",
         )
 
         main_spec = ModelSpec(
             constructor_name="main_model",
             checkpoint_path="{prev_checkpoint_dir}/main.pt",
-            sub_models={"encoder": encoder_spec}
+            sub_models={"encoder": encoder_spec},
         )
 
         result = interpolate_prev_checkpoint_dir(main_spec, "/checkpoints/task1")
 
         assert result.checkpoint_path == "/checkpoints/task1/main.pt"
-        assert result.sub_models["encoder"].checkpoint_path == "/checkpoints/task1/encoder.pt"
+        assert (
+            result.sub_models["encoder"].checkpoint_path
+            == "/checkpoints/task1/encoder.pt"
+        )
         # Original should be unchanged
-        assert main_spec.sub_models["encoder"].checkpoint_path == "{prev_checkpoint_dir}/encoder.pt"
+        assert (
+            main_spec.sub_models["encoder"].checkpoint_path
+            == "{prev_checkpoint_dir}/encoder.pt"
+        )
 
     def test_interpolate_nested_sub_models_with_mixed_paths(self):
         """Test recursive interpolation with some paths having {prev_checkpoint_dir} and others not."""
         encoder_spec = ModelSpec(
             constructor_name="encoder",
-            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/encoder_fold{fold}.pt"
+            checkpoint_path="{prev_checkpoint_dir}/lag_{lag}/encoder_fold{fold}.pt",
         )
 
         decoder_spec = ModelSpec(
             constructor_name="decoder",
-            checkpoint_path="/absolute/path/decoder.pt"  # No prev_checkpoint_dir
+            checkpoint_path="/absolute/path/decoder.pt",  # No prev_checkpoint_dir
         )
 
         main_spec = ModelSpec(
             constructor_name="main_model",
             checkpoint_path="{prev_checkpoint_dir}/main.pt",
-            sub_models={"encoder": encoder_spec, "decoder": decoder_spec}
+            sub_models={"encoder": encoder_spec, "decoder": decoder_spec},
         )
 
         result = interpolate_prev_checkpoint_dir(main_spec, "/checkpoints/pretrain")
 
         assert result.checkpoint_path == "/checkpoints/pretrain/main.pt"
-        assert result.sub_models["encoder"].checkpoint_path == "/checkpoints/pretrain/lag_{lag}/encoder_fold{fold}.pt"
-        assert result.sub_models["decoder"].checkpoint_path == "/absolute/path/decoder.pt"
+        assert (
+            result.sub_models["encoder"].checkpoint_path
+            == "/checkpoints/pretrain/lag_{lag}/encoder_fold{fold}.pt"
+        )
+        assert (
+            result.sub_models["decoder"].checkpoint_path == "/absolute/path/decoder.pt"
+        )
 
     def test_interpolate_empty_sub_models(self):
         """Test that empty sub_models dict doesn't cause issues."""
         spec = ModelSpec(
             constructor_name="test_model",
             checkpoint_path="{prev_checkpoint_dir}/model.pt",
-            sub_models={}
+            sub_models={},
         )
 
         result = interpolate_prev_checkpoint_dir(spec, "/checkpoints/prev")
@@ -1098,7 +1115,7 @@ class TestInterpolatePrevCheckpointDir:
         spec = ModelSpec(
             constructor_name="test_model",
             checkpoint_path="{prev_checkpoint_dir}/model.pt",
-            sub_models=None
+            sub_models=None,
         )
 
         result = interpolate_prev_checkpoint_dir(spec, "/checkpoints/prev")
@@ -1228,7 +1245,7 @@ tasks:
     model_spec:
       constructor_name: encoder_model
       params:
-        embedding_dim: 768
+        output_dim: 768
     task_config:
       task_name: test_task
       data_params:
@@ -1250,7 +1267,7 @@ tasks:
         encoder_model:
           constructor_name: encoder_model
           params:
-            embedding_dim: 768
+            output_dim: 768
           checkpoint_path: "{prev_checkpoint_dir}/lag_{lag}/best_model_fold{fold}.pt"
     task_config:
       task_name: test_task

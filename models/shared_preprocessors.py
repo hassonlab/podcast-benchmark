@@ -1,8 +1,20 @@
+import copy
+import dataclasses
+import hashlib
+import inspect
+import json
+import os
+import tempfile
+from decimal import Decimal, ROUND_DOWN
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 import core.registry as registry
+from utils.dataset import _apply_preprocessing
+
+_DEFAULT_PREPROCESSOR_CACHE_DIR = ".cache/preprocessors"
 
 
 @registry.register_data_preprocessor()
@@ -131,6 +143,336 @@ def zscore_preprocessor(
     standardized = standardized.reshape(channel_first.shape)
     standardized = np.moveaxis(standardized, 0, channel_axis)
     return standardized.astype(np.float32, copy=False)
+
+
+@registry.register_data_preprocessor("disk_cache_preprocessor")
+def disk_cache_preprocessor(
+    data: np.ndarray,
+    preprocessor_params: Optional[dict] = None,
+    **context,
+) -> np.ndarray:
+    """Cache row-wise output of one wrapped preprocessor or an ordered chain.
+
+    Partial cache reuse assumes each wrapped preprocessing result is independent per
+    input row. Avoid wrapping preprocessors that depend on batch-wide statistics.
+    """
+
+    params = preprocessor_params if preprocessor_params is not None else {}
+    if not isinstance(params, dict):
+        raise ValueError("disk_cache_preprocessor params must be a dictionary.")
+
+    names, wrapped_params = _resolve_wrapped_preprocessor_config(params)
+    wrapped_fns = []
+    for name in names:
+        if name not in registry.data_preprocessor_registry:
+            raise ValueError(f"Unknown wrapped preprocessor '{name}'.")
+        wrapped_fns.append(registry.data_preprocessor_registry[name])
+
+    cache_dir = Path(params.get("cache_dir", _DEFAULT_PREPROCESSOR_CACHE_DIR))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_identity = _build_cache_identity(
+        names=names,
+        wrapped_fns=wrapped_fns,
+        wrapped_params=wrapped_params,
+        mode=params.get("mode", "normal"),
+        context=context,
+    )
+    cache_key = hashlib.sha256(
+        json.dumps(cache_identity, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    cache_path = cache_dir / f"{cache_key}.npz"
+    requested_starts = _selected_row_starts(context, expected_rows=data.shape[0])
+
+    if cache_path.exists():
+        cached_payload = _load_v2_cache(cache_path)
+        if cached_payload is not None:
+            cached_starts, cached_data = cached_payload
+            cached_rows = _rows_by_start(cached_starts)
+            cached_positions = []
+            missing_positions = []
+            for row_position, start in enumerate(requested_starts):
+                cached_position = cached_rows.get(start)
+                if cached_position is None:
+                    missing_positions.append(row_position)
+                else:
+                    cached_positions.append((row_position, cached_position))
+
+            if not missing_positions:
+                output = np.empty(
+                    (len(requested_starts),) + cached_data.shape[1:],
+                    dtype=cached_data.dtype,
+                )
+                for row_position, cached_position in cached_positions:
+                    output[row_position] = cached_data[cached_position]
+                return output.astype(np.float32, copy=False)
+
+            missing_positions_array = np.asarray(missing_positions, dtype=np.int64)
+            missing_context = _slice_row_context(context, missing_positions_array)
+            missing_output = _apply_preprocessing(
+                np.asarray(data)[missing_positions_array],
+                wrapped_fns,
+                copy.deepcopy(wrapped_params),
+                **missing_context,
+            )
+            missing_output = np.asarray(missing_output)
+            _validate_preprocessor_output(
+                missing_output,
+                expected_rows=len(missing_positions),
+                expected_feature_shape=cached_data.shape[1:],
+            )
+
+            output = np.empty(
+                (len(requested_starts),) + cached_data.shape[1:],
+                dtype=np.result_type(cached_data.dtype, missing_output.dtype),
+            )
+            for row_position, cached_position in cached_positions:
+                output[row_position] = cached_data[cached_position]
+            output[missing_positions_array] = missing_output
+
+            if params.get("update_cache_with_missing", False):
+                merged_starts, merged_data = _merge_cache_rows(
+                    cached_starts,
+                    cached_data,
+                    [requested_starts[position] for position in missing_positions],
+                    missing_output,
+                )
+                metadata = json.dumps(cache_identity, sort_keys=True)
+                _atomic_save_npz(
+                    cache_path,
+                    starts=np.asarray(merged_starts, dtype=np.float64),
+                    data=np.asarray(merged_data),
+                    metadata=metadata,
+                )
+
+            return output.astype(np.float32, copy=False)
+
+    output = _apply_preprocessing(
+        data,
+        wrapped_fns,
+        copy.deepcopy(wrapped_params),
+        **context,
+    )
+    output = np.asarray(output)
+    _validate_preprocessor_output(output, expected_rows=len(requested_starts))
+    metadata = json.dumps(cache_identity, sort_keys=True)
+    _atomic_save_npz(
+        cache_path,
+        starts=np.asarray(requested_starts, dtype=np.float64),
+        data=output,
+        metadata=metadata,
+    )
+    return output
+
+
+def _resolve_wrapped_preprocessor_config(params: dict) -> tuple[list[str], list]:
+    names = params.get("base_preprocessing_fn_name")
+    if names is None:
+        raise ValueError("disk_cache_preprocessor requires base_preprocessing_fn_name.")
+
+    if isinstance(names, str):
+        names_list = [names]
+        wrapped_params = [params.get("base_preprocessor_params")]
+    elif isinstance(names, list):
+        names_list = names
+        raw_params = params.get("base_preprocessor_params")
+        if isinstance(raw_params, list):
+            wrapped_params = [
+                raw_params[i] if i < len(raw_params) else None
+                for i in range(len(names_list))
+            ]
+        else:
+            wrapped_params = [raw_params for _ in names_list]
+    else:
+        raise ValueError(
+            "base_preprocessing_fn_name must be a string or list of strings."
+        )
+
+    if not all(isinstance(name, str) for name in names_list):
+        raise ValueError("base_preprocessing_fn_name entries must be strings.")
+
+    return names_list, wrapped_params
+
+
+def _build_cache_identity(
+    names: list[str],
+    wrapped_fns: list,
+    wrapped_params: list,
+    mode: str,
+    context: dict,
+) -> dict:
+    return {
+        "version": 2,
+        "mode": mode,
+        "pipeline": [
+            {
+                "name": name,
+                "source_hash": _source_hash(fn),
+                "params": _normalize_for_json(params),
+            }
+            for name, fn, params in zip(names, wrapped_fns, wrapped_params)
+        ],
+        "lag": _normalize_for_json(context.get("lag")),
+        "subject_channel_names": _normalize_for_json(
+            context.get("subject_channel_names")
+        ),
+        "subject_channel_counts": _normalize_for_json(
+            context.get("subject_channel_counts")
+        ),
+    }
+
+
+def _selected_row_starts(context: dict, expected_rows: int) -> list[float]:
+    selected_rows = context.get("selected_rows_df", context.get("selected_rows"))
+    if selected_rows is None or "start" not in selected_rows:
+        raise ValueError(
+            "disk_cache_preprocessor requires selected_rows or selected_rows_df "
+            "with a start column for row-wise cache reuse."
+        )
+
+    starts = _normalize_start_times(selected_rows["start"].to_list())
+    if len(starts) != expected_rows:
+        raise ValueError(
+            "selected_rows start count must match the number of data rows for "
+            "disk_cache_preprocessor."
+        )
+    if any(start is None for start in starts):
+        raise ValueError("selected_rows start values cannot be None.")
+    return starts
+
+
+def _load_v2_cache(cache_path: Path) -> Optional[tuple[np.ndarray, np.ndarray]]:
+    with np.load(cache_path) as cached:
+        if "metadata" not in cached or "starts" not in cached or "data" not in cached:
+            return None
+
+        metadata = cached["metadata"].item()
+        if isinstance(metadata, bytes):
+            metadata = metadata.decode("utf-8")
+        try:
+            if json.loads(metadata).get("version") != 2:
+                return None
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+        starts = cached["starts"].astype(np.float64, copy=False)
+        data = cached["data"]
+        if data.shape[0] != starts.shape[0]:
+            return None
+        return starts, data
+
+
+def _rows_by_start(starts: np.ndarray) -> dict[float, int]:
+    rows = {}
+    for row_position, start in enumerate(starts.tolist()):
+        if start in rows:
+            raise ValueError(
+                "disk_cache_preprocessor cache contains duplicate start values."
+            )
+        rows[float(start)] = row_position
+    return rows
+
+
+def _slice_row_context(context: dict, row_positions: np.ndarray) -> dict:
+    sliced_context = dict(context)
+    for key in ("selected_rows", "selected_rows_df"):
+        rows = context.get(key)
+        if rows is None:
+            continue
+        if hasattr(rows, "iloc"):
+            sliced_context[key] = rows.iloc[row_positions].reset_index(drop=True)
+        else:
+            sliced_context[key] = np.asarray(rows)[row_positions]
+    return sliced_context
+
+
+def _validate_preprocessor_output(
+    output: np.ndarray,
+    expected_rows: int,
+    expected_feature_shape: Optional[tuple] = None,
+) -> None:
+    if output.shape[0] != expected_rows:
+        raise ValueError(
+            "Wrapped preprocessor output row count must match input row count for "
+            "disk_cache_preprocessor."
+        )
+    if expected_feature_shape is not None and output.shape[1:] != expected_feature_shape:
+        raise ValueError(
+            "Wrapped preprocessor output feature shape does not match cached rows."
+        )
+
+
+def _merge_cache_rows(
+    cached_starts: np.ndarray,
+    cached_data: np.ndarray,
+    missing_starts: list[float],
+    missing_data: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    merged_starts = np.concatenate(
+        [cached_starts.astype(np.float64, copy=False), np.asarray(missing_starts)]
+    )
+    merged_data = np.concatenate([cached_data, missing_data], axis=0)
+    order = np.argsort(merged_starts, kind="stable")
+    return merged_starts[order], merged_data[order]
+
+
+def _normalize_start_times(starts):
+    """Normalize event start times to millisecond precision for cache identity."""
+    normalized = []
+    for start in starts:
+        if start is None:
+            normalized.append(None)
+        else:
+            normalized.append(
+                float(Decimal(str(start)).quantize(Decimal("0.001"), ROUND_DOWN))
+            )
+    return _normalize_for_json(normalized)
+
+
+def _source_hash(fn) -> Optional[str]:
+    try:
+        source = inspect.getsource(fn)
+    except (OSError, TypeError):
+        return None
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _normalize_for_json(value):
+    if dataclasses.is_dataclass(value):
+        return _normalize_for_json(dataclasses.asdict(value))
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_for_json(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_json(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _normalize_for_json(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _atomic_save_npz(cache_path: Path, **arrays) -> None:
+    temp_file = tempfile.NamedTemporaryFile(
+        dir=cache_path.parent,
+        prefix=f".{cache_path.stem}.",
+        suffix=".tmp.npz",
+        delete=False,
+    )
+    temp_name = temp_file.name
+    temp_file.close()
+    try:
+        np.savez_compressed(temp_name, **arrays)
+        os.replace(temp_name, cache_path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
 
 
 def window_data(data: np.ndarray, num_average_samples: int) -> np.ndarray:

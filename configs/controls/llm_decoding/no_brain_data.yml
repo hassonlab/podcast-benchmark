@@ -2,16 +2,17 @@ task_config:
   task_name: llm_decoding_task
   data_params:
     data_root: data
-    window_width: 0.625
+    window_width: 1.0
     electrode_file_path: processed_data/all_subject_sig.csv
   task_specific_config:
     no_brain_encoder: true
 training_params:
+  tensorboard_logging: false
   batch_size: 16
   epochs: 50
   learning_rate: 0.01
   weight_decay: 0.0
-  early_stopping_patience: 15
+  early_stopping_patience: 10
   n_folds: 5
   min_lag: -1000
   max_lag: 1000

@@ -7,6 +7,7 @@ model_params:
   num_models: 10
   embedding_dim: 1
 training_params:
+  tensorboard_logging: false
   batch_size: 64
   epochs: 10
   learning_rate: 0.001

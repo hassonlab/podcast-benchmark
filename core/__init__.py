@@ -1,6 +1,13 @@
 """Core framework components for the podcast benchmark."""
 
-from .config import DataParams, TrainingParams, ExperimentConfig, RunMode, dict_to_config
+from .config import (
+    ChunkedPreprocessingParams,
+    DataParams,
+    TrainingParams,
+    ExperimentConfig,
+    RunMode,
+    dict_to_config,
+)
 from .registry import (
     register_model_constructor,
     register_data_preprocessor,
@@ -17,6 +24,7 @@ from .registry import (
 __all__ = [
     # Config
     "DataParams",
+    "ChunkedPreprocessingParams",
     "TrainingParams",
     "ExperimentConfig",
     "RunMode",

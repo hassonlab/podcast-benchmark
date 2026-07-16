@@ -1,3 +1,5 @@
+config_setter_name:
+- set_input_channels
 task_config:
   task_name: content_noncontent_task
   data_params:
@@ -5,6 +7,9 @@ task_config:
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: true
     window_width: 1.0
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 32
   task_specific_config:
     content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
 training_params:
@@ -14,14 +19,13 @@ training_params:
   max_lag: 1500
   lag_step_size: 500
   losses:
-  - cross_entropy
+  - bce
   loss_weights:
   - 1.0
   metrics:
   - roc_auc
   early_stopping_metric: roc_auc
   smaller_is_better: false
-  ridge_logistic_regression_baseline: true
   tensorboard_logging: false
   weight_decay: 0.001
   learning_rate: 0.05
@@ -30,5 +34,6 @@ model_spec:
   params:
     output_dim: 1
     bias: true
+    num_timpoints: 16
     activation: sigmoid
 trial_name: ridge_logistic_regression_content_noncontent_supersubject

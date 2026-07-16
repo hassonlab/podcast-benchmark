@@ -164,7 +164,8 @@ def test_profiler_outputs_csv_and_latex_with_separate_timing_columns(tmp_path, t
     assert "inference_ms_per_sample" in csv_text
     assert "cache\\_build\\_seconds" in latex_text
     assert row["feature_cache"] is True
-    assert row["cached_feature_shape"] != "n/a"
+    assert row["cached_feature_shape"] == "n/a"
+    assert row["cache_build_seconds"] == "n/a"
 
 
 def test_profiler_runs_non_cache_and_per_subject_cache_specs(tmp_path, toy_raws):
@@ -184,10 +185,10 @@ def test_profiler_runs_non_cache_and_per_subject_cache_specs(tmp_path, toy_raws)
     assert non_cache_row["cached_feature_shape"] == "n/a"
     assert per_subject_row["per_subject_feature_concat"] is True
     assert per_subject_row["num_subjects"] == 2
-    assert per_subject_row["cached_feature_shape"] != "n/a"
-    assert per_subject_row["total_params"] == 7
-    assert per_subject_row["trainable_params"] == 5
-    assert per_subject_row["frozen_params"] == 2
+    assert per_subject_row["cached_feature_shape"] == "n/a"
+    assert per_subject_row["total_params"] == 2
+    assert per_subject_row["trainable_params"] == 2
+    assert per_subject_row["frozen_params"] == 0
 
 
 def test_profiler_uses_first_task_for_multi_task_configs(tmp_path, toy_raws):

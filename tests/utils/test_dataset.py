@@ -4,6 +4,8 @@ Tests for utils/dataset.py.
 Tests dataset utilities for handling lagged raw slicing and dictionary inputs.
 """
 
+from pathlib import Path
+
 import mne
 import numpy as np
 import pandas as pd
@@ -11,7 +13,13 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from utils.dataset import NeuralDictDataset, RawNeuralDataset, _apply_preprocessing
+from core.config import DataParams, TaskConfig
+from utils.dataset import (
+    ChunkedPreprocessedLoader,
+    NeuralDictDataset,
+    RawNeuralDataset,
+    _apply_preprocessing,
+)
 
 
 def reference_get_data(
@@ -159,6 +167,40 @@ class TestApplyPreprocessing:
         )
 
         np.testing.assert_allclose(result, (data + 1.5) * 2.0)
+
+    def test_passes_lag_and_subject_channel_names_to_context_aware_preprocessor(
+        self, mock_raw_pair, task_df_in_bounds
+    ):
+        captured = {}
+
+        def capture_context(
+            data,
+            params,
+            lag=None,
+            subject_channel_names=None,
+            subject_channel_counts=None,
+        ):
+            captured["lag"] = lag
+            captured["subject_channel_names"] = subject_channel_names
+            captured["subject_channel_counts"] = subject_channel_counts
+            return data
+
+        ds = RawNeuralDataset(
+            mock_raw_pair,
+            task_df_in_bounds,
+            0.5,
+            preprocessing_fns=[capture_context],
+            preprocessor_params=None,
+        )
+
+        ds.get_data_for_lag(125)
+
+        assert captured["lag"] == 125
+        assert captured["subject_channel_names"] == [
+            ["A1", "A2", "A3"],
+            ["B1", "B2", "B3", "B4"],
+        ]
+        assert captured["subject_channel_counts"] == [3, 4]
 
 
 class TestRawNeuralDataset:
@@ -383,6 +425,286 @@ class TestRawNeuralDataset:
                 actual_targets.numpy(), expected_targets.astype(np.float32)
             )
             pd.testing.assert_frame_equal(actual_df, expected_df)
+
+    def test_chunked_preprocessing_matches_in_memory_identity(
+        self, mock_raw_pair, task_df_in_bounds, tmp_path
+    ):
+        ds = RawNeuralDataset(mock_raw_pair, task_df_in_bounds, 0.4)
+        expected_neural, expected_targets, expected_df, expected_counts = (
+            ds.get_data_for_lag(100)
+        )
+
+        chunk_store = ds.build_preprocessed_chunks(
+            100, num_chunks=2, cache_dir=str(tmp_path)
+        )
+        try:
+            data_parts = []
+            target_parts = []
+            row_parts = []
+            for path in chunk_store.chunk_paths:
+                with np.load(path) as loaded:
+                    data_parts.append(loaded["data"])
+                    target_parts.append(loaded["targets"])
+                    row_parts.append(loaded["row_positions"])
+
+            np.testing.assert_allclose(
+                np.concatenate(data_parts, axis=0), expected_neural.numpy()
+            )
+            np.testing.assert_allclose(
+                np.concatenate(target_parts, axis=0), expected_targets.numpy()
+            )
+            np.testing.assert_array_equal(
+                np.concatenate(row_parts), np.arange(len(expected_df))
+            )
+            pd.testing.assert_frame_equal(chunk_store.data_df, expected_df)
+            assert chunk_store.subject_channel_counts == expected_counts
+        finally:
+            chunk_store.cleanup()
+
+    def test_chunked_preprocessing_context_is_chunk_local(
+        self, mock_raw, task_df_in_bounds, tmp_path
+    ):
+        captured_lengths = []
+
+        def capture_rows(data, params, selected_rows=None, selected_rows_df=None):
+            assert selected_rows is not None
+            assert selected_rows_df is not None
+            captured_lengths.append(len(selected_rows))
+            return data
+
+        ds = RawNeuralDataset(
+            [mock_raw],
+            task_df_in_bounds,
+            0.5,
+            preprocessing_fns=[capture_rows],
+        )
+        chunk_store = ds.build_preprocessed_chunks(
+            0, num_chunks=2, cache_dir=str(tmp_path)
+        )
+        try:
+            assert captured_lengths == [2, 1]
+        finally:
+            chunk_store.cleanup()
+
+    def test_chunk_cleanup_removes_files(self, mock_raw, task_df_in_bounds, tmp_path):
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, 0.5)
+        chunk_store = ds.build_preprocessed_chunks(
+            0, num_chunks=3, cache_dir=str(tmp_path)
+        )
+        paths = list(chunk_store.chunk_paths)
+        assert all(path.exists() for path in paths)
+
+        chunk_store.cleanup()
+
+        assert all(not path.exists() for path in paths)
+
+    def test_chunk_build_failure_removes_partial_files(
+        self, mock_raw, task_df_in_bounds, tmp_path
+    ):
+        calls = 0
+
+        def fail_on_second_chunk(data, params):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("boom")
+            return data
+
+        ds = RawNeuralDataset(
+            [mock_raw],
+            task_df_in_bounds,
+            0.5,
+            preprocessing_fns=[fail_on_second_chunk],
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            ds.build_preprocessed_chunks(0, num_chunks=3, cache_dir=str(tmp_path))
+
+        assert not list(tmp_path.glob("*.npz"))
+
+    def test_chunk_write_failure_removes_partial_temp_file(
+        self, mock_raw, task_df_in_bounds, tmp_path, monkeypatch
+    ):
+        def fail_savez(path, *args, **kwargs):
+            Path(path).write_bytes(b"partial")
+            raise OSError("disk quota exceeded")
+
+        monkeypatch.setattr(np, "savez", fail_savez)
+        ds = RawNeuralDataset([mock_raw], task_df_in_bounds, 0.5)
+
+        with pytest.raises(OSError, match="disk quota exceeded"):
+            ds.build_preprocessed_chunks(0, num_chunks=3, cache_dir=str(tmp_path))
+
+        assert not list(tmp_path.glob("*.npz"))
+        assert not list(tmp_path.glob(".*.npz"))
+
+
+class TestChunkedPreprocessedLoader:
+    def _write_chunk(self, path, data, targets, row_positions):
+        np.savez(
+            path,
+            data=np.asarray(data, dtype=np.float32),
+            targets=np.asarray(targets, dtype=np.float32),
+            row_positions=np.asarray(row_positions, dtype=np.int64),
+        )
+
+    def test_filters_splits_and_batches(self, tmp_path):
+        path0 = tmp_path / "chunk0.npz"
+        path1 = tmp_path / "chunk1.npz"
+        self._write_chunk(path0, np.arange(12).reshape(3, 4), [0, 1, 2], [0, 1, 2])
+        self._write_chunk(path1, np.arange(12, 24).reshape(3, 4), [3, 4, 5], [3, 4, 5])
+        data_df = pd.DataFrame({"feature": np.arange(6), "target": np.arange(6)})
+        task_config = TaskConfig(
+            data_params=DataParams(),
+            task_specific_config=TaskConfig().task_specific_config,
+        )
+        targets = torch.arange(6, dtype=torch.float32)
+
+        loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            data_df,
+            [1, 4, 5],
+            task_config,
+            targets,
+            batch_size=2,
+            shuffle=False,
+        )
+        batches = list(loader)
+
+        assert len(loader) == 2
+        np.testing.assert_array_equal(
+            batches[0][0].numpy(), np.arange(4, 8).reshape(1, 4)
+        )
+        np.testing.assert_array_equal(
+            batches[1][0].numpy(), np.arange(16, 24).reshape(2, 4)
+        )
+        np.testing.assert_array_equal(batches[0][2].numpy(), np.array([1.0]))
+        np.testing.assert_array_equal(batches[1][2].numpy(), np.array([4.0, 5.0]))
+
+    def test_train_shuffle_changes_order_and_eval_is_deterministic(self, tmp_path):
+        path0 = tmp_path / "chunk0.npz"
+        path1 = tmp_path / "chunk1.npz"
+        self._write_chunk(
+            path0, np.arange(4).reshape(4, 1), np.arange(4), [0, 1, 2, 3]
+        )
+        self._write_chunk(
+            path1,
+            np.arange(4, 8).reshape(4, 1),
+            np.arange(4, 8),
+            [4, 5, 6, 7],
+        )
+        data_df = pd.DataFrame({"target": np.arange(8)})
+        task_config = TaskConfig()
+        targets = torch.arange(8, dtype=torch.float32)
+
+        train_loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            data_df,
+            np.arange(8),
+            task_config,
+            targets,
+            batch_size=1,
+            shuffle=True,
+            seed=123,
+        )
+        first = [int(batch[2].item()) for batch in train_loader]
+        second = [int(batch[2].item()) for batch in train_loader]
+        assert first != list(range(8))
+        assert second != first
+
+        eval_loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            data_df,
+            np.arange(8),
+            task_config,
+            targets,
+            batch_size=3,
+            shuffle=False,
+        )
+        assert len(eval_loader) == 4
+        assert [batch[2].tolist() for batch in eval_loader] == [
+            [0.0, 1.0, 2.0],
+            [3.0],
+            [4.0, 5.0, 6.0],
+            [7.0],
+        ]
+
+    def test_loads_one_chunk_file_at_a_time(self, tmp_path, monkeypatch):
+        path0 = tmp_path / "chunk0.npz"
+        path1 = tmp_path / "chunk1.npz"
+        self._write_chunk(path0, np.arange(2).reshape(2, 1), [0, 1], [0, 1])
+        self._write_chunk(path1, np.arange(2, 4).reshape(2, 1), [2, 3], [2, 3])
+
+        real_load = np.load
+        active_loads = 0
+        max_active_loads = 0
+
+        class TrackingLoad:
+            def __init__(self, loaded):
+                self.loaded = loaded
+
+            def __enter__(self):
+                nonlocal active_loads, max_active_loads
+                active_loads += 1
+                max_active_loads = max(max_active_loads, active_loads)
+                return self.loaded.__enter__()
+
+            def __exit__(self, *args):
+                nonlocal active_loads
+                try:
+                    return self.loaded.__exit__(*args)
+                finally:
+                    active_loads -= 1
+
+        def tracked_load(*args, **kwargs):
+            return TrackingLoad(real_load(*args, **kwargs))
+
+        monkeypatch.setattr(np, "load", tracked_load)
+
+        loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            pd.DataFrame({"target": np.arange(4)}),
+            np.arange(4),
+            TaskConfig(),
+            torch.arange(4, dtype=torch.float32),
+            batch_size=2,
+            shuffle=False,
+        )
+
+        assert [batch[2].tolist() for batch in loader] == [[0.0, 1.0], [2.0, 3.0]]
+        assert max_active_loads == 1
+
+    def test_iter_only_loads_chunks_used_by_split(self, tmp_path, monkeypatch):
+        path0 = tmp_path / "chunk0.npz"
+        path1 = tmp_path / "chunk1.npz"
+        self._write_chunk(path0, np.arange(2).reshape(2, 1), [0, 1], [0, 1])
+        self._write_chunk(path1, np.arange(2, 4).reshape(2, 1), [2, 3], [2, 3])
+
+        loader = ChunkedPreprocessedLoader(
+            [path0, path1],
+            pd.DataFrame({"target": np.arange(4)}),
+            [2, 3],
+            TaskConfig(),
+            torch.arange(4, dtype=torch.float32),
+            batch_size=2,
+            shuffle=False,
+            chunk_row_positions=[
+                np.asarray([0, 1], dtype=np.int64),
+                np.asarray([2, 3], dtype=np.int64),
+            ],
+        )
+
+        real_load = np.load
+        loaded_paths = []
+
+        def tracked_load(path, *args, **kwargs):
+            loaded_paths.append(Path(path))
+            return real_load(path, *args, **kwargs)
+
+        monkeypatch.setattr(np, "load", tracked_load)
+
+        assert [batch[2].tolist() for batch in loader] == [[2.0, 3.0]]
+        assert loaded_paths == [path1]
 
 
 @pytest.fixture

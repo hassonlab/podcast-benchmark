@@ -1,9 +1,14 @@
+config_setter_name:
+- set_input_channels
 task_config:
   task_name: pos_task
   data_params:
     data_root: data
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: true
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 32
     window_width: 1.0
   task_specific_config:
     pos_path: processed_data/df_word_onset_with_pos_class.csv
@@ -21,7 +26,6 @@ training_params:
   - roc_auc_multiclass
   early_stopping_metric: roc_auc_multiclass
   smaller_is_better: false
-  ridge_logistic_regression_baseline: true
   tensorboard_logging: false
   weight_decay: 0.001
   learning_rate: 0.05
@@ -30,5 +34,6 @@ model_spec:
   params:
     output_dim: 5
     bias: true
+    num_timepoints: 16
     activation: softmax
 trial_name: ridge_logistic_regression_pos_supersubject

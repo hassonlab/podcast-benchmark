@@ -22,10 +22,10 @@ from tqdm import tqdm
 from core import registry
 from .simple_transformer import load_pretrained_model, SimpleTransformer
 
-
 # =============================================================================
 # PATTERN 1: FEATURE EXTRACTION (FROZEN MODEL)
 # =============================================================================
+
 
 @registry.register_data_preprocessor("example_foundation_feature_extraction")
 def extract_foundation_features(data, preprocessor_params):
@@ -64,9 +64,7 @@ def extract_foundation_features(data, preprocessor_params):
     with torch.no_grad():
         for i in tqdm(range(0, len(data), batch_size), desc="Extracting features"):
             batch = torch.tensor(
-                data[i : i + batch_size],
-                dtype=torch.float32,
-                device=device
+                data[i : i + batch_size], dtype=torch.float32, device=device
             )
             batch_embeddings = model(batch, return_sequence=False)
             embeddings.append(batch_embeddings.cpu().numpy())
@@ -119,7 +117,7 @@ class MLPDecoder(nn.Module):
                     x = self.layer_norms[i](x)
                 x = F.relu(x)
                 x = self.dropout(x)
-        
+
         # Apply output activation if specified
         if self.output_activation == "sigmoid":
             x = torch.sigmoid(x)
@@ -128,12 +126,12 @@ class MLPDecoder(nn.Module):
         elif self.output_activation == "softmax":
             x = F.softmax(x, dim=-1)
         # "linear" means no activation (default)
-        
+
         # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
         # This matches the behavior of neural_conv_decoder
         if x.shape[-1] == 1:
             x = x.squeeze(-1)
-        
+
         return x
 
 
@@ -161,6 +159,7 @@ def create_mlp_decoder(model_params):
 # =============================================================================
 # PATTERN 2: FINETUNING (TRAINABLE MODEL)
 # =============================================================================
+
 
 class FoundationModelDecoder(nn.Module):
     """
@@ -202,13 +201,20 @@ class FoundationModelDecoder(nn.Module):
         # Load pretrained foundation model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.foundation_model = load_pretrained_model(model_dir, device=device)
-        
+
         # Fix: If input_channels is provided and different from pretrained model,
         # reinitialize the input_projection layer
-        if input_channels is not None and input_channels != self.foundation_model.input_channels:
-            print(f"Reinitializing input_projection: {self.foundation_model.input_channels} -> {input_channels}")
+        if (
+            input_channels is not None
+            and input_channels != self.foundation_model.input_channels
+        ):
+            print(
+                f"Reinitializing input_projection: {self.foundation_model.input_channels} -> {input_channels}"
+            )
             model_dim = self.foundation_model.model_dim
-            self.foundation_model.input_projection = nn.Linear(input_channels, model_dim)
+            self.foundation_model.input_projection = nn.Linear(
+                input_channels, model_dim
+            )
             self.foundation_model.input_channels = input_channels
 
         # Handle freezing
@@ -269,7 +275,7 @@ def create_finetuning_decoder(model_params):
         - output_activation: Output activation function (optional, auto-determined if not provided)
     """
     output_dim = model_params["output_dim"]
-    
+
     # Auto-determine output_activation based on output_dim and task type
     # Binary classification (output_dim=1) with BCE loss should use sigmoid
     output_activation = model_params.get("output_activation", None)
@@ -283,7 +289,7 @@ def create_finetuning_decoder(model_params):
         else:
             # Regression or other: no activation
             output_activation = "linear"
-    
+
     return FoundationModelDecoder(
         model_dir=model_params["model_dir"],
         output_dim=output_dim,
@@ -299,6 +305,7 @@ def create_finetuning_decoder(model_params):
 # =============================================================================
 # CONFIG SETTERS
 # =============================================================================
+
 
 @registry.register_config_setter("example_foundation_feature_extraction")
 def set_feature_extraction_config(experiment_config, raws, _df_word):
@@ -349,10 +356,5 @@ def set_finetuning_config(experiment_config, raws, _df_word):
 
     # Set window width based on foundation model
     data_params.window_width = foundation_config.window_width
-
-    # Fix: Copy output_dim to embedding_dim for compatibility with compute_all_metrics
-    # This ensures that confusion_matrix can correctly determine num_classes
-    if "output_dim" in model_params:
-        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config

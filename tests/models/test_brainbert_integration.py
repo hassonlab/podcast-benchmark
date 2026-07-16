@@ -1,10 +1,13 @@
+import pytest
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from core.config import DataParams, ExperimentConfig, ModelSpec, TaskConfig
 from models.brainbert.integration import (
     ReferenceBrainBERTDecoder,
     _adaptive_avg_pool_temporal_patches,
+    set_finetuning_config,
 )
 
 
@@ -84,3 +87,82 @@ def test_brainbert_decoder_pools_temporal_tokens_flattened():
         batch_size,
         num_electrodes * temporal_patches_to_keep * hidden_dim,
     )
+
+
+class StubRaw:
+    ch_names = ["E1", "E2", "E3"]
+    info = {"sfreq": 2048}
+
+
+def test_brainbert_config_setter_uses_explicit_nested_stft_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="brainbert_finetune",
+            params={"output_dim": 5},
+        ),
+        task_config=TaskConfig(
+            data_params=DataParams(
+                target_sr=1000,
+                preprocessing_fn_name=[
+                    "stft_preprocessing",
+                    "foundation_feature_cache",
+                ],
+                preprocessor_params=[
+                    {"freq_channel_cutoff": 32},
+                    {
+                        "mode": "normal",
+                    },
+                ],
+            ),
+        ),
+    )
+
+    result = set_finetuning_config(config, [StubRaw()], None)
+    stft_params = result.task_config.data_params.preprocessor_params[0]
+
+    assert result.task_config.data_params.preprocessing_fn_name == [
+        "stft_preprocessing",
+        "foundation_feature_cache",
+    ]
+    assert stft_params["freq_channel_cutoff"] == 32
+    assert stft_params["fs"] == 1000
+    assert stft_params["nperseg"] == 400
+    assert result.model_spec.params["input_channels"] == 32
+
+
+def test_brainbert_config_setter_requires_explicit_stft_preprocessor():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="brainbert_finetune",
+            params={"output_dim": 5},
+        ),
+        task_config=TaskConfig(data_params=DataParams()),
+    )
+
+    with pytest.raises(ValueError, match="requires an explicit 'stft_preprocessing'"):
+        set_finetuning_config(config, [StubRaw()], None)
+
+
+def test_brainbert_feature_cache_config_setter_does_not_inject_head_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="brainbert_finetune",
+            params={"feature_cache": True, "output_dim": None},
+            feature_cache=True,
+        ),
+        task_config=TaskConfig(
+            task_name="content_noncontent_task",
+            data_params=DataParams(
+                target_sr=1000,
+                preprocessing_fn_name=["stft_preprocessing", "foundation_feature_cache"],
+                preprocessor_params=[{"freq_channel_cutoff": 32}, {}],
+            ),
+        ),
+    )
+
+    result = set_finetuning_config(config, [StubRaw()], None)
+
+    assert result.model_spec.params["input_channels"] == 32
+    assert result.model_spec.params["output_dim"] is None
+    assert "embedding_dim" not in result.model_spec.params
+    assert "output_activation" not in result.model_spec.params

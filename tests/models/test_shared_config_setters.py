@@ -31,7 +31,7 @@ def test_set_input_channels_sets_correct_modelspec_when_constructor_names_specif
     # Create a nested ModelSpec structure
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128},
+        params={"input_channels": 10, "output_dim": 128},
     )
 
     decoder_spec = ModelSpec(
@@ -68,12 +68,12 @@ def test_set_input_channels_sets_multiple_matching_constructors():
     # Create a nested ModelSpec structure with multiple models with the same constructor name
     encoder1_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128},
+        params={"input_channels": 10, "output_dim": 128},
     )
 
     encoder2_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 20, "embedding_dim": 256},
+        params={"input_channels": 20, "output_dim": 256},
     )
 
     parent_spec = ModelSpec(
@@ -102,7 +102,7 @@ def test_set_input_channels_searches_nested_submodels():
     # Create a deeply nested ModelSpec structure
     innermost_spec = ModelSpec(
         constructor_name="inner_encoder",
-        params={"input_channels": 10, "embedding_dim": 64},
+        params={"input_channels": 10, "output_dim": 64},
     )
 
     middle_spec = ModelSpec(
@@ -136,7 +136,7 @@ def test_set_input_channels_raises_error_when_constructor_not_found():
     # Create a simple ModelSpec
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128},
+        params={"input_channels": 10, "output_dim": 128},
     )
 
     parent_spec = ModelSpec(
@@ -162,7 +162,7 @@ def test_set_input_channels_handles_multiple_constructor_names():
     # Create a nested ModelSpec structure
     encoder_spec = ModelSpec(
         constructor_name="encoder_model",
-        params={"input_channels": 10, "embedding_dim": 128},
+        params={"input_channels": 10, "output_dim": 128},
     )
 
     decoder_spec = ModelSpec(

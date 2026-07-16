@@ -2,10 +2,11 @@
 .ONESHELL:-
 
 USR := $(shell whoami | head -c 2)
-DT := $(shell date +"%Y%m%d-%H:%M:%S")
+DT := $(shell date +"%Y%m%d-%H%M%S")
 
 PREFIX = decoder-training
-JOB_NAME ?= "$(PREFIX)-$(USR)-$(DT)"
+CONFIG_JOB_TAG := $(if $(CONFIG),$(subst /,-,$(patsubst %.yaml,%,$(patsubst %.yml,%,$(patsubst configs/%,%,$(CONFIG))))),manual)
+JOB_NAME ?= "$(PREFIX)-$(CONFIG_JOB_TAG)-$(USR)-$(DT)"
 
 # To run locally
 CMD = python
@@ -20,6 +21,13 @@ SUBJECT_BATCH_SIZE ?=
 REGION_BATCH_SIZE ?=
 TASKS ?= word_embedding_decoding_task,sentence_onset_task,gpt_surprise_task,gpt_surprise_multiclass_task,content_noncontent_task,pos_task,llm_decoding_task,whisper_embedding_decoding_task,iu_boundary_task,volume_level_decoding_task
 CONFIG_OVERRIDES ?=
+MIN_LAG ?=
+MAX_LAG ?=
+LAG_STEP ?=
+LAGS_PER_JOB ?=
+CONFIGS ?=
+SBATCH_FLAGS ?=
+DRY_RUN ?=
 
 # Specify a single config to use.
 # Usage:
@@ -55,7 +63,7 @@ train-all:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
 		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config"; \
@@ -77,7 +85,7 @@ train-all-supersubjects:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		job_name="$(PREFIX)-$$config_tag-$(USR)-$(DT)"; \
 		echo "Submitting: $$model / $$task / $$config"; \
 		JOB_NAME="$$job_name" $(MAKE) --no-print-directory train-config CONFIG="$$config"; \
@@ -99,7 +107,7 @@ train-all-per-subjects:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		subjects="$(SUBJECTS)"; \
 		for subject in $$subjects; do \
@@ -134,7 +142,7 @@ train-all-subject-groups:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for subject_spec in $$subject_specs; do \
 			subject_group=$${subject_spec%%|*}; \
@@ -169,7 +177,7 @@ train-all-per-regions:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for region in $$regions; do \
 			if [ "$$is_multi" = "1" ]; then \
@@ -203,7 +211,7 @@ train-all-region-groups:
 		model=$$(echo $$target | cut -d'|' -f1); \
 		task=$$(echo $$target | cut -d'|' -f2); \
 		config=$$(echo $$target | cut -d'|' -f3); \
-		config_tag=$$(basename $$config .yml); \
+		config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/##' -e 's#\.yaml$$##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g' -e 's#--*#-#g' -e 's#^-##' -e 's#-$$##'); \
 		is_multi=$$(python -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1])) or {}; print("1" if isinstance(cfg, dict) and "tasks" in cfg else "0")' "$$config"); \
 		for region_spec in $$region_specs; do \
 			region_group=$${region_spec%%|*}; \
@@ -220,6 +228,24 @@ train-all-region-groups:
 	done
 
 train-all-per-region-groups: train-all-region-groups
+
+# Submit DIVER volume-level lag batches with at most one active job per config.
+# Uses Slurm singleton dependencies with stable per-config job names.
+# Usage:
+#   make train-diver-volume-lags-sequential
+#   make train-diver-volume-lags-sequential MIN_LAG=-1000 MAX_LAG=1000 LAG_STEP=100 LAGS_PER_JOB=2
+#   make train-diver-volume-lags-sequential SBATCH_FLAGS='-p debug'
+#   make train-diver-volume-lags-sequential DRY_RUN=1
+train-diver-volume-lags-sequential:
+	@MIN_LAG="$(MIN_LAG)" \
+	MAX_LAG="$(MAX_LAG)" \
+	LAG_STEP="$(LAG_STEP)" \
+	LAGS_PER_JOB="$(LAGS_PER_JOB)" \
+	CONFIGS="$(CONFIGS)" \
+	SBATCH_FLAGS="$(SBATCH_FLAGS)" \
+	CONFIG_OVERRIDES="$(CONFIG_OVERRIDES)" \
+	DRY_RUN="$(DRY_RUN)" \
+	./submit_diver_volume_lags.sh
 
 # Development and testing targets
 setup:
@@ -268,4 +294,4 @@ test:
 clean-env:
 	rm -rf decoding_env test_env
 
-.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups
+.PHONY: setup setup-gpu setup-dev setup-all test-env test clean-env train-config train-all train-all-supersubjects train-all-per-subjects train-all-subject-groups train-all-per-subject-groups train-all-per-regions train-all-region-groups train-all-per-region-groups train-diver-volume-lags-sequential

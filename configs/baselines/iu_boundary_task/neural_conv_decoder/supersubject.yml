@@ -4,7 +4,7 @@ task_config:
   data_params:
     data_root: data
     electrode_file_path: processed_data/all_subject_sig.csv
-    window_width: 0.625
+    window_width: 1.0
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
       num_average_samples: 32
@@ -13,6 +13,7 @@ task_config:
     negative_margin_s: 0.5
     iu_boundaries_csv_path: processed_data/iu_boundaries.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 32
   epochs: 50
   learning_rate: 0.001

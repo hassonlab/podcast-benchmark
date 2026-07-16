@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
@@ -255,14 +256,11 @@ def combine_lag_dataframes(frames: Sequence[pd.DataFrame], label: str) -> pd.Dat
     if "lags" not in combined.columns:
         return combined
 
-    duplicated_lags = combined.loc[combined["lags"].duplicated(), "lags"].unique()
-    if len(duplicated_lags):
-        duplicate_text = ", ".join(str(lag) for lag in sorted(duplicated_lags))
-        raise ValueError(
-            f"Multiple configured result directories for {label} contain duplicate "
-            f"lags: {duplicate_text}"
-        )
-    return combined.sort_values("lags").reset_index(drop=True)
+    return (
+        combined.drop_duplicates(subset="lags", keep="last")
+        .sort_values("lags")
+        .reset_index(drop=True)
+    )
 
 
 def average_subject_lag_dataframes(
@@ -290,12 +288,19 @@ def average_subject_lag_dataframes(
 def load_per_subject_run(run_dir: Path) -> Dict[str, pd.DataFrame]:
     run_dir = Path(run_dir)
     loaded = {}
+    root_csv = run_dir / "lag_performance.csv"
+    if root_csv.exists():
+        match = re.search(r"subject[_-]?(\d+)", run_dir.name)
+        if match:
+            return {f"subject_{int(match.group(1))}": pd.read_csv(root_csv)}
+
     for csv_path in sorted(run_dir.glob("subject_*/lag_performance.csv")):
         loaded[csv_path.parent.name] = pd.read_csv(csv_path)
 
     if not loaded:
         raise FileNotFoundError(
-            f"Expected subject_*/lag_performance.csv files under {run_dir}"
+            f"Expected subject_*/lag_performance.csv files under {run_dir} or "
+            "a subject-named directory containing lag_performance.csv"
         )
     return loaded
 
@@ -329,6 +334,13 @@ def load_current_style_runs(run_dirs: Sequence[Path], label: str) -> pd.DataFram
             "per-subject result layouts"
         )
     if any(has_subject_csvs):
+        return load_per_subject_runs(run_dirs, label)
+    if (
+        label.endswith("/per_subject")
+        and has_root_csv
+        and all(has_root_csv)
+        and all(re.search(r"subject[_-]?\d+", Path(run_dir).name) for run_dir in run_dirs)
+    ):
         return load_per_subject_runs(run_dirs, label)
     return combine_lag_dataframes(
         [load_current_style_run(run_dir) for run_dir in run_dirs],

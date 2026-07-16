@@ -27,6 +27,17 @@ class BaseTaskConfig(ABC):
 
 
 @dataclass
+class ChunkedPreprocessingParams:
+    # If true, preprocess lag windows in temporary disk-backed chunks instead of
+    # materializing the full preprocessed lag tensor in memory.
+    enabled: bool = False
+    # Desired number of near-equal chunks per lag.
+    num_chunks: int = 1
+    # Directory for temporary chunk .npz files.
+    cache_dir: str = ".cache/preprocessed_chunks"
+
+
+@dataclass
 class DataParams:
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
@@ -51,11 +62,6 @@ class DataParams:
     # A user defined configuration for their specific models preprocessor function.  Can provide either a single value or a
     # list of parameters to apply in order. Should align with desired function in preprocessing_fn_name.
     preprocessor_params: Optional[dict | list[dict]] = None
-    # Reference foundation-model configs may toggle this explicitly even though the
-    # current root pipeline routes STFT through preprocessing_fn_name.
-    use_stft_preprocessing: bool = False
-    # Optional STFT configuration used by foundation-model config setters.
-    stft_config: Optional[dict] = None
     # Optional flag for models that consume electrode coordinates in their own
     # model_data_getter / forward kwargs path.
     use_lip_coords: bool = False
@@ -72,6 +78,10 @@ class DataParams:
     signal_unit: Optional[str] = None
     # If true, will drop bad channels marked in raw.info['bads'] after loading data.
     do_drop_bads: bool = True
+    # Optional disk-backed preprocessing path for large lag datasets.
+    chunked_preprocessing: ChunkedPreprocessingParams = field(
+        default_factory=lambda: ChunkedPreprocessingParams()
+    )
 
 
 @dataclass
@@ -131,17 +141,7 @@ class TrainingParams:
     # Whether to visualize fold class distribution before training.
     visualize_fold_distribution: bool = False
     # If true writes training logs to Tensorboard.
-    tensorboard_logging: bool = True
-    # If true trains and evaluates a linear regression baseline.
-    linear_regression_baseline: bool = False
-    # If true trains and evaluates a ridge regression baseline.
-    ridge_regression_baseline: bool = False
-    # Regularization strength (alpha) for ridge regression baseline.
-    ridge_alpha: float = 1.0
-    # If true trains and evaluates a logistic regression baseline.
-    logistic_regression_baseline: bool = False
-    # If true trains and evaluates an L2-regularized logistic regression CV baseline.
-    ridge_logistic_regression_baseline: bool = False
+    tensorboard_logging: bool = False
     # If true, normalizes targets (Y) to zero mean and unit variance using training set statistics.
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
@@ -243,6 +243,8 @@ class ExperimentConfig:
     # For per-region runs, optionally restrict execution to these region names.
     # If None, all configured regions are run.
     regions: Optional[list[str]] = None
+    # Path to the atlas file to use for region-based analyses.
+    atlas_path: Optional[str] = None
     # Name for trial. Will be used for separating results in storage. Can use format strings such as
     # %s, %d, etc and provide which config values you want to fill them in format_fields.
     trial_name: str = ""

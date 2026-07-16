@@ -5,7 +5,7 @@ task_config:
     electrode_file_path: processed_data/all_subject_sig.csv
     use_high_gamma: true
     channel_reg_ex: null
-    window_width: 0.2
+    window_width: 1.0
     preprocessing_fn_name: window_rms
   task_specific_config:
     audio_path: stimuli/podcast.wav
@@ -31,7 +31,6 @@ training_params:
   - corr
   early_stopping_metric: r2
   smaller_is_better: false
-  ridge_regression_baseline: true
   tensorboard_logging: false
   weight_decay: 0.001
   learning_rate: 0.05
@@ -43,3 +42,4 @@ model_spec:
     activation: linear
 trial_name: ridge_regression_volume_level_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

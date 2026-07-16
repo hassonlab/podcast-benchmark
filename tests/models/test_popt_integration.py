@@ -4,7 +4,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from models.popt.integration import ReferencePOPTDecoder
+from core.config import DataParams, ExperimentConfig, ModelSpec, TaskConfig, TrainingParams
+from models.popt.integration import ReferencePOPTDecoder, set_finetuning_config
 
 
 class TestPopTLipCoordsHandling:
@@ -196,3 +197,85 @@ def test_reference_popt_feature_extraction_accepts_subject_channel_chunk():
     features = decoder(x, return_feature_emb_instead_of_projection=True)
 
     assert features.shape == (batch_size, (actual_electrodes + 1) * hidden_dim)
+
+
+class StubRaw:
+    ch_names = ["E1", "E2", "E3", "E4"]
+    info = {"sfreq": 2048}
+
+
+def test_popt_config_setter_uses_explicit_nested_stft_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="popt_finetune",
+            params={"output_dim": 5, "use_lip_coords": True},
+        ),
+        task_config=TaskConfig(
+            data_params=DataParams(
+                target_sr=1000,
+                preprocessing_fn_name=[
+                    "stft_preprocessing",
+                    "foundation_feature_cache",
+                ],
+                preprocessor_params=[
+                    {"freq_channel_cutoff": 24},
+                    {
+                        "mode": "normal",
+                    },
+                ],
+            ),
+        ),
+        training_params=TrainingParams(batch_size=6),
+    )
+
+    result = set_finetuning_config(config, [StubRaw()], None)
+    stft_params = result.task_config.data_params.preprocessor_params[0]
+
+    assert result.task_config.data_params.preprocessing_fn_name == [
+        "stft_preprocessing",
+        "foundation_feature_cache",
+    ]
+    assert stft_params["freq_channel_cutoff"] == 24
+    assert stft_params["fs"] == 1000
+    assert stft_params["batch_size"] == 6
+    assert result.model_spec.params["input_channels"] == 24
+    assert result.task_config.data_params.use_lip_coords is True
+
+
+def test_popt_config_setter_requires_explicit_stft_preprocessor():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="popt_finetune",
+            params={"output_dim": 5},
+        ),
+        task_config=TaskConfig(data_params=DataParams()),
+    )
+
+    with pytest.raises(ValueError, match="requires an explicit 'stft_preprocessing'"):
+        set_finetuning_config(config, [StubRaw()], None)
+
+
+def test_popt_feature_cache_config_setter_does_not_inject_head_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="popt_finetune",
+            params={"feature_cache": True, "output_dim": None},
+            feature_cache=True,
+        ),
+        task_config=TaskConfig(
+            task_name="content_noncontent_task",
+            data_params=DataParams(
+                target_sr=1000,
+                preprocessing_fn_name=["stft_preprocessing", "foundation_feature_cache"],
+                preprocessor_params=[{"freq_channel_cutoff": 24}, {}],
+            ),
+        ),
+        training_params=TrainingParams(batch_size=6),
+    )
+
+    result = set_finetuning_config(config, [StubRaw()], None)
+
+    assert result.model_spec.params["input_channels"] == 24
+    assert result.model_spec.params["output_dim"] is None
+    assert "embedding_dim" not in result.model_spec.params
+    assert "output_activation" not in result.model_spec.params

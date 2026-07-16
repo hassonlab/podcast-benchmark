@@ -195,7 +195,7 @@ training_params:
   # Cross-validation strategy
   fold_type: sequential_folds   # or "zero_shot_folds" for words not in training
   n_folds: 5
-  fold_ids: [0, 1, 2]          # Optional: only run specific folds
+  fold_ids: [1, 2, 3]          # Optional: only run specific 1-based folds
 
   # Time lags - find optimal temporal offset
   min_lag: -500      # Start 500ms before word onset
@@ -211,12 +211,6 @@ training_params:
   # Target manipulation
   normalize_targets: false      # Normalize targets to zero mean / unit variance
   shuffle_targets: false        # Shuffle targets (sanity check baseline)
-
-  # Baseline models
-  linear_regression_baseline: false    # Train and evaluate linear regression baseline
-  logistic_regression_baseline: false  # Train and evaluate logistic regression baseline
-  ridge_regression_baseline: false     # Train and evaluate ridge regression baseline
-  ridge_alpha: 1.0                     # Regularization strength for ridge baseline
 ```
 
 See `core/config.py:TrainingParams` for all available fields.
@@ -296,11 +290,19 @@ task_config:
     preprocessing_fn_name: my_preprocessor  # or [preprocessor1, preprocessor2]
     preprocessor_params:  # Single dict or list of dicts
       param1: value1
+
+    # Optional: preprocess lag windows in temporary disk-backed chunks
+    chunked_preprocessing:
+      enabled: false
+      num_chunks: 1
+      cache_dir: .cache/preprocessed_chunks
 ```
 
 **Note**: `preprocessing_fn_name` and `preprocessor_params` can be either:
 - Single values: Apply one preprocessor
 - Lists: Apply multiple preprocessors in sequence (useful for chaining transformations)
+
+`chunked_preprocessing.enabled` keeps only one preprocessed chunk loaded at a time during training. This is useful for large foundation-model volume-level runs. Chunks are temporary `.npz` files and are deleted after each lag. Leave it disabled for preprocessors that need statistics from the full lag dataset.
 
 ### Task-Specific Config
 
@@ -458,7 +460,7 @@ Apply multiple config setters in sequence:
 config_setter_name: set_input_channels
 
 # Multiple setters (applied in order)
-config_setter_name: [set_input_channels, set_embedding_dim, initialize_model]
+config_setter_name: [set_input_channels, set_output_dim, initialize_model]
 ```
 
 This is useful when you need to:

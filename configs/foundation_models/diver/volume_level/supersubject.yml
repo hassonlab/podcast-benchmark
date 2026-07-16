@@ -1,4 +1,4 @@
-config_setter_name: diver_finetune
+config_setter_name: foundation_feature_cache
 task_config:
   task_name: volume_level_decoding_task
   data_params:
@@ -9,6 +9,31 @@ task_config:
     signal_unit: uV
     do_drop_bads: true
     window_width: 1.0
+    preprocessing_fn_name:
+    - foundation_feature_cache
+    preprocessor_params:
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: diver_finetune
+      foundation_model_spec:
+        constructor_name: diver_finetune
+        params:
+          foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+          patch_sampling_rate: 500
+          patch_size: 50
+          d_model: 256
+          e_layer: 12
+          ft_config: flatten_linear
+          deepspeed_pth_format: true
+          mup_weights: true
+          ft_mup: false
+          feature_cache: true
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
+    chunked_preprocessing:
+      enabled: true
+      num_chunks: 5
   task_specific_config:
     audio_path: stimuli/podcast.wav
     target_sr: 512
@@ -18,8 +43,9 @@ task_config:
     zero_phase: true
     allow_resample_audio: true
     window_size: 200.0
-    hop_size: 25.0
+    hop_size: 100.0
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   epochs: 100
   learning_rate: 1.0e-05
@@ -41,17 +67,12 @@ training_params:
   smaller_is_better: false
 trial_name: diver_supersubject_volume_level
 model_spec:
-  constructor_name: diver_finetune
+  constructor_name: mlp_probe_decoder
   params:
-    foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
-    patch_sampling_rate: 500
-    patch_size: 50
-    d_model: 256
-    e_layer: 12
-    ft_config: flatten_linear
-    deepspeed_pth_format: true
+    layer_sizes:
+    - 1
+    dropout: 0.0
+    use_layer_norm: true
     output_dim: 1
-    freeze_foundation: true
-    mup_weights: true
-    ft_mup: false
+    embedding_dim: 1
   sub_models: {}

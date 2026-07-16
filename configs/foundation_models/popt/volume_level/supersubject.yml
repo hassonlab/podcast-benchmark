@@ -1,4 +1,4 @@
-config_setter_name: popt_finetune
+config_setter_name: foundation_feature_cache
 task_config:
   task_name: volume_level_decoding_task
   data_params:
@@ -8,6 +8,32 @@ task_config:
     target_sr: 2048
     use_lip_coords: true
     window_width: 1.0
+    preprocessing_fn_name:
+    - stft_preprocessing
+    - foundation_feature_cache
+    preprocessor_params:
+    - freq_channel_cutoff: 40
+      nperseg: 400
+      noverlap: 350
+      normalizing: zscore
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: popt_finetune
+      foundation_model_spec:
+        constructor_name: popt_finetune
+        params:
+          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
+          brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+          use_lip_coords: true
+          use_brainbert: true
+          max_coord_value: 5000
+          feature_cache: true
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
+    chunked_preprocessing:
+      enabled: true
+      num_chunks: 8
   task_specific_config:
     audio_path: stimuli/podcast.wav
     target_sr: 512
@@ -17,8 +43,9 @@ task_config:
     zero_phase: true
     allow_resample_audio: true
     window_size: 200.0
-    hop_size: 25.0
+    hop_size: 100.0
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   epochs: 100
   learning_rate: 1.0e-05
@@ -40,16 +67,12 @@ training_params:
   smaller_is_better: false
 trial_name: popt_supersubject_volume_level
 model_spec:
-  constructor_name: popt_finetune
+  constructor_name: mlp_probe_decoder
   params:
-    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/popt/pretrained_model
-    brainbert_model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
-    use_lip_coords: true
-    use_brainbert: true
-    max_coord_value: 5000
-    output_dim: 1
-    mlp_layer_sizes: []
+    layer_sizes:
+    - 1
     dropout: 0.0
-    freeze_foundation: true
-    num_frozen_layers: 0
+    use_layer_norm: true
+    output_dim: 1
+    embedding_dim: 1
   sub_models: {}

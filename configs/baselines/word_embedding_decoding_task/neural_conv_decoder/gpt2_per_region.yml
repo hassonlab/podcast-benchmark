@@ -5,7 +5,7 @@ task_config:
     data_root: data
     word_column: word
     electrode_file_path: null
-    window_width: 0.625
+    window_width: 1.0
     preprocessing_fn_name: window_average_neural_data
     preprocessor_params:
       num_average_samples: 32
@@ -33,6 +33,7 @@ model_spec:
     embedding_dim: 50
   sub_models: {}
 training_params:
+  tensorboard_logging: false
   batch_size: 32
   epochs: 100
   learning_rate: 0.001
@@ -48,3 +49,4 @@ training_params:
   - pairwise_accuracy
 trial_name: ensemble_model_10_gpt2_per_region
 run_mode: per_region
+atlas_path: atlases/destrieux_2009/destrieux2009_rois_lateralized.nii.gz

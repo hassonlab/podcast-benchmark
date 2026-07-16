@@ -5,7 +5,9 @@ import pytest
 import torch
 import torch.nn as nn
 
+from core.config import DataParams, ExperimentConfig, ModelSpec, TaskConfig
 from models.diver.integration import DIVERDecoder, create_data_info_list
+from models.diver.integration import set_diver_finetuning_config
 
 
 class MockDiverBackbone(nn.Module):
@@ -281,3 +283,30 @@ class TestCreateDataInfoList:
 
         for info in data_info_list:
             np.testing.assert_array_equal(info["xyz_id"], xyz_id)
+
+
+class StubRaw:
+    ch_names = ["E1", "E2", "E3"]
+    info = {"sfreq": 500}
+
+
+def test_diver_feature_cache_config_setter_does_not_inject_head_params():
+    config = ExperimentConfig(
+        model_spec=ModelSpec(
+            constructor_name="diver_finetune",
+            params={"feature_cache": True, "output_dim": None},
+            feature_cache=True,
+        ),
+        task_config=TaskConfig(
+            task_name="content_noncontent_task",
+            data_params=DataParams(window_width=1.0),
+        ),
+    )
+
+    result = set_diver_finetuning_config(config, [StubRaw()], None)
+
+    assert result.model_spec.params["input_channels"] == 3
+    assert result.model_spec.params["output_dim"] is None
+    assert result.model_spec.params["_task_info_dict"]["num_targets"] == 1
+    assert "embedding_dim" not in result.model_spec.params
+    assert "output_activation" not in result.model_spec.params

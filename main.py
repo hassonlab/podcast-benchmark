@@ -154,9 +154,8 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
         model_info = registry.model_constructor_registry.get(
             unit_model_spec.constructor_name, {}
         )
-        getter_name = (
-            unit_model_spec.model_data_getter
-            or model_info.get("required_data_getter")
+        getter_name = unit_model_spec.model_data_getter or model_info.get(
+            "required_data_getter"
         )
 
         if getter_name:
@@ -219,15 +218,21 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
 
 
 def _resolve_preprocessing_fns(experiment_config: ExperimentConfig):
-    preprocessing_names = experiment_config.task_config.data_params.preprocessing_fn_name
+    preprocessing_names = (
+        experiment_config.task_config.data_params.preprocessing_fn_name
+    )
     if not preprocessing_names:
         return None
 
     if not isinstance(preprocessing_names, list):
         preprocessing_names = [preprocessing_names]
-        experiment_config.task_config.data_params.preprocessing_fn_name = preprocessing_names
+        experiment_config.task_config.data_params.preprocessing_fn_name = (
+            preprocessing_names
+        )
 
-    return [registry.data_preprocessor_registry[fn_name] for fn_name in preprocessing_names]
+    return [
+        registry.data_preprocessor_registry[fn_name] for fn_name in preprocessing_names
+    ]
 
 
 def _iter_config_setter_names(config_setter_name):
@@ -240,7 +245,9 @@ def _iter_config_setter_names(config_setter_name):
 
 def _build_run_units(experiment_config: ExperimentConfig, base_raws):
     subject_ids = experiment_config.task_config.data_params.subject_ids
-    per_subject_electrodes = experiment_config.task_config.data_params.per_subject_electrodes
+    per_subject_electrodes = (
+        experiment_config.task_config.data_params.per_subject_electrodes
+    )
 
     if experiment_config.run_mode == RunMode.COMBINED:
         return [
@@ -272,6 +279,7 @@ def _build_run_units(experiment_config: ExperimentConfig, base_raws):
             subject_ids=subject_ids,
             raws=base_raws,
             region_groups=REGION_GROUPS,
+            atlas_path=experiment_config.atlas_path,
         )
         if experiment_config.regions is not None:
             requested_regions = set(experiment_config.regions)
@@ -295,7 +303,9 @@ def _build_run_units(experiment_config: ExperimentConfig, base_raws):
             region_subject_ids = []
             for subject_id, raw in zip(subject_ids, base_raws):
                 if subject_id in region_subjects:
-                    region_raws.append(raw)
+                    region_raws.append(
+                        raw.copy().pick(region_subjects[subject_id])
+                    )
                     region_subject_ids.append(subject_id)
 
             if not region_raws:
@@ -325,7 +335,9 @@ def run_multi_task(multi_config: MultiTaskConfig):
 
     for task_idx, task_config in enumerate(multi_config.tasks):
         print("\n" + "=" * 80)
-        print(f"RUNNING TASK {task_idx + 1}/{len(multi_config.tasks)}: {task_config.trial_name}")
+        print(
+            f"RUNNING TASK {task_idx + 1}/{len(multi_config.tasks)}: {task_config.trial_name}"
+        )
         print("=" * 80 + "\n")
 
         # Interpolate {prev_checkpoint_dir} in model_spec if this is not the first task
@@ -345,7 +357,9 @@ def run_multi_task(multi_config: MultiTaskConfig):
         # Update prev_checkpoint_dir for next task
         prev_checkpoint_dir = checkpoint_dir
 
-        print(f"\nTask {task_idx + 1} completed. Checkpoint directory: {checkpoint_dir}\n")
+        print(
+            f"\nTask {task_idx + 1} completed. Checkpoint directory: {checkpoint_dir}\n"
+        )
 
 
 def main():

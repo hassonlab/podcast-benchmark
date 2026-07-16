@@ -21,6 +21,8 @@ def build_subject_variant_config(template_cfg: dict, model: str, task: str, subj
     task_config = cfg.setdefault("task_config", {})
     data_params = task_config.setdefault("data_params", {})
 
+    # Preserve preprocessing settings from the supersubject template, including
+    # chunked_preprocessing for large volume-level foundation model configs.
     data_params["subject_ids"] = [subject_id]
     data_params["electrode_file_path"] = None
     data_params["channel_reg_ex"] = None

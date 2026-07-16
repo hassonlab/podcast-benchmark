@@ -1,14 +1,14 @@
-config_setter_name: brainbert_finetune
+config_setter_name: foundation_feature_cache
 model_spec:
-  constructor_name: brainbert_finetune
+  constructor_name: mlp_probe_decoder
   params:
+    layer_sizes:
+    - 768
     dropout: 0.0
-    freeze_foundation: false
-    mlp_layer_sizes: []
-    model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
-    num_frozen_layers: 0
+    use_layer_norm: true
     output_dim: 768
-    temporal_patches_to_keep: 3
+    embedding_dim: 768
+  sub_models: {}
 task_config:
   data_params:
     data_root: data
@@ -20,6 +20,26 @@ task_config:
     - 8
     channel_reg_ex: null
     per_subject_electrodes: null
+    preprocessing_fn_name:
+    - stft_preprocessing
+    - foundation_feature_cache
+    preprocessor_params:
+    - freq_channel_cutoff: 40
+      nperseg: 400
+      noverlap: 350
+      normalizing: zscore
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: brainbert_finetune
+      foundation_model_spec:
+        constructor_name: brainbert_finetune
+        params:
+          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+          temporal_patches_to_keep: 3
+          feature_cache: true
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
   task_name: llm_decoding_task
   task_specific_config:
     cache_dir: ./model_cache
@@ -29,9 +49,10 @@ task_config:
     prepend_space: true
     transcript_path: data/stimuli/podcast_transcript.csv
 training_params:
+  tensorboard_logging: false
   batch_size: 4
   early_stopping_metric: cross_entropy
-  early_stopping_patience: 5
+  early_stopping_patience: 10
   epochs: 100
   lag_step_size: 500
   learning_rate: 1.0e-05

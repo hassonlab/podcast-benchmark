@@ -16,69 +16,13 @@ import os
 import sys
 import types
 import yaml
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from tqdm import tqdm
 
 from core import registry
-from .simple_transformer import (
-    load_pretrained_model as load_simple_pretrained_model,
-    SimpleTransformer,
-)
-
-# =============================================================================
-# PATTERN 1: FEATURE EXTRACTION (FROZEN MODEL)
-# =============================================================================
-
-
-@registry.register_data_preprocessor("population_transformer_feature_extraction")
-def extract_foundation_features(data, preprocessor_params):
-    """
-    Extract frozen features from the foundation model during preprocessing.
-
-    This pattern:
-    1. Loads the pretrained foundation model
-    2. Freezes all parameters
-    3. Runs the data through the model to extract embeddings
-    4. Returns embeddings which are then used to train a simple decoder
-
-    Args:
-        data: Neural data of shape [num_samples, num_channels, num_timepoints]
-        preprocessor_params: Dictionary with:
-            - model_dir: Path to pretrained model directory
-            - batch_size: Batch size for processing (default: 32)
-
-    Returns:
-        embeddings: Numpy array of shape [num_samples, model_dim]
-    """
-    model_dir = preprocessor_params["model_dir"]
-    batch_size = preprocessor_params.get("batch_size", 32)
-
-    # Load pretrained model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_simple_pretrained_model(model_dir, device=device)
-    model.eval()
-    model.freeze()
-
-    print(f"Loaded foundation model from {model_dir}")
-    print(f"Model has {model.get_num_params():,} parameters (all frozen)")
-
-    # Extract embeddings in batches
-    embeddings = []
-    with torch.no_grad():
-        for i in tqdm(range(0, len(data), batch_size), desc="Extracting features"):
-            batch = torch.tensor(
-                data[i : i + batch_size], dtype=torch.float32, device=device
-            )
-            batch_embeddings = model(batch, return_sequence=False)
-            embeddings.append(batch_embeddings.cpu().numpy())
-
-    embeddings = np.vstack(embeddings)
-    print(f"Extracted embeddings of shape: {embeddings.shape}")
-
-    return embeddings
+from models.shared_decoders import MLPProbeDecoder as MLPDecoder
+from models.stft_config import configure_explicit_stft_preprocessor
 
 
 @registry.register_config_setter("set_sample_rate_for_stft")
@@ -160,66 +104,6 @@ def stft_preprocessing(data, preprocessor_params):
     return datas
 
 
-# Simple MLP decoder to use on top of frozen features
-class MLPDecoder(nn.Module):
-    """
-    Simple MLP decoder for use with frozen foundation features.
-
-    This is used with PATTERN 1 (feature extraction).
-    """
-
-    def __init__(
-        self,
-        input_dim: int,
-        layer_sizes: list[int],
-        dropout: float = 0.0,
-        use_layer_norm: bool = False,
-        output_activation: str = "linear",
-    ):
-        super().__init__()
-
-        self.layers = nn.ModuleList()
-        self.layer_norms = nn.ModuleList() if use_layer_norm else None
-
-        # Build layers
-        prev_dim = input_dim
-        for size in layer_sizes:
-            self.layers.append(nn.Linear(prev_dim, size))
-            if use_layer_norm and size != layer_sizes[-1]:
-                self.layer_norms.append(nn.LayerNorm(size))
-            prev_dim = size
-
-        self.dropout = nn.Dropout(dropout)
-        self.use_layer_norm = use_layer_norm
-        self.output_activation = output_activation
-
-    def forward(self, x):
-        for i, layer in enumerate(self.layers):
-            x = layer(x)
-            # Don't apply activation/dropout to final layer
-            if i < len(self.layers) - 1:
-                if self.use_layer_norm:
-                    x = self.layer_norms[i](x)
-                x = F.relu(x)
-                x = self.dropout(x)
-
-        # Apply output activation if specified
-        if self.output_activation == "sigmoid":
-            x = torch.sigmoid(x)
-        elif self.output_activation == "tanh":
-            x = torch.tanh(x)
-        elif self.output_activation == "softmax":
-            x = F.softmax(x, dim=-1)
-        # "linear" means no activation (default)
-
-        # Squeeze the output to match the label shape [batch_size] instead of [batch_size, 1]
-        # This matches the behavior of neural_conv_decoder
-        if x.shape[-1] == 1:
-            x = x.squeeze(-1)
-
-        return x
-
-
 def _resolve_training_losses(model_params):
     losses = model_params.get("_training_losses")
     if losses:
@@ -241,35 +125,6 @@ def _resolve_output_activation(model_params):
     if "softmax_output" in losses:
         return "softmax"
     return "linear"
-
-
-def _append_preprocessor(data_params, fn_name, params):
-    existing_names = data_params.preprocessing_fn_name
-    existing_params = data_params.preprocessor_params
-
-    if existing_names is None:
-        data_params.preprocessing_fn_name = [fn_name]
-        data_params.preprocessor_params = [params]
-        return
-
-    if not isinstance(existing_names, list):
-        existing_names = [existing_names]
-    if existing_params is None:
-        existing_params = [None] * len(existing_names)
-    elif not isinstance(existing_params, list):
-        existing_params = [existing_params]
-
-    if fn_name in existing_names:
-        idx = existing_names.index(fn_name)
-        while len(existing_params) <= idx:
-            existing_params.append(None)
-        existing_params[idx] = params
-    else:
-        existing_names.append(fn_name)
-        existing_params.append(params)
-
-    data_params.preprocessing_fn_name = existing_names
-    data_params.preprocessor_params = existing_params
 
 
 def _default_output_dim_for_task(task_name, task_specific_config):
@@ -739,365 +594,9 @@ class ReferencePOPTDecoder(nn.Module):
         return self.forward_from_features(features, **kwargs)
 
 
-@registry.register_model_constructor("population_transformer_mlp")
-def create_mlp_decoder(model_params):
-    """
-    Create MLP decoder for frozen foundation features.
-
-    This is used with PATTERN 1 (feature extraction).
-
-    Expected model_params:
-        - input_dim: Dimension of foundation model embeddings
-        - layer_sizes: List of layer sizes for MLP
-        - dropout: Dropout probability (optional)
-        - use_layer_norm: Whether to use layer normalization (optional)
-    """
-    return MLPDecoder(
-        input_dim=model_params["input_dim"],
-        layer_sizes=model_params["layer_sizes"],
-        dropout=model_params.get("dropout", 0.0),
-        use_layer_norm=model_params.get("use_layer_norm", False),
-    )
-
-
 # =============================================================================
 # PATTERN 2: FINETUNING (TRAINABLE MODEL)
 # =============================================================================
-
-
-class PopulationTransformerDecoder(nn.Module):
-    """
-    Decoder that includes the PopulationTransformer model as a trainable submodule.
-
-    This pattern:
-    1. Loads the PopulationTransformer model with pretrained weights
-    2. Optionally freezes some layers (partial finetuning)
-    3. Includes the PopulationTransformer model in the decoder architecture
-    4. During training, gradients flow through unfrozen parts
-
-    This is used with PATTERN 2 (finetuning).
-    """
-
-    def __init__(
-        self,
-        model_dir: str,
-        output_dim: int,
-        mlp_layer_sizes: list[int],
-        freeze_foundation: bool = False,
-        num_frozen_layers: int = 0,
-        dropout: float = 0.0,
-        input_channels: int = None,
-        output_activation: str = "linear",
-        use_lip_coords: bool = False,
-        max_coord_value: int = 5000,
-        use_brainbert: bool = True,
-        brainbert_model_dir: str = None,
-        stft_config: dict = None,
-        sample_rate: int = 2048,
-    ):
-        """
-        Args:
-            model_dir: Path to pretrained foundation model directory
-            output_dim: Output dimension for final predictions
-            mlp_layer_sizes: Layer sizes for decoder head MLP
-            freeze_foundation: If True, freeze entire foundation model
-            num_frozen_layers: Number of foundation layers to freeze (0 = none)
-            dropout: Dropout probability
-            input_channels: Number of input channels (if different from pretrained model)
-            output_activation: Activation function for output layer ("linear", "sigmoid", "tanh", "softmax")
-            use_lip_coords: If True, use LIP coordinates for positional encoding
-            max_coord_value: Maximum coordinate value for PE table
-            use_brainbert: If True, use BrainBERT to process time sequences (default: True, matching original PopT)
-            brainbert_model_dir: Path to BrainBERT pretrained model directory (default: models/brainbert/pretrained_model)
-            stft_config: STFT preprocessing configuration dict. If None, uses default values matching original PopT.
-            sample_rate: Sampling rate (Hz) for STFT preprocessing. Default: 2048
-        """
-        super().__init__()
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Load BrainBERT model if needed
-        self.use_brainbert = use_brainbert
-        if use_brainbert:
-            if brainbert_model_dir is None:
-                # Default BrainBERT path
-                brainbert_model_dir = "models/brainbert/pretrained_model"
-
-            try:
-                from models.brainbert.simple_transformer import (
-                    load_pretrained_model as load_brainbert,
-                )
-
-                self.brainbert = load_brainbert(brainbert_model_dir, device=device)
-                self.brainbert.eval()
-                # BrainBERT is pretrained, so freeze it
-                for param in self.brainbert.parameters():
-                    param.requires_grad = False
-                print(f"Loaded BrainBERT from {brainbert_model_dir}")
-
-                # Initialize STFT preprocessor (matching original PopT)
-                if stft_config is None:
-                    # Default STFT configuration matching original PopT
-                    stft_config = {
-                        "fs": sample_rate,
-                        "freq_channel_cutoff": 40,
-                        "nperseg": 400,
-                        "noverlap": 350,
-                        "normalizing": "zscore",
-                    }
-
-                from .preprocessors.stft import STFTPreprocessor
-
-                self.stft_preprocessor = STFTPreprocessor(**stft_config)
-                self.stft_preprocessor.eval()
-                # STFT is deterministic, no gradients needed
-                for param in self.stft_preprocessor.parameters():
-                    param.requires_grad = False
-                print(
-                    f"Initialized STFT preprocessor with fs={sample_rate}, freq_channels=40"
-                )
-
-            except Exception as e:
-                print(
-                    f"Warning: Failed to load BrainBERT from {brainbert_model_dir}: {e}"
-                )
-                print("Falling back to direct input processing (use_brainbert=False)")
-                self.use_brainbert = False
-                self.brainbert = None
-                self.stft_preprocessor = None
-        else:
-            self.brainbert = None
-            self.stft_preprocessor = None
-
-        # Load pretrained foundation model
-        self.foundation_model = load_pretrained_model(model_dir, device=device)
-
-        # If use_lip_coords is True, we need to replace the positional encoder
-        if use_lip_coords:
-            from .simple_transformer import MultiSubjBrainPositionalEncoding
-
-            self.foundation_model.use_lip_coords = True
-            self.foundation_model.pos_encoder = MultiSubjBrainPositionalEncoding(
-                self.foundation_model.model_dim, dropout, max_coord_value
-            )
-            # Move to device
-            self.foundation_model.pos_encoder.to(device)
-        else:
-            self.foundation_model.use_lip_coords = False
-
-        self.use_lip_coords = use_lip_coords
-
-        # Handle input_projection based on whether BrainBERT is used
-        if self.use_brainbert:
-            # BrainBERT outputs 768-dimensional embeddings per channel
-            expected_input_channels = 768
-            if self.foundation_model.input_channels != expected_input_channels:
-                print(
-                    f"Reinitializing input_projection for BrainBERT output: "
-                    f"{self.foundation_model.input_channels} -> {expected_input_channels}"
-                )
-                model_dim = self.foundation_model.model_dim
-                self.foundation_model.input_projection = nn.Linear(
-                    expected_input_channels, model_dim
-                )
-                self.foundation_model.input_channels = expected_input_channels
-        else:
-            # Direct input processing: use actual channel count
-            if (
-                input_channels is not None
-                and input_channels != self.foundation_model.input_channels
-            ):
-                print(
-                    f"Reinitializing input_projection: {self.foundation_model.input_channels} -> {input_channels}"
-                )
-                model_dim = self.foundation_model.model_dim
-                self.foundation_model.input_projection = nn.Linear(
-                    input_channels, model_dim
-                )
-                self.foundation_model.input_channels = input_channels
-
-        # Handle freezing
-        if freeze_foundation:
-            self.foundation_model.freeze()
-            print("Foundation model completely frozen")
-        elif num_frozen_layers > 0:
-            self.foundation_model.freeze_layers(num_frozen_layers)
-            print(f"Froze first {num_frozen_layers} layers of foundation model")
-        else:
-            print("Foundation model fully trainable")
-
-        # Decoder head (MLP on top of foundation features)
-        foundation_dim = self.foundation_model.model_dim
-        self.decoder_head = MLPDecoder(
-            input_dim=foundation_dim,
-            layer_sizes=mlp_layer_sizes + [output_dim],
-            dropout=dropout,
-            use_layer_norm=True,
-            output_activation=output_activation,
-        )
-
-    def encode_features(self, x, **kwargs):
-        """
-        Compute PopT foundation features before the decoder head.
-
-        Matches original DIVER_CLIP PopT implementation:
-        - Supports data_info_list (original approach)
-        - Also supports lip_coords directly (backward compatibility)
-
-        Args:
-            x: Input tensor [batch_size, num_channels, seq_len] - raw neural signals
-            data_info_list: List of dicts with 'LIP_id' key (original DIVER_CLIP approach)
-            lip_coords: Optional LIP coordinates [batch_size, num_channels, 3] LongTensor (backward compatibility)
-            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
-
-        Returns:
-            Output tensor [batch_size, output_dim]
-        """
-        # Extract LIP_id from data_info_list
-        data_info_list = kwargs.get("data_info_list", None)
-        lip_coords = kwargs.get("lip_coords", None)
-
-        # Extract LIP_id from data_info_list (matching original PopT's datainfo_to_poptpostion_tensor() approach)
-        if data_info_list is not None:
-            # Reference original PopT.py's datainfo_to_poptpostion_tensor() approach
-            coord_tensor = []
-            for i in range(len(data_info_list)):
-                coord_tensor.append(data_info_list[i]["LIP_id"])
-            lip_coords = torch.stack(
-                coord_tensor, dim=0
-            )  # [batch_size, num_channels, 3]
-
-        # Check if input is already STFT preprocessed (4D tensor: [batch, channels, time_stft, freq_channels])
-        is_stft_preprocessed = len(x.shape) == 4
-
-        # Process through BrainBERT if enabled
-        if self.use_brainbert:
-            if self.brainbert is None:
-                raise ValueError("BrainBERT model not loaded but use_brainbert=True")
-
-            if is_stft_preprocessed:
-                # Input is already STFT preprocessed: [batch, channels, time_stft, freq_channels]
-                batch_size, num_channels, time_stft, freq_channels = x.shape
-
-                # Reshape: [batch, channels, time_stft, freq_channels] → [batch*channels, time_stft, freq_channels]
-                x_stft = x.contiguous().view(
-                    batch_size * num_channels, time_stft, freq_channels
-                )
-
-                # Convert to BrainBERT input shape: [batch*channels, time_stft, freq_channels] → [batch*channels, freq_channels, time_stft]
-                # BrainBERT expects [batch, channels, time] where channels=freq_channels (40)
-                x_brainbert = x_stft.transpose(
-                    1, 2
-                )  # [batch*channels, freq_channels, time_stft]
-
-                with torch.no_grad():
-                    # BrainBERT inference (frozen, no gradients) - all channels at once
-                    # Return sequence to keep time dimension for middle selection (matching original PopT)
-                    all_emb_seq = self.brainbert(
-                        x_brainbert, return_sequence=True
-                    )  # [batch*channels, time_stft, 768]
-
-                    # Time dimension processing: select middle portion and pool (matching original PopT)
-                    time_steps_stft = all_emb_seq.shape[1]
-                    middle = int(time_steps_stft / 2)
-                    # Select middle 10 time steps: [batch*channels, 10, 768]
-                    all_emb_selected = all_emb_seq[:, middle - 5 : middle + 5, :]
-
-                    # Mean pooling over time dimension: [batch*channels, 10, 768] → [batch*channels, 768]
-                    all_emb = all_emb_selected.mean(dim=1)  # [batch*channels, 768]
-
-                # Reshape back to [batch, channels, 768]
-                x_emb = all_emb.view(batch_size, num_channels, 768)
-            else:
-                # Input is raw signal: [batch, channels, time]
-                # STFT preprocessing should have been done in data loading, but fallback to model-level STFT
-                if self.stft_preprocessor is None:
-                    raise ValueError(
-                        "Raw signal input detected but STFT preprocessor not initialized. "
-                        "Either enable stft_preprocessing or initialize STFT preprocessor."
-                    )
-
-                batch_size, num_channels, time_steps = x.shape
-
-                # Process all channels at once (matching original PopT implementation)
-                x_reshaped = x.contiguous().view(
-                    batch_size * num_channels, time_steps
-                )  # [batch*channels, time]
-
-                with torch.no_grad():
-                    # STFT preprocessing: [batch*channels, time] → [batch*channels, time_stft, 40]
-                    all_spec = self.stft_preprocessor(
-                        x_reshaped
-                    )  # [batch*channels, time_stft, 40]
-
-                    # Move STFT output to same device as input (STFT returns CPU tensor)
-                    all_spec = all_spec.to(x.device)  # [batch*channels, time_stft, 40]
-
-                    # Convert to BrainBERT input shape: [batch*channels, time_stft, 40] → [batch*channels, 40, time_stft]
-                    all_spec_brainbert = all_spec.transpose(
-                        1, 2
-                    )  # [batch*channels, 40, time_stft]
-
-                    # BrainBERT inference (frozen, no gradients) - all channels at once
-                    all_emb_seq = self.brainbert(
-                        all_spec_brainbert, return_sequence=True
-                    )  # [batch*channels, time_stft, 768]
-
-                    # Time dimension processing: select middle portion and pool (matching original PopT)
-                    time_steps_stft = all_emb_seq.shape[1]
-                    middle = int(time_steps_stft / 2)
-                    all_emb_selected = all_emb_seq[:, middle - 5 : middle + 5, :]
-                    all_emb = all_emb_selected.mean(dim=1)  # [batch*channels, 768]
-
-                # Reshape back to [batch, channels, 768]
-                x_emb = all_emb.view(batch_size, num_channels, 768)
-
-            # Pass BrainBERT embeddings to PopT foundation model
-            if self.use_lip_coords:
-                if lip_coords is None:
-                    raise ValueError("lip_coords is required when use_lip_coords=True")
-                features = self.foundation_model(
-                    x_emb, return_sequence=False, lip_coords=lip_coords
-                )
-            else:
-                features = self.foundation_model(x_emb, return_sequence=False)
-        else:
-            # Direct processing: pass raw signals to PopT (original behavior)
-            if self.use_lip_coords:
-                if lip_coords is None:
-                    raise ValueError("lip_coords is required when use_lip_coords=True")
-                features = self.foundation_model(
-                    x, return_sequence=False, lip_coords=lip_coords
-                )
-            else:
-                features = self.foundation_model(x, return_sequence=False)
-
-        return features
-
-    def forward_from_features(self, features, **kwargs):
-        return self.decoder_head(features)
-
-    def forward(self, x, **kwargs):
-        """
-        Forward pass through STFT → BrainBERT (if enabled) → PopT foundation model.
-
-        Matches original DIVER_CLIP PopT implementation:
-        - Supports data_info_list (original approach)
-        - Also supports lip_coords directly (backward compatibility)
-
-        Args:
-            x: Input tensor [batch_size, num_channels, seq_len] - raw neural signals
-            data_info_list: List of dicts with 'LIP_id' key (original DIVER_CLIP approach)
-            lip_coords: Optional LIP coordinates [batch_size, num_channels, 3] LongTensor (backward compatibility)
-            **kwargs: Additional keyword arguments (e.g., preserve_ensemble for word embedding tasks)
-
-        Returns:
-            Output tensor [batch_size, output_dim]
-        """
-        features = self.encode_features(x, **kwargs)
-        if kwargs.get("return_feature_emb_instead_of_projection", False):
-            return features
-        return self.forward_from_features(features, **kwargs)
 
 
 @registry.register_model_data_getter("popt_lip_coords")
@@ -1181,7 +680,10 @@ def create_finetuning_decoder(model_params):
         - use_brainbert: Whether to use BrainBERT for time sequence processing (optional, default: True)
         - brainbert_model_dir: Path to BrainBERT pretrained model directory (optional)
     """
-    output_dim = model_params.get("output_dim", 1)
+    feature_cache = model_params.get("feature_cache", False)
+    output_dim = model_params.get("output_dim")
+    if output_dim is None:
+        output_dim = 1
     frozen_upstream = model_params.get("frozen_upstream", False) or model_params.get(
         "freeze_foundation", False
     )
@@ -1304,32 +806,6 @@ def create_finetuning_decoder(model_params):
 # =============================================================================
 
 
-@registry.register_config_setter("population_transformer_feature_extraction")
-def set_feature_extraction_config(experiment_config, raws, _df_word):
-    """
-    Config setter for feature extraction pattern.
-
-    Sets the input_dim for the MLP based on the foundation model's dimension.
-    """
-    from .config import load_config
-
-    model_params = experiment_config.model_spec.params
-    model_dir = model_params["model_dir"]
-    config_path = os.path.join(model_dir, "config.yaml")
-    foundation_config = load_config(config_path)
-
-    # Set input_dim to match foundation model output
-    model_params["input_dim"] = foundation_config.model_dim
-
-    # Set preprocessor params
-    data_params = experiment_config.task_config.data_params
-    if not data_params.preprocessor_params:
-        data_params.preprocessor_params = {}
-    data_params.preprocessor_params["model_dir"] = model_dir
-
-    return experiment_config
-
-
 def _find_first_model_spec_by_constructors(model_spec, constructor_names):
     if model_spec.constructor_name in constructor_names:
         return model_spec
@@ -1370,6 +846,9 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         raise ValueError("Could not find PopT model spec.")
 
     model_params = target_spec.params
+    feature_cache = target_spec.feature_cache or model_params.get(
+        "feature_cache", False
+    )
     data_params = experiment_config.task_config.data_params
     task_name = experiment_config.task_config.task_name
     task_specific_config = experiment_config.task_config.task_specific_config
@@ -1391,24 +870,14 @@ def set_finetuning_config(experiment_config, raws, _df_word):
         if raws
         else 512
     )
-    stft_config = dict(
-        model_params.get("stft_config")
-        or data_params.stft_config
-        or {
-            "freq_channel_cutoff": 40,
-            "nperseg": 400,
-            "noverlap": 350,
-            "normalizing": "zscore",
-        }
+    stft_config = configure_explicit_stft_preprocessor(
+        data_params,
+        sample_rate=int(sample_rate),
+        model_name="PopT finetuning",
+        extra_defaults={
+            "batch_size": experiment_config.training_params.batch_size or 4
+        },
     )
-    stft_config.setdefault("fs", int(sample_rate))
-    stft_config.setdefault(
-        "batch_size", experiment_config.training_params.batch_size or 4
-    )
-
-    _append_preprocessor(data_params, "stft_preprocessing", stft_config)
-    data_params.use_stft_preprocessing = True
-    data_params.stft_config = stft_config
     data_params.use_lip_coords = use_lip_coords
 
     if experiment_config.model_spec.constructor_name == "gpt2_brain" and use_lip_coords:
@@ -1438,24 +907,23 @@ def set_finetuning_config(experiment_config, raws, _df_word):
                 window_width = None
         data_params.window_width = window_width or 1.0
 
-    if model_params.get("output_dim") is None:
+    if not feature_cache and model_params.get("output_dim") is None:
         output_dim = _default_output_dim_for_task(task_name, task_specific_config)
         if output_dim is not None:
             model_params["output_dim"] = output_dim
 
-    losses = experiment_config.training_params.losses or []
-    if not losses and experiment_config.training_params.loss_name:
-        losses = [experiment_config.training_params.loss_name]
-    model_params["_training_losses"] = losses
-    model_params["_loss_name"] = experiment_config.training_params.loss_name
-    model_params["output_activation"] = _resolve_output_activation(model_params)
+    if not feature_cache:
+        losses = experiment_config.training_params.losses or []
+        if not losses and experiment_config.training_params.loss_name:
+            losses = [experiment_config.training_params.loss_name]
+        model_params["_training_losses"] = losses
+        model_params["_loss_name"] = experiment_config.training_params.loss_name
+        model_params["output_activation"] = _resolve_output_activation(model_params)
     model_params["input_channels"] = stft_config.get("freq_channel_cutoff", 40)
     model_params["sample_rate"] = int(sample_rate)
     if use_lip_coords:
         model_params.setdefault(
             "popt_position_encoding", "multi_subj_position_encoding"
         )
-    if model_params.get("output_dim") is not None:
-        model_params["embedding_dim"] = model_params["output_dim"]
 
     return experiment_config
