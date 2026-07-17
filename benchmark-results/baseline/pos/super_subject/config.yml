@@ -284,7 +284,7 @@ training_params:
     patience: 10
   shuffle_targets: false
   smaller_is_better: false
-  tensorboard_logging: true
+  tensorboard_logging: false
   top_k_thresholds:
   - 1
   - 5

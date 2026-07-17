@@ -243,7 +243,7 @@ task_config:
           patch_size: 50
         per_subject_feature_concat: false
         sub_models: {}
-      mode: per_subject_feature_concat
+      mode: normal
     signal_unit: uV
     subject_ids:
     - 1
@@ -307,7 +307,7 @@ training_params:
   scheduler_params: null
   shuffle_targets: false
   smaller_is_better: false
-  tensorboard_logging: true
+  tensorboard_logging: false
   top_k_thresholds:
   - 1
   - 5
