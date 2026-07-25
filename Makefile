@@ -247,20 +247,15 @@ train-diver-volume-lags-sequential:
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
 
-# Submit random-init foundation controls for exactly the lags present in
-# benchmark-results. Jobs for each control run sequentially and contain no more
-# than five lags.
+# Submit one random-init rough-pass job for each foundation condition represented
+# in benchmark-results. Each job runs -1000, -500, 0, 500, and 1000 ms.
 # Usage:
 #   make train-foundation-random-init-controls
-#   make train-foundation-random-init-controls LAGS_PER_JOB=3
 #   make train-foundation-random-init-controls SBATCH_FLAGS='-p debug' DRY_RUN=1
 train-foundation-random-init-controls:
-	@lags_per_job="$(LAGS_PER_JOB)"; \
-	if [ -z "$$lags_per_job" ]; then lags_per_job=5; fi; \
-	args=""; \
+	@args=""; \
 	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
 	python scripts/submit_foundation_random_init_lags.py \
-		--lags-per-job="$$lags_per_job" \
 		--sbatch-flags="$(SBATCH_FLAGS)" \
 		--config-overrides="$(CONFIG_OVERRIDES)" \
 		$$args
