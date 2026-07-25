@@ -190,6 +190,8 @@ class ModelSpec:
                    the built sub-models when constructing the parent model.
         checkpoint_path: Optional path to checkpoint for initialization. Supports
                         dynamic formatting with {lag} and {fold} placeholders.
+        random_init: Whether to replace the constructed or checkpoint-loaded weights
+                     with a fresh random initialization.
 
     Example:
         # Nested encoder model inside GPT2Brain
@@ -213,6 +215,7 @@ class ModelSpec:
     per_subject_feature_concat: bool = False
     sub_models: Dict[str, "ModelSpec"] = field(default_factory=dict)
     checkpoint_path: Optional[str] = None
+    random_init: bool = False
     # Optional model_data_getter name. If specified, this getter will be called to
     # add model-specific columns to the task DataFrame. Can override the model's
     # default required_data_getter declared at registration time.

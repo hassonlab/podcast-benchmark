@@ -1,0 +1,80 @@
+config_setter_name: foundation_feature_cache
+model_spec:
+  constructor_name: mlp_probe_decoder
+  params:
+    dropout: 0.0
+    embedding_dim: 50
+    layer_sizes:
+    - 50
+    output_dim: 50
+    use_layer_norm: true
+  sub_models: {}
+task_config:
+  data_params:
+    channel_reg_ex: null
+    data_root: data
+    do_drop_bads: true
+    electrode_file_path: null
+    per_subject_electrodes: null
+    preprocessing_fn_name:
+    - foundation_feature_cache
+    preprocessor_params:
+    - batch_size: 4
+      foundation_config_setter_name: diver_finetune
+      foundation_model_spec:
+        constructor_name: diver_finetune
+        feature_cache: true
+        params:
+          d_model: 256
+          deepspeed_pth_format: true
+          e_layer: 12
+          feature_cache: true
+          foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+          ft_config: flatten_linear
+          ft_mup: false
+          mup_weights: true
+          patch_sampling_rate: 500
+          patch_size: 50
+        per_subject_feature_concat: false
+        sub_models: {}
+        random_init: true
+      mode: normal
+    signal_unit: uV
+    subject_ids:
+    - 1
+    target_sr: 500
+    use_high_gamma: false
+    window_width: 1.0
+    word_column: word
+  task_name: word_embedding_decoding_task
+  task_specific_config:
+    embedding_layer: 24
+    embedding_pca_dim: 50
+    embedding_type: gpt-2xl
+training_params:
+  batch_size: 4
+  early_stopping_metric: cosine_sim
+  early_stopping_patience: 10
+  epochs: 100
+  lag_step_size: 500
+  learning_rate: 1.0e-05
+  loss_weights:
+  - 1.0
+  losses:
+  - mse
+  max_lag: 1500
+  metrics:
+  - mse
+  - corr
+  - cosine_sim
+  - cosine_dist
+  - nll_embedding
+  - pairwise_accuracy
+  - similarity_entropy
+  min_lag: -1000
+  n_folds: 5
+  normalize_targets: true
+  smaller_is_better: false
+  tensorboard_logging: false
+  weight_decay: 1.0e-05
+trial_name: diver_subject1_full_word_embedding_random_init

@@ -23,6 +23,7 @@ Examples:
 - `configs/baselines/word_embedding_decoding_task/ridge_regression/supersubject.yml`
 - `configs/baselines/volume_level_decoding_task/time_pooling_model_torch_ridge_per_region.yml`
 - `configs/controls/llm_decoding/no_brain_data.yml`
+- `configs/controls/foundation_random_init/brainbert_word_embedding_supersubject.yml`
 - `configs/examples/example_foundation_model/finetuning.yml`
 - `configs/foundation_models/brainbert/word_embedding/supersubject.yml`
 - `configs/foundation_models/legacy/popt_word_embedding.yml`

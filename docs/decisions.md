@@ -40,4 +40,6 @@ The shared training loop no longer runs auxiliary sklearn/Himalaya baseline esti
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.
 
+`ModelSpec.random_init` supports checkpoint-architecture controls. Model construction and checkpoint loading happen normally, after which native PyTorch initialization hooks reset standard layers. Any parameter left unchanged receives a `normal(0, 0.02)` fallback, ensuring custom directly registered parameters are also replaced while remaining reproducible under the global PyTorch random seed.
+
 Paper-result consolidation may use explicit model/task lag bounds under `cleaning.lag_bounds`. Filtering is performed before coverage validation and runnable-config generation so a deliberately narrower analysis range does not require rewriting source result CSVs.

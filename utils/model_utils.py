@@ -9,6 +9,38 @@ from core.config import ModelSpec
 from core.registry import model_constructor_registry
 
 
+def _randomly_initialize_model(model: torch.nn.Module) -> None:
+    """Randomize every parameter, falling back when native hooks leave one unchanged.
+
+    Parameters are checked one module at a time to avoid copying the full model.
+    """
+    with torch.no_grad():
+        # Leaf-first order matches torch.nn.Module.apply and avoids retaining a
+        # checkpoint-sized copy of all parameters for the unchanged-value check.
+        for module_name, module in reversed(list(model.named_modules())):
+            direct_parameters = list(module.named_parameters(recurse=False))
+            previous_parameters = {
+                name: parameter.detach().clone()
+                for name, parameter in direct_parameters
+            }
+
+            reset = getattr(module, "reset_parameters", None)
+            if callable(reset):
+                reset()
+
+            for name, parameter in direct_parameters:
+                if not torch.equal(parameter, previous_parameters[name]):
+                    continue
+                if not (parameter.is_floating_point() or parameter.is_complex()):
+                    qualified_name = f"{module_name}.{name}".lstrip(".")
+                    raise TypeError(
+                        f"Cannot randomly initialize non-floating parameter "
+                        f"'{qualified_name}' "
+                        f"with dtype {parameter.dtype}."
+                    )
+                torch.nn.init.normal_(parameter, mean=0.0, std=0.02)
+
+
 def build_model_from_spec(
     model_spec: ModelSpec, lag: Optional[int] = None, fold: Optional[int] = None
 ):
@@ -19,6 +51,8 @@ def build_model_from_spec(
     sub-models as keyword arguments to the registered constructor function.
 
     Supports loading checkpoints with dynamic path formatting for lag and fold values.
+    When ``random_init`` is enabled, the model is reset after checkpoint loading so
+    the checkpoint supplies the architecture but not the learned weights.
 
     Args:
         model_spec: ModelSpec instance describing the model to build
@@ -26,7 +60,8 @@ def build_model_from_spec(
         fold: Current fold number (for checkpoint path formatting)
 
     Returns:
-        The constructed model instance with checkpoints loaded if specified
+        The constructed model instance, with checkpoints loaded and optional random
+        reinitialization applied
 
     Raises:
         KeyError: If the constructor_name is not found in model_constructor_registry
@@ -92,5 +127,8 @@ def build_model_from_spec(
                 f"Checkpoint not found: {checkpoint_path}\n"
                 f"Please ensure the checkpoint exists or run pre-training first."
             )
+
+    if model_spec.random_init:
+        _randomly_initialize_model(model)
 
     return model

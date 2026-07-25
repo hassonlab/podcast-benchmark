@@ -1,0 +1,67 @@
+config_setter_name: foundation_feature_cache
+model_spec:
+  constructor_name: mlp_probe_decoder
+  params:
+    dropout: 0.0
+    embedding_dim: 1
+    layer_sizes:
+    - 1
+    output_dim: 1
+    use_layer_norm: true
+  sub_models: {}
+task_config:
+  data_params:
+    data_root: data
+    electrode_file_path: processed_data/all_subject_sig.csv
+    preprocessing_fn_name:
+    - stft_preprocessing
+    - foundation_feature_cache
+    preprocessor_params:
+    - freq_channel_cutoff: 40
+      normalizing: zscore
+      noverlap: 350
+      nperseg: 400
+    - batch_size: 4
+      foundation_config_setter_name: brainbert_finetune
+      foundation_model_spec:
+        constructor_name: brainbert_finetune
+        feature_cache: true
+        params:
+          feature_cache: true
+          model_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/brainbert/pretrained_model
+          temporal_patches_to_keep: 3
+        per_subject_feature_concat: false
+        sub_models: {}
+        random_init: true
+      mode: normal
+    target_sr: 2048
+    use_high_gamma: false
+    window_width: 1.0
+  task_name: content_noncontent_task
+  task_specific_config:
+    content_noncontent_path: processed_data/df_word_onset_with_pos_class.csv
+training_params:
+  batch_size: 4
+  early_stopping_metric: roc_auc
+  early_stopping_patience: 10
+  epochs: 100
+  lag_step_size: 500
+  learning_rate: 1.0e-05
+  loss_weights:
+  - 1.0
+  losses:
+  - bce_with_logits
+  max_lag: 1500
+  metrics:
+  - roc_auc
+  - sensitivity_logits
+  - specificity_logits
+  - f1_logits
+  - precision_logits
+  - acc_logits
+  min_lag: -1000
+  n_folds: 5
+  smaller_is_better: false
+  tensorboard_logging: false
+  weight_decay: 1.0e-05
+trial_name: brainbert_supersubject_content_noncontent_random_init
