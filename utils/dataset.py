@@ -92,6 +92,7 @@ class RawNeuralDataset:
         window_width: float,
         preprocessing_fns=None,
         preprocessor_params=None,
+        per_raw_event_times=None,
     ):
         self.window_width = window_width
         self.preprocessing_fns = preprocessing_fns
@@ -102,6 +103,23 @@ class RawNeuralDataset:
         self._raw_subject_channel_names = [list(raw.ch_names) for raw in raws]
         self.subject_channel_counts = list(self._raw_subject_channel_counts)
         self._sfreqs = [raw.info["sfreq"] for raw in raws]
+
+        if per_raw_event_times is None:
+            base_onsets = task_df["start"].to_numpy(dtype=float)
+            per_raw_event_times = [base_onsets.copy() for _ in raws]
+        if len(per_raw_event_times) != len(raws):
+            raise ValueError(
+                "per_raw_event_times must contain one onset array per Raw"
+            )
+        self.per_raw_event_times = []
+        for onsets in per_raw_event_times:
+            values = np.asarray(onsets, dtype=float)
+            if values.ndim != 1 or len(values) != len(task_df):
+                raise ValueError(
+                    "Each per-subject event-time array must be one-dimensional "
+                    "and match task_df length"
+                )
+            self.per_raw_event_times.append(values)
 
         if len(set(self._sfreqs)) != 1:
             raise ValueError(
@@ -120,43 +138,36 @@ class RawNeuralDataset:
 
     def _selection_for_lag(self, lag: int):
         _, _, tmin, tmax = self._lag_window_params(lag)
-        selected_rows_df = None
-        subject_channel_counts = []
-        subject_channel_names = []
-        per_raw_onsets = []
-
-        for data_duration, channel_count, channel_names in zip(
-            self.data_durations,
-            self._raw_subject_channel_counts,
-            self._raw_subject_channel_names,
+        common_bounds_mask = np.ones(len(self.task_df), dtype=bool)
+        common_nonduplicate_mask = np.ones(len(self.task_df), dtype=bool)
+        onset_samples_by_raw = []
+        for data_duration, event_times in zip(
+            self.data_durations, self.per_raw_event_times
         ):
-            valid_mask = (self.task_df.start + tmin >= 0) & (
-                self.task_df.start + tmax <= data_duration
+            finite = np.isfinite(event_times)
+            in_bounds = (event_times + tmin >= 0) & (
+                event_times + tmax <= data_duration
             )
-            task_df_valid = self.task_df[valid_mask].reset_index(drop=True)
+            safe_event_times = np.where(finite, event_times, 0.0)
+            onset_samples = np.rint(safe_event_times * self.sfreq).astype(np.int64)
+            nonduplicate = ~pd.Series(onset_samples).duplicated().to_numpy()
+            common_bounds_mask &= finite & in_bounds
+            common_nonduplicate_mask &= nonduplicate
+            onset_samples_by_raw.append(onset_samples)
 
-            if len(task_df_valid) == 0:
-                continue
-
-            onset_samples = (task_df_valid.start.to_numpy() * self.sfreq).astype(int)
-            selection = np.flatnonzero(
-                ~pd.Series(onset_samples).duplicated().to_numpy()
-            )
-            selected_rows_this_raw = task_df_valid.iloc[selection]
-
-            if selected_rows_df is None:
-                selected_rows_df = selected_rows_this_raw
-            else:
-                assert selected_rows_df.equals(
-                    selected_rows_this_raw
-                ), "Selected rows differ across raws"
-
-            per_raw_onsets.append(onset_samples[selection])
-            subject_channel_counts.append(channel_count)
-            subject_channel_names.append(channel_names)
-
-        if not per_raw_onsets or selected_rows_df is None:
+        common_mask = common_bounds_mask & common_nonduplicate_mask
+        selection = np.flatnonzero(common_mask)
+        if len(selection) == 0:
             raise ValueError("No valid events found within data time bounds")
+
+        selected_rows_df = self.task_df.iloc[selection].copy()
+        # Preserve the legacy MNE Epochs selection index: bounds filtering
+        # resets the row index, while duplicate removal can leave gaps.
+        bounded_positions = np.flatnonzero(common_bounds_mask)
+        selected_rows_df.index = np.searchsorted(bounded_positions, selection)
+        per_raw_onsets = [onsets[selection] for onsets in onset_samples_by_raw]
+        subject_channel_counts = list(self._raw_subject_channel_counts)
+        subject_channel_names = list(self._raw_subject_channel_names)
 
         return (
             selected_rows_df,

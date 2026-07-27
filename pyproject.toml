@@ -7,7 +7,7 @@ name = "podcast-benchmark"
 version = "0.1.0"
 description = "ECoG decoding benchmark for podcast data"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10,<3.13"
 authors = [
     {name = "Zach Paris", email = "zparis99@gmail.com"}
 ]

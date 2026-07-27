@@ -4,9 +4,10 @@ from typing import Optional
 import numpy as np
 import torch
 import mne
-from mne_bids import BIDSPath
 import pandas as pd
 import torch
+
+import datasets  # noqa: F401  # Populate built-in dataset registrations.
 
 from core.config import DataParams
 from core import registry
@@ -17,32 +18,20 @@ def load_raws(data_params: DataParams):
     Loads raw iEEG data with YAML-configurable preprocessing.
     All transformations (Resampling, Drop Bad, Scaling) happen here directly on the Raw object.
     """
+    dataset = registry.get_dataset(data_params.dataset_name)
     raws = []
 
     for sub_id in data_params.subject_ids:
-        if data_params.use_high_gamma:
-            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
-            description = "highgamma"
-            print(f"Loading High Gamma data for subject {sub_id}...")
-        else:
-            root_path = os.path.join(data_params.data_root, "derivatives/ecogprep")
-            description = None
-            print(f"Loading Raw data for subject {sub_id}...")
-
-        file_path = BIDSPath(
-            root=root_path,
-            subject=f"{sub_id:02}",
-            task="podcast",
-            datatype="ieeg",
-            description=description,
-            suffix="ieeg",
-            extension=".fif",
+        print(
+            f"Loading {data_params.dataset_name} data for subject {sub_id} "
+            f"({'high-gamma' if data_params.use_high_gamma else 'broadband'})..."
         )
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Data file not found: {file_path}")
-
-        raw = mne.io.read_raw_fif(file_path, preload=True, verbose=False)
+        raw = dataset["getter"](sub_id, data_params)
+        if not isinstance(raw, mne.io.BaseRaw):
+            raise TypeError(
+                f"Dataset '{data_params.dataset_name}' getter returned "
+                f"{type(raw).__name__}, expected an MNE Raw"
+            )
 
         if data_params.target_sr is not None:
             if int(raw.info["sfreq"]) != int(data_params.target_sr):
@@ -51,50 +40,11 @@ def load_raws(data_params: DataParams):
                 )
                 raw.resample(data_params.target_sr)
 
-        if data_params.do_drop_bads:
-            try:
-                # Build channels.tsv path via BIDSPath (avoid accidental reading of .fif)
-                ch_path = file_path.copy()
-                ch_path.update(suffix="channels", extension=".tsv")
-                tsv_path = str(ch_path)
-
-                # Some datasets omit 'description' on channels.tsv even if present on ieeg.fif
-                if not os.path.exists(tsv_path) and getattr(
-                    file_path, "description", None
-                ):
-                    ch_path2 = file_path.copy()
-                    ch_path2.update(
-                        description=None, suffix="channels", extension=".tsv"
-                    )
-                    tsv_path = str(ch_path2)
-
-                if not os.path.exists(tsv_path) and "derivatives" in str(file_path):
-                    raw_root = data_params.data_root
-                    raw_bids_path = BIDSPath(
-                        root=raw_root,
-                        subject=f"{sub_id:02}",
-                        task="podcast",
-                        datatype="ieeg",
-                        suffix="channels",
-                        extension=".tsv",
-                    )
-                    tsv_path = str(raw_bids_path)
-
-                if os.path.exists(tsv_path):
-                    df_ch = pd.read_csv(tsv_path, sep="\t")
-                    if "status" in df_ch.columns and "name" in df_ch.columns:
-                        bad_channels = df_ch[df_ch["status"] == "bad"]["name"].tolist()
-                        if bad_channels:
-                            bad_channels = [
-                                ch for ch in bad_channels if ch in raw.ch_names
-                            ]
-                            raw.info["bads"].extend(bad_channels)
-                            print(
-                                f"  - [Config] Dropping {len(bad_channels)} bad channels"
-                            )
-                            raw.drop_channels(bad_channels)
-            except Exception as e:
-                print(f"Warning: Failed to process bad channels: {e}")
+        if data_params.do_drop_bads and raw.info["bads"]:
+            bad_channels = [ch for ch in raw.info["bads"] if ch in raw.ch_names]
+            if bad_channels:
+                print(f"  - [Config] Dropping {len(bad_channels)} bad channels")
+                raw.drop_channels(bad_channels)
 
         if data_params.signal_unit == "uV":
             print(f"  - [Config] Scaling data: Volt -> MicroVolt (x 1e6)")
@@ -111,6 +61,28 @@ def load_raws(data_params: DataParams):
         raws.append(raw)
 
     return raws
+
+
+def get_event_times(
+    task_df: pd.DataFrame, data_params: DataParams
+) -> Optional[list[np.ndarray]]:
+    """Resolve one neural-clock event-onset array per configured subject."""
+    dataset = registry.get_dataset(data_params.dataset_name)
+    event_time_getter = dataset.get("event_time_getter")
+    if event_time_getter is None:
+        return None
+    event_times = []
+    for subject_id in data_params.subject_ids:
+        values = np.asarray(
+            event_time_getter(task_df, subject_id, data_params), dtype=float
+        )
+        if values.ndim != 1 or len(values) != len(task_df):
+            raise ValueError(
+                f"Dataset '{data_params.dataset_name}' event-time getter for "
+                f"subject {subject_id} must return one value per task row"
+            )
+        event_times.append(values)
+    return event_times
 
 
 def read_subject_mapping(participant_map_file: str, delimiter="\t"):

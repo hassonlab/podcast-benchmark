@@ -3,12 +3,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseWordLabelTaskConfig, TaskConfig
 from core import registry
+from utils.label_utils import load_label_table
 
 
 @dataclass
-class SentenceOnsetConfig(BaseTaskConfig):
+class SentenceOnsetConfig(BaseWordLabelTaskConfig):
     """Configuration for sentence_onset_task."""
     sentence_csv_path: str = "processed_data/all_sentences_podcast.csv"
     word_csv_path: str = "processed_data/df_word_onset_with_pos_class.csv"
@@ -37,30 +38,41 @@ def sentence_onset_task(task_config: TaskConfig):
     # Get typed task-specific config
     config: SentenceOnsetConfig = task_config.task_specific_config
 
-    df_sentence = pd.read_csv(config.sentence_csv_path)
-    df_word = pd.read_csv(config.word_csv_path)
-
-    if "sentence_onset" not in df_sentence.columns:
-        raise ValueError("Expected column 'sentence_onset' in sentence CSV")
-
-    if "onset" not in df_word.columns:
-        raise ValueError("Expected column 'onset' in word CSV")
-
-    sentence_onsets = df_sentence["sentence_onset"].to_numpy(dtype=float)
-    word_onsets = df_word["onset"].to_numpy(dtype=float)
-
-    if len(sentence_onsets) == 0 or len(word_onsets) == 0:
-        word_matches_sentence = np.zeros(len(word_onsets), dtype=bool)
-        sentence_matches_word = np.zeros(len(sentence_onsets), dtype=bool)
-    else:
-        matches = np.isclose(
-            word_onsets[:, None],
-            sentence_onsets[None, :],
-            atol=1e-6,
-            rtol=0.0,
+    canonical_table = None
+    if config.labels_path:
+        canonical_table = load_label_table(
+            config.labels_path, required_columns=("sentence_onset",)
         )
-        word_matches_sentence = matches.any(axis=1)
-        sentence_matches_word = matches.any(axis=0)
+        word_onsets = canonical_table["start"].to_numpy(dtype=float)
+        sentence_values = canonical_table["sentence_onset"]
+        if sentence_values.dtype == object:
+            normalized = sentence_values.astype(str).str.strip().str.lower()
+            unknown = ~normalized.isin({"true", "false", "1", "0"})
+            if unknown.any():
+                raise ValueError(
+                    "sentence_onset values must be booleans or 0/1"
+                )
+            sentence_values = normalized.isin({"true", "1"})
+        word_matches_sentence = sentence_values.astype(bool).to_numpy()
+        sentence_matches_word = np.ones(int(word_matches_sentence.sum()), dtype=bool)
+    else:
+        df_sentence = pd.read_csv(config.sentence_csv_path)
+        df_word = pd.read_csv(config.word_csv_path)
+        if "sentence_onset" not in df_sentence.columns:
+            raise ValueError("Expected column 'sentence_onset' in sentence CSV")
+        if "onset" not in df_word.columns:
+            raise ValueError("Expected column 'onset' in word CSV")
+        sentence_onsets = df_sentence["sentence_onset"].to_numpy(dtype=float)
+        word_onsets = df_word["onset"].to_numpy(dtype=float)
+        if len(sentence_onsets) == 0 or len(word_onsets) == 0:
+            word_matches_sentence = np.zeros(len(word_onsets), dtype=bool)
+            sentence_matches_word = np.zeros(len(sentence_onsets), dtype=bool)
+        else:
+            matches = np.isclose(
+                word_onsets[:, None], sentence_onsets[None, :], atol=1e-6, rtol=0.0
+            )
+            word_matches_sentence = matches.any(axis=1)
+            sentence_matches_word = matches.any(axis=0)
 
     pos = pd.DataFrame(
         {
@@ -97,6 +109,11 @@ def sentence_onset_task(task_config: TaskConfig):
         .sort_values("start")
         .reset_index(drop=True)
     )
+    if canonical_table is not None and len(df_out):
+        metadata = canonical_table.drop_duplicates("start").set_index("start")
+        for column in ("event_id", "word", "end"):
+            if column in metadata:
+                df_out[column] = df_out["start"].map(metadata[column])
 
     # Print dataset summary for inspection
     print(f"\n=== SENTENCE ONSET DATASET ===")

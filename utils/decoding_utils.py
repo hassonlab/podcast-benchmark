@@ -1177,6 +1177,7 @@ def run_training_over_lags(
     checkpoint_dir="checkpoints/",
     write_to_tensorboard=False,
     tensorboard_dir="event_log",
+    per_raw_event_times=None,
 ):
     data_params = task_config.data_params
     os.makedirs(output_dir, exist_ok=True)
@@ -1200,6 +1201,7 @@ def run_training_over_lags(
         data_params.window_width,
         preprocessing_fns,
         data_params.preprocessor_params,
+        per_raw_event_times=per_raw_event_times,
     )
 
     for lag in lags:

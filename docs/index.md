@@ -17,15 +17,17 @@ A benchmarking framework for neural decoding from podcast listening data.
 1. [Quickstart](quickstart.md) - Get up and running quickly
 2. [Onboarding a New Model](onboarding-model.md) - Step-by-step guide to adding your own decoding model
 3. [Adding a New Task](adding-task.md) - How to implement custom decoding tasks
-4. [Configuration Guide](configuration.md) - Understanding and configuring experiments
-5. [Task Reference](task-reference.md) - Complete reference for all available tasks
-6. [Baseline Results](baseline-results.md) - Performance benchmarks for all tasks
-7. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
+4. [Adding a Dataset](adding-dataset.md) - Load MNE recordings and align stimulus events
+5. [Configuration Guide](configuration.md) - Understanding and configuring experiments
+6. [Task Reference](task-reference.md) - Complete reference for all available tasks
+7. [Baseline Results](baseline-results.md) - Performance benchmarks for all tasks
+8. [Registry API Reference](api-reference.md) - Registry decorators and function signatures
 
 ## Overview
 
 This framework provides a flexible system for:
 - Training neural decoding models on iEEG data
+- Registering new MNE-compatible datasets with subject-specific stimulus timing
 - Evaluating foundation models (POPT, DIVER, BrainBERT) on standardized tasks
 - Comparing different model architectures
 - Evaluating performance across multiple metrics

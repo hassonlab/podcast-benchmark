@@ -10,6 +10,26 @@ The framework uses registries to discover and manage model components. Decorate 
 
 ---
 
+## `@register_dataset(name=None, event_time_getter=None)`
+
+Register an MNE Raw getter under a dataset name. Modules placed in `datasets/` are imported automatically.
+
+```python
+def dataset_getter(subject_id: int, data_params: DataParams) -> mne.io.BaseRaw:
+    ...
+```
+
+The optional event-time getter has signature:
+
+```python
+def event_time_getter(task_df, subject_id: int, data_params: DataParams):
+    return neural_clock_onsets  # one float per task row, in seconds
+```
+
+Use `data_params.dataset_name` to select the getter and `data_params.dataset_params` for dataset-specific options.
+
+---
+
 ## `@register_model_constructor(name=None, required_data_getter=None)`
 
 Register a function that constructs your decoding model.
