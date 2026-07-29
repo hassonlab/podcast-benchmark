@@ -14,7 +14,7 @@ The main pipeline is:
 4. `utils/dataset.py` slices lagged neural windows and applies registered preprocessors. Large runs can opt into disk-backed preprocessing chunks with `data_params.chunked_preprocessing.enabled`.
 5. `utils/model_utils.py` builds the configured model from the registry.
 6. `utils/decoding_utils.py` trains and evaluates the model across folds and lags.
-7. Metrics from `metrics/` are written to result directories.
+7. Metrics from `metrics/` are written to result directories. Runs with `training_params.save_test_predictions: true` also write best-checkpoint, out-of-fold test outputs to `test_predictions.h5` for paired analyses; full LLM token-logit outputs are intentionally unsupported.
 
 ## Important Folders and Files
 

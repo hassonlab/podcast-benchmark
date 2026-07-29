@@ -83,6 +83,7 @@ class RawNeuralDataset:
         lags: List of lags in milliseconds to support.
         preprocessing_fns: Optional list of preprocessing functions applied after slicing.
         preprocessor_params: Parameters forwarded to preprocessing functions.
+        include_sample_ids: Add stable string sample IDs to selected task rows.
     """
 
     def __init__(
@@ -93,11 +94,27 @@ class RawNeuralDataset:
         preprocessing_fns=None,
         preprocessor_params=None,
         per_raw_event_times=None,
+        include_sample_ids: bool = False,
     ):
         self.window_width = window_width
         self.preprocessing_fns = preprocessing_fns
         self.preprocessor_params = preprocessor_params
-        self.task_df = task_df
+        self.task_df = task_df.copy()
+        if include_sample_ids:
+            if "sample_id" in self.task_df:
+                sample_ids = self.task_df["sample_id"]
+            elif "event_id" in self.task_df:
+                sample_ids = self.task_df["event_id"]
+            else:
+                sample_ids = pd.Series(
+                    np.arange(len(self.task_df), dtype=np.int64),
+                    index=self.task_df.index,
+                )
+            if sample_ids.isna().any() or sample_ids.duplicated().any():
+                raise ValueError("Task sample IDs must be present and unique")
+            # A single UTF-8 representation gives HDF5 artifacts a stable join
+            # key even when tasks use different event-id scalar types.
+            self.task_df["sample_id"] = sample_ids.astype(str).to_numpy()
         self.data_durations = [raw.times[-1] for raw in raws]
         self._raw_subject_channel_counts = [len(raw.ch_names) for raw in raws]
         self._raw_subject_channel_names = [list(raw.ch_names) for raw in raws]
@@ -466,11 +483,20 @@ class ChunkedPreprocessedLoader:
                 {
                     "chunk_idx": chunk_idx,
                     "local_positions": local_positions,
+                    "absolute_positions": absolute_positions,
                     "split_positions": split_positions,
                     "batches": batches,
                 }
             )
         return plans
+
+    def ordered_indices(self):
+        """Return absolute row positions in non-shuffled iteration order."""
+        if not self.chunk_plans:
+            return np.array([], dtype=np.int64)
+        return np.concatenate(
+            [plan["absolute_positions"] for plan in self.chunk_plans]
+        ).astype(np.int64, copy=False)
 
     def __len__(self):
         return self._length

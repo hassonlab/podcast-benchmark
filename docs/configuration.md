@@ -211,6 +211,7 @@ training_params:
   # Target manipulation
   normalize_targets: false      # Normalize targets to zero mean / unit variance
   shuffle_targets: false        # Shuffle targets (sanity check baseline)
+  save_test_predictions: false  # Save out-of-fold test outputs to HDF5
 ```
 
 See `core/config.py:TrainingParams` for all available fields.
