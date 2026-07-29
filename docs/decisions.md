@@ -20,6 +20,8 @@ Task tables describe canonical stimulus events and targets. A dataset may option
 
 Dataset getters return MNE Raw objects and mark dataset-specific bad channels in `raw.info['bads']`; shared loading then handles configured dropping, resampling, unit conversion, and channel selection. Dataset preprocessing that affects referencing, such as Brain Treebank corrupted-channel removal before common-average reference, is performed when the reusable FIF artifact is built.
 
+Brain Treebank artifact construction resamples each HDF5 electrode while reading when a target rate is requested. Full-movie source recordings are too large to safely stack and copy at 2048 Hz before downsampling; channel-wise resampling preserves the artifact builder's output rate while bounding peak memory.
+
 ## Canonical Word Labels
 
 Reusable word-level label artifacts use unique `event_id`, stimulus-time `start`, and optional `end`, `word`, and task columns. Linguistic task getters are views over that table. Legacy Podcast paths and column aliases remain accepted, while new datasets can generate one table for surprisal, content/function, POS, and sentence-onset tasks.

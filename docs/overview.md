@@ -24,7 +24,7 @@ The main pipeline is:
 
 `core/config.py` defines the dataclasses used by YAML configs, including `ExperimentConfig`, `TaskConfig`, `DataParams`, `TrainingParams`, and `ModelSpec`.
 
-`configs/` contains experiment YAML files. `configs/foundation_models/` holds generated benchmark configs for foundation models and tasks. These configs list foundation preprocessing steps directly; BrainBERT and PopT configs declare STFT as an explicit step before `foundation_feature_cache`, and DIVER configs call `foundation_feature_cache` directly. Nested foundation specs inside `foundation_feature_cache` are cache-only feature extraction specs and intentionally omit task head parameters. Volume-level foundation configs can opt into temporary chunked preprocessing for large lag tensors; DIVER volume-level configs use five chunks to bound peak memory. `configs/examples/` contains smaller examples.
+`configs/` contains experiment YAML files. `configs/brain_treebank/` contains matching per-subject suites for the linear model, CNN, BrainBERT, DIVER, and PopT across canonical Brain Treebank word-label tasks; its foundation configs can be regenerated with `scripts/generate_brain_treebank_foundation_configs.py`. `configs/foundation_models/` holds Podcast benchmark configs for foundation models and tasks. These configs list foundation preprocessing steps directly; BrainBERT and PopT configs declare STFT as an explicit step before `foundation_feature_cache`, and DIVER configs call `foundation_feature_cache` directly. Nested foundation specs inside `foundation_feature_cache` are cache-only feature extraction specs and intentionally omit task head parameters. Volume-level foundation configs can opt into temporary chunked preprocessing for large lag tensors; DIVER volume-level configs use five chunks to bound peak memory. `configs/examples/` contains smaller examples.
 
 `tasks/` defines decoding targets such as word embeddings, Whisper embeddings, sentence onset, content/non-content words, part of speech, LLM surprise, IU boundaries, volume level, and LLM decoding. Each task registers a data getter and task-specific config.
 
@@ -46,7 +46,7 @@ Model configs use `model_params.output_dim` for decoder output size across regre
 `benchmark-results/` and `paper-results/` contain generated benchmark outputs and paper-oriented result artifacts.
 
 `scripts/` contains one-off and batch utilities for generating configs, training targets, paper results, scoring, profiling, transcription, and analysis.
-`scripts/preprocess_brain_treebank.py` converts Brain Treebank HDF5 trials into benchmark FIF and sync artifacts. `scripts/build_word_labels.py` creates canonical Podcast or Brain Treebank word-label tables.
+`scripts/preprocess_brain_treebank.py` converts Brain Treebank HDF5 trials into benchmark FIF and sync artifacts, resampling each source channel during loading to keep full-movie conversion memory bounded. `scripts/build_word_labels.py` creates canonical Podcast or Brain Treebank word-label tables. Small Brain Treebank CNN proof-of-concept configs live under `configs/examples/brain_treebank/`.
 `scripts/clean_paper_result_config.py` can apply model/task-specific inclusive lag bounds from `cleaning.lag_bounds` while consolidating result shards.
 
 `tests/` contains pytest coverage for configs, registries, data loading, datasets, tasks, metrics, model integrations, scripts, and smoke tests for the training loop.
