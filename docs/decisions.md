@@ -48,6 +48,12 @@ DIVER volume-level configs use five temporary preprocessing chunks by default. T
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
 
+## Out-of-Fold Prediction Artifacts
+
+Test-prediction persistence is opt-in because vector targets can materially increase result storage. Enabled runs write original-scale predictions, targets, stable sample identifiers, onsets, folds, and target-normalization statistics to one HDF5 artifact per run unit. This supports paired downstream tests without retaining training or validation predictions. LLM decoding logits are excluded because their vocabulary dimension would make these artifacts tens to hundreds of gigabytes per run.
+
+Target-shuffling controls randomize training labels inside each fold while preserving validation and test labels. Zero-shot word folds use stable first-occurrence ordering so separate model processes can produce genuinely paired test partitions.
+
 ## YAML Experiment Configuration
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.

@@ -3,6 +3,7 @@ import gc
 import os
 import math
 import matplotlib.pyplot as plt
+import h5py
 import numpy as np
 import pandas as pd
 import torch
@@ -261,14 +262,24 @@ def should_update_gradient_accumulation(
     ) == total_batches
 
 
-def _maybe_shuffle_targets(Y: torch.Tensor, training_params: TrainingParams):
+def _maybe_shuffle_training_targets(
+    target_splits, training_params: TrainingParams, fold: int
+):
+    """Shuffle only a fold's training labels for the sanity-check control."""
     if not training_params.shuffle_targets:
-        return Y
+        return target_splits
 
-    print("WARNING: Shuffling targets for sanity check. Model should perform poorly.")
-    rng = np.random.default_rng(training_params.random_seed)
-    shuffle_indices = rng.permutation(len(Y))
-    return Y[shuffle_indices]
+    print(
+        "WARNING: Shuffling training targets for sanity check. "
+        "Model should perform poorly."
+    )
+    rng = np.random.default_rng(training_params.random_seed + fold * 9173)
+    shuffle_indices = torch.as_tensor(
+        rng.permutation(len(target_splits["train"])), dtype=torch.long
+    )
+    shuffled = dict(target_splits)
+    shuffled["train"] = target_splits["train"][shuffle_indices]
+    return shuffled
 
 
 def _get_fold_indices(
@@ -402,6 +413,16 @@ def _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params: Training
         "val": (Y[va_idx] - y_mean) / y_std,
         "test": (Y[te_idx] - y_mean) / y_std,
     }
+
+
+def _fold_target_normalization_stats(Y, tr_idx, training_params: TrainingParams):
+    if not training_params.normalize_targets:
+        return None
+    Y_train = Y[tr_idx]
+    y_mean = Y_train.mean(dim=0, keepdim=True)
+    y_std = Y_train.std(dim=0, keepdim=True)
+    y_std = torch.where(y_std < 1e-6, torch.ones_like(y_std), y_std)
+    return y_mean, y_std
 
 
 def _normalize_full_targets(Y, tr_idx, va_idx, te_idx, training_params: TrainingParams):
@@ -837,6 +858,109 @@ def _collect_loader_features(loader):
     return torch.cat(test_features, dim=0), torch.cat(test_targets, dim=0)
 
 
+def _collect_model_outputs(model, loader, device):
+    predictions = []
+    model.eval()
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, _ = _move_batch_to_device(batch_data, device)
+            predictions.append(model(Xb, **inputs_dict).detach().cpu())
+    return torch.cat(predictions, dim=0)
+
+
+def _loader_output_indices(loader, split_indices):
+    if hasattr(loader, "ordered_indices"):
+        return np.asarray(loader.ordered_indices(), dtype=np.int64)
+    return np.asarray(split_indices, dtype=np.int64)
+
+
+def _prediction_record(
+    model,
+    loader,
+    device,
+    data_df,
+    original_targets,
+    te_idx,
+    fold,
+    normalization_stats,
+):
+    predictions = _collect_model_outputs(model, loader, device)
+    output_indices = _loader_output_indices(loader, te_idx)
+    if len(output_indices) != len(predictions):
+        raise RuntimeError("Prediction rows do not align with test sample indices")
+
+    if normalization_stats is not None:
+        y_mean, y_std = normalization_stats
+        predictions = predictions * y_std.cpu() + y_mean.cpu()
+
+    rows = data_df.iloc[output_indices]
+    raw_targets = original_targets[
+        torch.as_tensor(output_indices, dtype=torch.long)
+    ].detach().cpu()
+    record = {
+        "fold": int(fold),
+        "sample_id": rows["sample_id"].astype(str).to_numpy(),
+        "start": rows["start"].to_numpy(dtype=np.float64),
+        "prediction": predictions.numpy().astype(np.float32, copy=False),
+        "target": raw_targets.numpy().astype(np.float32, copy=False),
+    }
+    if normalization_stats is not None:
+        record["target_mean"] = normalization_stats[0].detach().cpu().numpy()
+        record["target_std"] = normalization_stats[1].detach().cpu().numpy()
+    return record
+
+
+def _create_compressed_dataset(group, name, values):
+    values = np.asarray(values)
+    kwargs = {}
+    if values.size:
+        kwargs = {"compression": "gzip", "shuffle": True}
+    group.create_dataset(name, data=values, **kwargs)
+
+
+def _write_prediction_artifact(filename, lag, task_name, records):
+    """Commit one completed lag of out-of-fold predictions to HDF5."""
+    final_group_name = f"lag_{int(lag)}"
+    pending_group_name = f"_pending_{final_group_name}"
+    string_dtype = h5py.string_dtype(encoding="utf-8")
+
+    with h5py.File(filename, "a") as artifact:
+        artifact.attrs["schema_version"] = 1
+        artifact.attrs["task_name"] = task_name
+        for stale_name in (pending_group_name, final_group_name):
+            if stale_name in artifact:
+                del artifact[stale_name]
+        lag_group = artifact.create_group(pending_group_name)
+        lag_group.attrs["lag_ms"] = int(lag)
+
+        for record in records:
+            fold_group = lag_group.create_group(f"fold_{record['fold']}")
+            fold_group.attrs["fold"] = record["fold"]
+            fold_group.attrs["normalized_during_training"] = (
+                "target_mean" in record
+            )
+            fold_group.create_dataset(
+                "sample_id",
+                data=np.asarray(record["sample_id"], dtype=object),
+                dtype=string_dtype,
+            )
+            _create_compressed_dataset(fold_group, "start", record["start"])
+            _create_compressed_dataset(
+                fold_group, "prediction", record["prediction"]
+            )
+            _create_compressed_dataset(fold_group, "target", record["target"])
+            if "target_mean" in record:
+                _create_compressed_dataset(
+                    fold_group, "target_mean", record["target_mean"]
+                )
+                _create_compressed_dataset(
+                    fold_group, "target_std", record["target_std"]
+                )
+
+        artifact.move(pending_group_name, final_group_name)
+        artifact.flush()
+
+
 def _maybe_compute_word_embedding_metrics(
     cv_results,
     embedding_metrics,
@@ -930,7 +1054,6 @@ def train_decoding_model(
         raise ValueError("model_spec.constructor_name is required for neural training")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    Y = _maybe_shuffle_targets(Y, training_params)
     fold_indices = _get_fold_indices(neural_data, data_df, task_config, training_params)
     fold_indices, fold_nums = _select_requested_folds(fold_indices, training_params)
     _maybe_visualize_fold_distribution(Y, fold_indices, task_name, lag, training_params)
@@ -945,6 +1068,7 @@ def train_decoding_model(
     )
 
     models, histories = [], []
+    prediction_records = []
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
@@ -958,6 +1082,9 @@ def train_decoding_model(
         split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
         target_splits = _normalize_fold_targets(
             Y, tr_idx, va_idx, te_idx, training_params
+        )
+        target_splits = _maybe_shuffle_training_targets(
+            target_splits, training_params, fold
         )
         loaders = _build_fold_loaders(
             neural_data,
@@ -1011,6 +1138,21 @@ def train_decoding_model(
             te_idx,
             training_params,
         )
+        if training_params.save_test_predictions:
+            prediction_records.append(
+                _prediction_record(
+                    model,
+                    loaders["test"],
+                    device,
+                    data_df,
+                    Y,
+                    te_idx,
+                    fold,
+                    _fold_target_normalization_stats(
+                        Y, tr_idx, training_params
+                    ),
+                )
+            )
 
         models.append(model)
         histories.append(history)
@@ -1023,7 +1165,7 @@ def train_decoding_model(
     if plot_results:
         plot_cv_results(cv_results)
 
-    return models, histories, cv_results
+    return models, histories, cv_results, prediction_records
 
 
 def train_decoding_model_chunked(
@@ -1044,7 +1186,7 @@ def train_decoding_model_chunked(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    Y = _maybe_shuffle_targets(chunk_store.targets, training_params)
+    Y = chunk_store.targets
     fold_indices = _get_fold_indices_for_length(
         len(Y), chunk_store.data_df, task_config, training_params
     )
@@ -1061,6 +1203,7 @@ def train_decoding_model_chunked(
     )
 
     models, histories = [], []
+    prediction_records = []
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
@@ -1078,10 +1221,16 @@ def train_decoding_model_chunked(
             write_to_tensorboard, tensorboard_dir, lag, fold
         )
 
-        full_targets = _normalize_full_targets(
+        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        target_splits = _normalize_fold_targets(
             Y, tr_idx, va_idx, te_idx, training_params
         )
-        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        target_splits = _maybe_shuffle_training_targets(
+            target_splits, training_params, fold
+        )
+        full_targets = torch.empty_like(Y)
+        for phase, indices in split_indices.items():
+            full_targets[_as_index_tensor(indices)] = target_splits[phase]
         loaders = {
             phase: chunk_store.get_loader(
                 indices,
@@ -1137,6 +1286,21 @@ def train_decoding_model_chunked(
             te_idx,
             training_params,
         )
+        if training_params.save_test_predictions:
+            prediction_records.append(
+                _prediction_record(
+                    model,
+                    loaders["test"],
+                    device,
+                    chunk_store.data_df,
+                    Y,
+                    te_idx,
+                    fold,
+                    _fold_target_normalization_stats(
+                        Y, tr_idx, training_params
+                    ),
+                )
+            )
 
         models.append(model)
         histories.append(history)
@@ -1149,7 +1313,7 @@ def train_decoding_model_chunked(
     if plot_results:
         plot_cv_results(cv_results)
 
-    return models, histories, cv_results
+    return models, histories, cv_results, prediction_records
 
 
 def _chunked_preprocessing_value(chunked_params, name, default=None):
@@ -1182,7 +1346,14 @@ def run_training_over_lags(
     data_params = task_config.data_params
     os.makedirs(output_dir, exist_ok=True)
 
+    if training_params.save_test_predictions and task_name == "llm_decoding_task":
+        raise ValueError(
+            "save_test_predictions is not supported for llm_decoding_task because "
+            "full token-vocabulary logits are prohibitively large"
+        )
+
     filename = os.path.join(output_dir, f"lag_performance.csv")
+    prediction_filename = os.path.join(output_dir, "test_predictions.h5")
 
     # Load existing results if they exist
     if os.path.exists(filename):
@@ -1202,6 +1373,7 @@ def run_training_over_lags(
         preprocessing_fns,
         data_params.preprocessor_params,
         per_raw_event_times=per_raw_event_times,
+        include_sample_ids=training_params.save_test_predictions,
     )
 
     for lag in lags:
@@ -1231,16 +1403,18 @@ def run_training_over_lags(
                     "chunked preprocessing rows: "
                     f"{len(chunk_store.data_df)}, chunks: {len(chunk_store.chunk_paths)}"
                 )
-                models, histories, cv_results = train_decoding_model_chunked(
-                    chunk_store,
-                    model_spec,
-                    task_name,
-                    task_config,
-                    lag,
-                    training_params=training_params,
-                    checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                    write_to_tensorboard=write_to_tensorboard,
-                    tensorboard_dir=tensorboard_dir,
+                models, histories, cv_results, prediction_records = (
+                    train_decoding_model_chunked(
+                        chunk_store,
+                        model_spec,
+                        task_name,
+                        task_config,
+                        lag,
+                        training_params=training_params,
+                        checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
+                        write_to_tensorboard=write_to_tensorboard,
+                        tensorboard_dir=tensorboard_dir,
+                    )
                 )
             finally:
                 chunk_store.cleanup()
@@ -1253,19 +1427,29 @@ def run_training_over_lags(
             ) = raw_dataset.get_data_for_lag(lag)
 
             print(f"neural_tensor shape: {neural_tensor.shape}")
-            models, histories, cv_results = train_decoding_model(
-                neural_tensor,
-                targets_tensor,
-                data_df,
-                model_spec,
-                task_name,
-                task_config,
+            models, histories, cv_results, prediction_records = (
+                train_decoding_model(
+                    neural_tensor,
+                    targets_tensor,
+                    data_df,
+                    model_spec,
+                    task_name,
+                    task_config,
+                    lag,
+                    training_params=training_params,
+                    checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
+                    write_to_tensorboard=write_to_tensorboard,
+                    tensorboard_dir=tensorboard_dir,
+                    subject_channel_counts=subject_channel_counts,
+                )
+            )
+
+        if training_params.save_test_predictions:
+            _write_prediction_artifact(
+                prediction_filename,
                 lag,
-                training_params=training_params,
-                checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                write_to_tensorboard=write_to_tensorboard,
-                tensorboard_dir=tensorboard_dir,
-                subject_channel_counts=subject_channel_counts,
+                task_name,
+                prediction_records,
             )
 
         # Aggregate metrics
@@ -1303,7 +1487,7 @@ def run_training_over_lags(
         # Do not retain fold models and lag-sized tensors while preprocessing the
         # next lag. Foundation feature extraction temporarily loads another large
         # model, so overlapping these objects can exceed host or accelerator RAM.
-        del models, histories, cv_results, lag_metrics
+        del models, histories, cv_results, prediction_records, lag_metrics
         if "neural_tensor" in locals():
             del neural_tensor, targets_tensor, data_df, subject_channel_counts
         _release_accelerator_memory()

@@ -1,6 +1,8 @@
+import h5py
 import mne
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 import torch.nn as nn
 
@@ -23,6 +25,9 @@ import models.shared_decoders  # noqa: F401 - registers shared probe
 from utils import data_utils
 from utils import decoding_utils
 from utils.decoding_utils import run_training_over_lags
+from utils.dataset import RawNeuralDataset
+from utils.fold_utils import get_sequential_folds
+from utils.model_utils import build_model_from_spec
 
 SMOKE_STATS = {"preprocessor_calls": 0, "foundation_encode_calls": 0}
 
@@ -154,6 +159,137 @@ def test_run_training_over_lags_smoke_with_preprocessor(tmp_path):
     assert (checkpoint_dir / "lag_0" / "best_model_fold1.pt").exists()
     assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
     assert SMOKE_STATS["preprocessor_calls"] == 1
+    assert not (output_dir / "test_predictions.h5").exists()
+
+
+def test_saves_original_scale_out_of_fold_predictions(tmp_path):
+    output_dir = tmp_path / "prediction_results"
+    checkpoint_dir = tmp_path / "prediction_checkpoints"
+    params = _training_params()
+    params.normalize_targets = True
+    params.save_test_predictions = True
+
+    run_training_over_lags(
+        [0],
+        _fake_raws(),
+        _task_df(),
+        preprocessing_fns=None,
+        model_spec=ModelSpec(
+            constructor_name="smoke_flatten_regressor",
+            params={"output_dim": 1},
+        ),
+        task_name="smoke_task",
+        training_params=params,
+        task_config=_task_config(DataParams(window_width=0.004)),
+        output_dir=str(output_dir),
+        checkpoint_dir=str(checkpoint_dir),
+        write_to_tensorboard=False,
+    )
+
+    with h5py.File(output_dir / "test_predictions.h5", "r") as artifact:
+        assert artifact.attrs["schema_version"] == 1
+        lag_group = artifact["lag_0"]
+        saved = {}
+        for fold_name in ("fold_1", "fold_2"):
+            fold_group = lag_group[fold_name]
+            assert bool(fold_group.attrs["normalized_during_training"])
+            assert fold_group["prediction"].dtype == np.float32
+            assert "target_mean" in fold_group
+            assert "target_std" in fold_group
+            ids = fold_group["sample_id"].asstr()[:]
+            targets = fold_group["target"][:]
+            saved.update(zip(ids, targets.tolist()))
+
+    expected = {
+        str(index): float(target)
+        for index, target in enumerate(_task_df()["target"].to_numpy())
+    }
+    assert saved == expected
+
+
+def test_rejects_llm_prediction_artifacts(tmp_path):
+    params = _training_params()
+    params.save_test_predictions = True
+
+    with pytest.raises(ValueError, match="not supported for llm_decoding_task"):
+        run_training_over_lags(
+            [0],
+            _fake_raws(),
+            _task_df(),
+            preprocessing_fns=None,
+            model_spec=ModelSpec(constructor_name="smoke_flatten_regressor"),
+            task_name="llm_decoding_task",
+            training_params=params,
+            task_config=_task_config(DataParams(window_width=0.004)),
+            output_dir=str(tmp_path / "results"),
+            checkpoint_dir=str(tmp_path / "checkpoints"),
+        )
+
+
+def test_cnn_artifact_matches_reloaded_best_checkpoints(tmp_path):
+    output_dir = tmp_path / "cnn_results"
+    checkpoint_dir = tmp_path / "cnn_checkpoints"
+    task_df = _task_df()
+    raws = _fake_raws()
+    model_spec = ModelSpec(
+        constructor_name="pitom_model",
+        params={
+            "input_channels": 4,
+            "output_dim": 1,
+            "conv_filters": 4,
+            "dropout": 0.0,
+            "output_activation": "linear",
+        },
+    )
+    params = _training_params()
+    params.epochs = 3
+    params.save_test_predictions = True
+    data_params = DataParams(window_width=0.02)
+
+    run_training_over_lags(
+        [0],
+        raws,
+        task_df,
+        preprocessing_fns=None,
+        model_spec=model_spec,
+        task_name="smoke_task",
+        training_params=params,
+        task_config=_task_config(data_params),
+        output_dir=str(output_dir),
+        checkpoint_dir=str(checkpoint_dir),
+        write_to_tensorboard=False,
+    )
+
+    neural, _, selected_df, _ = RawNeuralDataset(
+        raws,
+        task_df,
+        data_params.window_width,
+        include_sample_ids=True,
+    ).get_data_for_lag(0)
+    folds = get_sequential_folds(neural, num_folds=params.n_folds)
+
+    with h5py.File(output_dir / "test_predictions.h5", "r") as artifact:
+        for fold, (_, _, test_indices) in enumerate(folds, start=1):
+            model = build_model_from_spec(model_spec, lag=0, fold=fold)
+            decoding_utils._load_checkpoint(
+                model,
+                checkpoint_dir / "lag_0" / f"best_model_fold{fold}.pt",
+            )
+            model.eval()
+            with torch.no_grad():
+                expected_predictions = model(neural[test_indices]).numpy()
+
+            fold_group = artifact[f"lag_0/fold_{fold}"]
+            np.testing.assert_array_equal(
+                fold_group["sample_id"].asstr()[:],
+                selected_df.iloc[test_indices]["sample_id"].to_numpy(),
+            )
+            np.testing.assert_allclose(
+                fold_group["prediction"][:],
+                expected_predictions,
+                rtol=1e-6,
+                atol=1e-7,
+            )
 
 
 def test_run_training_over_lags_releases_memory_after_each_lag(
@@ -196,6 +332,8 @@ def test_run_training_over_lags_smoke_with_chunked_preprocessing(tmp_path):
     output_dir = tmp_path / "chunked_results"
     checkpoint_dir = tmp_path / "chunked_checkpoints"
     cache_dir = tmp_path / "chunks"
+    params = _training_params()
+    params.save_test_predictions = True
 
     run_training_over_lags(
         [0],
@@ -207,7 +345,7 @@ def test_run_training_over_lags_smoke_with_chunked_preprocessing(tmp_path):
             params={"output_dim": 1},
         ),
         task_name="smoke_task",
-        training_params=_training_params(),
+        training_params=params,
         task_config=_task_config(
             DataParams(
                 window_width=0.004,
@@ -231,6 +369,14 @@ def test_run_training_over_lags_smoke_with_chunked_preprocessing(tmp_path):
     assert (checkpoint_dir / "lag_0" / "best_model_fold2.pt").exists()
     assert SMOKE_STATS["preprocessor_calls"] == 3
     assert not list(cache_dir.glob("*.npz"))
+    with h5py.File(output_dir / "test_predictions.h5", "r") as artifact:
+        saved_ids = np.concatenate(
+            [
+                artifact[f"lag_0/fold_{fold}/sample_id"].asstr()[:]
+                for fold in (1, 2)
+            ]
+        )
+    assert set(saved_ids) == {str(index) for index in range(len(_task_df()))}
 
 
 def test_run_training_over_lags_smoke_with_foundation_feature_cache(tmp_path):
