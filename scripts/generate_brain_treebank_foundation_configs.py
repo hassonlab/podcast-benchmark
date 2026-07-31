@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PROJECT_ROOT / "configs" / "foundation_models"
 OUTPUT_ROOT = PROJECT_ROOT / "configs" / "brain_treebank"
 MODELS = ("brainbert", "diver", "popt")
+SUBJECTS = (3, 7, 10)
 TASKS = {
     "content_noncontent": "content_noncontent_task",
     "gpt_surprise": "gpt_surprise_task",
@@ -50,7 +51,7 @@ def _configure_foundation_paths(model: str, config: dict) -> None:
         )
 
 
-def build_config(model: str, task: str) -> dict:
+def build_config(model: str, task: str, subject_id: int) -> dict:
     source = SOURCE_ROOT / model / task / "subject3_full.yml"
     with source.open() as stream:
         config = yaml.safe_load(stream)
@@ -62,24 +63,48 @@ def build_config(model: str, task: str) -> dict:
             "dataset_name": "brain_treebank",
             "dataset_params": {"movie": "cars-2"},
             "data_root": "data/brain-treebank",
-            "subject_ids": [3, 7, 10],
+            "subject_ids": [subject_id],
             "electrode_file_path": None,
             "channel_reg_ex": None,
             "per_subject_electrodes": None,
             "use_high_gamma": False,
         }
     )
+    data_params["chunked_preprocessing"] = {
+        "enabled": True,
+        "num_chunks": 20,
+        "cache_dir": ".cache/preprocessed_chunks",
+    }
+    if model == "popt":
+        # The public Brain Treebank localization table contains MNI XYZ but not
+        # the L/I/P integer indices used to pretrain PopT's position lookup.
+        data_params["use_lip_coords"] = False
     data_params["preprocessor_params"][-1]["mode"] = "normal"
 
     config["task_config"]["task_name"] = TASKS[task]
     config["task_config"]["task_specific_config"] = _task_specific_config(task)
     config["training_params"].update(
-        {"min_lag": -1000, "max_lag": 1100, "lag_step_size": 100}
+        {
+            "min_lag": -1000,
+            "max_lag": 1100,
+            "lag_step_size": 100,
+            "weight_decay": 1.0e-3,
+        }
     )
     config["model_spec"]["params"].pop("embedding_dim", None)
+    config["model_spec"]["params"]["input_dropout"] = 0.5
+    if model == "diver":
+        config["model_spec"]["params"]["coordinate_root"] = (
+            "processed_data/brain_treebank/coordinates"
+        )
     config["run_mode"] = "per_subject"
-    config["trial_name"] = f"brain_treebank_cars2_{model}_{task}_per_subject"
+    config["trial_name"] = f"brain_treebank_cars2_{model}_{task}_subject{subject_id}"
     _configure_foundation_paths(model, config)
+    if model == "popt":
+        foundation_params = data_params["preprocessor_params"][-1][
+            "foundation_model_spec"
+        ]["params"]
+        foundation_params["use_lip_coords"] = False
     return config
 
 
@@ -88,10 +113,14 @@ def main() -> None:
         output_dir = OUTPUT_ROOT / model
         output_dir.mkdir(parents=True, exist_ok=True)
         for task in TASKS:
-            path = output_dir / f"{task}.yml"
-            with path.open("w") as stream:
-                yaml.safe_dump(build_config(model, task), stream, sort_keys=False)
-            print(path.relative_to(PROJECT_ROOT))
+            for subject_id in SUBJECTS:
+                suffix = "" if subject_id == 3 else f"_subject{subject_id}"
+                path = output_dir / f"{task}{suffix}.yml"
+                with path.open("w") as stream:
+                    yaml.safe_dump(
+                        build_config(model, task, subject_id), stream, sort_keys=False
+                    )
+                print(path.relative_to(PROJECT_ROOT))
 
 
 if __name__ == "__main__":

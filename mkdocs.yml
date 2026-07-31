@@ -38,6 +38,7 @@ nav:
       - Adding a Dataset: adding-dataset.md
       - Adding a Task: adding-task.md
       - Configuration: configuration.md
+      - Significance Testing: significance-testing.md
   - Reference:
       - Task Reference: task-reference.md
       - Registry API: api-reference.md

@@ -3,10 +3,10 @@ model_spec:
   constructor_name: mlp_probe_decoder
   params:
     layer_sizes:
-    - 3
+    - 1
     dropout: 0.0
     use_layer_norm: true
-    output_dim: 3
+    output_dim: 1
     input_dropout: 0.5
   sub_models: {}
 task_config:
@@ -17,7 +17,7 @@ task_config:
     use_high_gamma: false
     window_width: 1.0
     subject_ids:
-    - 3
+    - 10
     channel_reg_ex: null
     per_subject_electrodes: null
     preprocessing_fn_name:
@@ -47,13 +47,13 @@ task_config:
       enabled: true
       num_chunks: 20
       cache_dir: .cache/preprocessed_chunks
-  task_name: gpt_surprise_multiclass_task
+  task_name: content_noncontent_task
   task_specific_config:
     labels_path: processed_data/brain_treebank/cars-2/word_labels.csv
 training_params:
   tensorboard_logging: false
   batch_size: 4
-  early_stopping_metric: roc_auc_multiclass
+  early_stopping_metric: roc_auc
   early_stopping_patience: 10
   epochs: 100
   lag_step_size: 100
@@ -61,15 +61,18 @@ training_params:
   loss_weights:
   - 1.0
   losses:
-  - cross_entropy
+  - bce_with_logits
   max_lag: 1100
   metrics:
-  - roc_auc_multiclass
-  - f1
-  - acc
+  - roc_auc
+  - sensitivity_logits
+  - specificity_logits
+  - f1_logits
+  - precision_logits
+  - acc_logits
   min_lag: -1000
   n_folds: 5
   smaller_is_better: false
   weight_decay: 0.001
-trial_name: brain_treebank_cars2_brainbert_gpt_surprise_multiclass_subject3
+trial_name: brain_treebank_cars2_brainbert_content_noncontent_subject10
 run_mode: per_subject

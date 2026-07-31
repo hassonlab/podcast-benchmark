@@ -3,10 +3,10 @@ model_spec:
   constructor_name: mlp_probe_decoder
   params:
     layer_sizes:
-    - 3
+    - 5
     dropout: 0.0
     use_layer_norm: true
-    output_dim: 3
+    output_dim: 5
     input_dropout: 0.5
   sub_models: {}
 task_config:
@@ -17,7 +17,7 @@ task_config:
     use_high_gamma: false
     window_width: 1.0
     subject_ids:
-    - 3
+    - 10
     channel_reg_ex: null
     per_subject_electrodes: null
     preprocessing_fn_name:
@@ -47,7 +47,7 @@ task_config:
       enabled: true
       num_chunks: 20
       cache_dir: .cache/preprocessed_chunks
-  task_name: gpt_surprise_multiclass_task
+  task_name: pos_task
   task_specific_config:
     labels_path: processed_data/brain_treebank/cars-2/word_labels.csv
 training_params:
@@ -71,5 +71,5 @@ training_params:
   n_folds: 5
   smaller_is_better: false
   weight_decay: 0.001
-trial_name: brain_treebank_cars2_brainbert_gpt_surprise_multiclass_subject3
+trial_name: brain_treebank_cars2_brainbert_pos_subject10
 run_mode: per_subject

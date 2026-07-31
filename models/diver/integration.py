@@ -495,7 +495,9 @@ def get_diver_data_info(task_df, raws, model_params):
     """
     from utils.data_utils import extract_subject_id_from_raw, get_mni_coordinates
 
-    data_root = model_params.get("data_root", "data")
+    data_root = model_params.get(
+        "coordinate_root", model_params.get("data_root", "data")
+    )
     coord_blocks = []
     for raw in raws:
         subject_id = extract_subject_id_from_raw(raw)

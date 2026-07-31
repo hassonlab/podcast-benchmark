@@ -44,6 +44,12 @@ DIVER volume-level lag sweeps can still create too much concurrent cache and scr
 
 DIVER volume-level configs use five temporary preprocessing chunks by default. This bounds peak memory while keeping each chunk large enough to avoid excessive disk-backed loader overhead; cluster submissions place these chunks in job-local temporary storage.
 
+Brain Treebank foundation configs run one subject per job and use twenty temporary
+preprocessing chunks. Their full frozen feature matrices can exceed host memory, and
+there is no Brain Treebank supersubject condition that benefits from serializing the
+subjects in one process. Their linear probes use input dropout and stronger weight
+decay to address the train/test gap seen with high-dimensional cached features.
+
 ## Neural-Only Training Loop
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
@@ -53,6 +59,14 @@ The shared training loop no longer runs auxiliary sklearn/Himalaya baseline esti
 Test-prediction persistence is opt-in because vector targets can materially increase result storage. Enabled runs write original-scale predictions, targets, stable sample identifiers, onsets, folds, and target-normalization statistics to one HDF5 artifact per run unit. This supports paired downstream tests without retaining training or validation predictions. LLM decoding logits are excluded because their vocabulary dimension would make these artifacts tens to hundreds of gigabytes per run.
 
 Target-shuffling controls randomize training labels inside each fold while preserving validation and test labels. Zero-shot word folds use stable first-occurrence ordering so separate model processes can produce genuinely paired test partitions.
+
+## Prediction-Artifact Significance Tests
+
+Paired significance analyses recompute registered scalar metrics over pooled out-of-fold predictions rather than treating fold scores as independent observations. Artifacts are joined strictly by stable sample ID and must agree on targets, onsets, task, and prediction shape at each compared lag.
+
+The randomization null swaps paired predictions between two results. Contiguous onset-ordered event blocks can be swapped as units to preserve short-range target dependence, and best-lag tests reuse each swap mask across lags before reselecting both best lags. Best-lag analyses use one common sample population across all candidate results and lags so missing boundary samples cannot determine the winner.
+
+Holm correction is the initial multiple-comparison policy. Baseline analyses correct across all result-by-lag hypotheses. Data-selected best-result analyses calculate the correction over every possible ordered result pair, then report the observed winner's contrasts. This controls familywise error without requiring the stronger joint multi-model exchangeability assumptions of a permutation max-statistic procedure.
 
 ## YAML Experiment Configuration
 
