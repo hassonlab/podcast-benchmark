@@ -4,12 +4,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseWordLabelTaskConfig, TaskConfig
 from core import registry
+from utils.label_utils import task_frame_from_labels
 
 
 @dataclass
-class PosTaskConfig(BaseTaskConfig):
+class PosTaskConfig(BaseWordLabelTaskConfig):
     """Configuration for pos_task."""
     pos_path: str = "processed_data/df_word_onset_with_pos_class.csv"
 
@@ -30,13 +31,8 @@ def pos_task(task_config: TaskConfig):
 
     """
     config: PosTaskConfig = task_config.task_specific_config
-    csv_path = config.pos_path
-
-    df1 = pd.read_csv(csv_path, index_col=0)
-
-    df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
-    df["target"] = df1["pos_class"]
+    csv_path = config.labels_path or config.pos_path
+    df = task_frame_from_labels(csv_path, "pos_class")
 
     print(f"\n=== Parts of Speech DATASET ===")
     print(f"Total examples: {len(df)}")

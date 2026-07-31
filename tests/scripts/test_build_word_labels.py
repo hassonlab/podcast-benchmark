@@ -2,7 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.build_word_labels import build_parser, sentence_of, surprise_classes, tag_by_sentence
+from scripts.build_word_labels import (
+    brain_treebank_word_level,
+    build_parser,
+    sentence_of,
+    surprise_classes,
+    tag_by_sentence,
+)
 
 
 def sentences(*texts):
@@ -68,3 +74,21 @@ def test_tag_by_sentence_uses_spacy_tags_and_first_token_ownership():
     result = tag_by_sentence(words, np.array([-1, 0, 0]), nlp=FakeNLP())
 
     assert result.tolist() == ["NN", "VB", "VB"]
+
+
+def test_brain_treebank_word_level_normalizes_timing_and_surprisal():
+    transcript = pd.DataFrame(
+        {
+            "text": ["Hello", "world"],
+            "start": [1.0, 1.5],
+            "end": [1.4, 1.9],
+            "sentence_idx": [7, 7],
+            "gpt2_surprisal": [2.0, 3.0],
+        }
+    )
+
+    result = brain_treebank_word_level(transcript)
+
+    assert result["event_id"].tolist() == [0, 1]
+    assert result["sentence_id"].tolist() == [7, 7]
+    assert result["surprisal"].tolist() == [2.0, 3.0]

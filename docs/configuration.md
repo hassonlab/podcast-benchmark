@@ -211,6 +211,7 @@ training_params:
   # Target manipulation
   normalize_targets: false      # Normalize targets to zero mean / unit variance
   shuffle_targets: false        # Shuffle targets (sanity check baseline)
+  save_test_predictions: false  # Save out-of-fold test outputs to HDF5
 ```
 
 See `core/config.py:TrainingParams` for all available fields.
@@ -275,6 +276,8 @@ task_config:
 ```yaml
 task_config:
   data_params:
+    dataset_name: podcast          # Registered dataset getter
+    dataset_params: {}             # Dataset-specific options
     data_root: data
     subject_ids: [1, 2, 3]
     window_width: 0.625           # Width of neural data window (seconds)
@@ -304,6 +307,8 @@ task_config:
 
 `chunked_preprocessing.enabled` keeps only one preprocessed chunk loaded at a time during training. This is useful for large foundation-model volume-level runs. Chunks are temporary `.npz` files and are deleted after each lag. Leave it disabled for preprocessors that need statistics from the full lag dataset.
 
+Brain Treebank configs set `dataset_name: brain_treebank` and provide `dataset_params.movie`. Its canonical task times are movie times; the dataset's sync mapper converts them independently for each subject.
+
 ### Task-Specific Config
 
 Each task defines its own config dataclass with type-safe parameters. See [Task Reference](task-reference.md) for details on each task's configuration options.
@@ -326,6 +331,14 @@ task_config:
     sentence_csv_path: processed_data/sentences.csv
     negatives_per_positive: 5
     negative_margin_s: 0.75
+```
+
+The surprisal, content/non-content, POS, and sentence-onset tasks also accept one canonical table:
+
+```yaml
+task_config:
+  task_specific_config:
+    labels_path: processed_data/brain_treebank/cars-2/word_labels.csv
 ```
 
 **Example with input_fields** (pass additional DataFrame columns to model):

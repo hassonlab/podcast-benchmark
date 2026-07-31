@@ -35,6 +35,7 @@ nav:
   - Quickstart: quickstart.md
   - Guides:
       - Onboarding a Model: onboarding-model.md
+      - Adding a Dataset: adding-dataset.md
       - Adding a Task: adding-task.md
       - Configuration: configuration.md
   - Reference:

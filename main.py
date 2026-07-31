@@ -35,6 +35,7 @@ from utils.config_utils import (
 import_all_from_package("models", recursive=True)
 import_all_from_package("tasks", recursive=True)
 import_all_from_package("metrics", recursive=True)
+import_all_from_package("datasets", recursive=True)
 
 
 def set_seed(seed=42, cudnn_deterministic=False):
@@ -179,6 +180,9 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             print(f"Model data getter '{getter_name}' added columns: {added_columns}")
 
         preprocessing_fns = _resolve_preprocessing_fns(unit_config)
+        per_raw_event_times = data_utils.get_event_times(
+            unit_task_df, unit_config.task_config.data_params
+        )
 
         unit_output_dir = (
             output_dir
@@ -212,6 +216,7 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             checkpoint_dir=unit_checkpoint_dir,
             tensorboard_dir=unit_tensorboard_dir,
             write_to_tensorboard=unit_config.training_params.tensorboard_logging,
+            per_raw_event_times=per_raw_event_times,
         )
 
     return checkpoint_dir

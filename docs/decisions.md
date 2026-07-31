@@ -12,7 +12,17 @@ This keeps the core benchmark surface controlled and comparable while still allo
 
 ## Registry-Based Extension Points
 
-Models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported model or task into `main.py`.
+Datasets, models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported component into `main.py`.
+
+## Canonical Stimulus Events and Subject Neural Clocks
+
+Task tables describe canonical stimulus events and targets. A dataset may optionally map those rows to a different onset array for each subject. Lag slicing intersects rows that are valid for every selected Raw, then slices each Raw using its own neural-clock onsets. This supports shared-stimulus combined runs without resampling or warping recordings onto an artificial common clock.
+
+Dataset getters return MNE Raw objects and mark dataset-specific bad channels in `raw.info['bads']`; shared loading then handles configured dropping, resampling, unit conversion, and channel selection. Dataset preprocessing that affects referencing, such as Brain Treebank corrupted-channel removal before common-average reference, is performed when the reusable FIF artifact is built.
+
+## Canonical Word Labels
+
+Reusable word-level label artifacts use unique `event_id`, stimulus-time `start`, and optional `end`, `word`, and task columns. Linguistic task getters are views over that table. Legacy Podcast paths and column aliases remain accepted, while new datasets can generate one table for surprisal, content/function, POS, and sentence-onset tasks.
 
 ## Foundation Preprocessor Pipelines
 
@@ -35,6 +45,12 @@ DIVER volume-level configs use five temporary preprocessing chunks by default. T
 ## Neural-Only Training Loop
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
+
+## Out-of-Fold Prediction Artifacts
+
+Test-prediction persistence is opt-in because vector targets can materially increase result storage. Enabled runs write original-scale predictions, targets, stable sample identifiers, onsets, folds, and target-normalization statistics to one HDF5 artifact per run unit. This supports paired downstream tests without retaining training or validation predictions. LLM decoding logits are excluded because their vocabulary dimension would make these artifacts tens to hundreds of gigabytes per run.
+
+Target-shuffling controls randomize training labels inside each fold while preserving validation and test labels. Zero-shot word folds use stable first-occurrence ordering so separate model processes can produce genuinely paired test partitions.
 
 ## YAML Experiment Configuration
 

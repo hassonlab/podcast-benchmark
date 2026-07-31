@@ -30,7 +30,10 @@ def get_zero_shot_folds(selected_words, num_folds=5):
             example_fold_idx.extend(word_to_idx[unique_words[i]])
         return example_fold_idx
 
-    unique_words = list(set(selected_words))
+    # Preserve first-occurrence order. Building this list from a set makes fold
+    # membership depend on the process hash seed, which prevents paired results
+    # from reliably sharing the same test folds across separate runs.
+    unique_words = list(dict.fromkeys(selected_words))
     word_to_idx = {}
     for i, word in enumerate(selected_words):
         if word not in word_to_idx:

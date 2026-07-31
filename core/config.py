@@ -27,6 +27,13 @@ class BaseTaskConfig(ABC):
 
 
 @dataclass
+class BaseWordLabelTaskConfig(BaseTaskConfig):
+    """Shared opt-in canonical word-label table for linguistic tasks."""
+
+    labels_path: Optional[str] = None
+
+
+@dataclass
 class ChunkedPreprocessingParams:
     # If true, preprocess lag windows in temporary disk-backed chunks instead of
     # materializing the full preprocessed lag tensor in memory.
@@ -39,13 +46,18 @@ class ChunkedPreprocessingParams:
 
 @dataclass
 class DataParams:
+    # Registered dataset getter. Existing configurations default to Podcast.
+    dataset_name: str = "podcast"
+    # Free-form options interpreted by the selected dataset (for example,
+    # Brain Treebank's movie identifier).
+    dataset_params: dict = field(default_factory=dict)
     # The width of neural data to gather around each word onset in seconds.
     window_width: float = -1
     # The name of your model's preprocessing function. Your function must be registered using the register_data_preprocessor
     # decorator and imported into main.py. See registry.py for details. Can provide either a single value or a list of names to apply in order.
     # Should align with desired parameters in preprocessor_params.
     preprocessing_fn_name: Optional[str | list[str]] = None
-    # The subject id's to include in your analysis. For the podcast data they must all be in the range [1, 9]
+    # The subject ids to include in the analysis.
     subject_ids: list[int] = field(default_factory=lambda: [])
     # Root of data folder.
     data_root: str = "data"
@@ -146,6 +158,9 @@ class TrainingParams:
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
     shuffle_targets: bool = False
+    # If true, writes best-checkpoint out-of-fold test predictions to the results
+    # directory for paired downstream analyses.
+    save_test_predictions: bool = False
 
     # --------------------------------------------------------------------------
     # Optimizer extras (optional)

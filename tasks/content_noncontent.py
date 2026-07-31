@@ -4,12 +4,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseWordLabelTaskConfig, TaskConfig
 from core import registry
+from utils.label_utils import task_frame_from_labels
 
 
 @dataclass
-class ContentNonContentConfig(BaseTaskConfig):
+class ContentNonContentConfig(BaseWordLabelTaskConfig):
     """Configuration for content_noncontent_task."""
     content_noncontent_path: str = "processed_data/df_word_onset_with_pos_class.csv"
 
@@ -29,13 +30,8 @@ def content_noncontent_task(task_config: TaskConfig):
 
     """
     config: ContentNonContentConfig = task_config.task_specific_config
-    csv_path = config.content_noncontent_path
-
-    df1 = pd.read_csv(csv_path, index_col=0)
-
-    df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
-    df["target"] = df1["is_content"]
+    csv_path = config.labels_path or config.content_noncontent_path
+    df = task_frame_from_labels(csv_path, "is_content")
 
     print(f"\n=== Content Non-content words DATASET ===")
     print(f"Total examples: {len(df)}")
