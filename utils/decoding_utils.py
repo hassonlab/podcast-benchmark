@@ -2,6 +2,8 @@ from typing import Optional
 import gc
 import os
 import math
+import random
+from copy import deepcopy
 import matplotlib.pyplot as plt
 import h5py
 import numpy as np
@@ -918,20 +920,35 @@ def _create_compressed_dataset(group, name, values):
     group.create_dataset(name, data=values, **kwargs)
 
 
-def _write_prediction_artifact(filename, lag, task_name, records):
+def _write_prediction_artifact(
+    filename, lag, task_name, records, null_repetition=None
+):
     """Commit one completed lag of out-of-fold predictions to HDF5."""
-    final_group_name = f"lag_{int(lag)}"
-    pending_group_name = f"_pending_{final_group_name}"
+    lag_group_name = f"lag_{int(lag)}"
+    final_group_name = (
+        lag_group_name
+        if null_repetition is None
+        else f"{lag_group_name}/null_repetition_{int(null_repetition)}"
+    )
+    pending_group_name = (
+        f"_pending_lag_{int(lag)}"
+        if null_repetition is None
+        else f"_pending_lag_{int(lag)}_null_repetition_{int(null_repetition)}"
+    )
     string_dtype = h5py.string_dtype(encoding="utf-8")
 
     with h5py.File(filename, "a") as artifact:
-        artifact.attrs["schema_version"] = 1
+        artifact.attrs["schema_version"] = 1 if null_repetition is None else 2
         artifact.attrs["task_name"] = task_name
+        if null_repetition is not None:
+            artifact.require_group(lag_group_name).attrs["lag_ms"] = int(lag)
         for stale_name in (pending_group_name, final_group_name):
             if stale_name in artifact:
                 del artifact[stale_name]
         lag_group = artifact.create_group(pending_group_name)
         lag_group.attrs["lag_ms"] = int(lag)
+        if null_repetition is not None:
+            lag_group.attrs["null_repetition"] = int(null_repetition)
 
         for record in records:
             fold_group = lag_group.create_group(f"fold_{record['fold']}")
@@ -1328,6 +1345,122 @@ def _release_accelerator_memory():
         torch.cuda.empty_cache()
 
 
+def _contains_enabled_random_init(value) -> bool:
+    """Find an enabled random-init flag in nested model/preprocessor config."""
+    if isinstance(value, ModelSpec):
+        return value.random_init or any(
+            _contains_enabled_random_init(spec) for spec in value.sub_models.values()
+        )
+    if isinstance(value, dict):
+        if value.get("random_init") is True:
+            return True
+        return any(_contains_enabled_random_init(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_enabled_random_init(item) for item in value)
+    return False
+
+
+def _preprocessor_params_for_null_seed(value, seed):
+    """Copy params and salt caches that wrap a random foundation model."""
+    copied = deepcopy(value)
+
+    def add_seed_marker(item):
+        if isinstance(item, dict):
+            foundation_spec = item.get("foundation_model_spec")
+            if foundation_spec is not None and _contains_enabled_random_init(
+                foundation_spec
+            ):
+                item["_null_repetition_seed"] = seed
+            for nested in item.values():
+                add_seed_marker(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                add_seed_marker(nested)
+
+    add_seed_marker(copied)
+    return copied
+
+
+def _set_null_repetition_seed(seed: int, cudnn_deterministic: bool) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if cudnn_deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def _validate_null_repetitions(lags, model_spec, training_params, data_params):
+    repetitions = training_params.num_null_repetitions
+    if isinstance(repetitions, bool) or not isinstance(repetitions, int):
+        raise ValueError("num_null_repetitions must be a positive integer")
+    if repetitions < 1:
+        raise ValueError("num_null_repetitions must be a positive integer")
+
+    model_random_init = _contains_enabled_random_init(model_spec)
+    preprocessor_random_init = _contains_enabled_random_init(
+        data_params.preprocessor_params
+    )
+    if repetitions > 1:
+        if len(lags) != 1:
+            raise ValueError(
+                "num_null_repetitions > 1 requires exactly one resolved lag"
+            )
+        if not (
+            training_params.shuffle_targets
+            or model_random_init
+            or preprocessor_random_init
+        ):
+            raise ValueError(
+                "num_null_repetitions > 1 requires shuffle_targets and/or "
+                "an enabled random_init ModelSpec"
+            )
+    return repetitions, preprocessor_random_init
+
+
+def _aggregate_lag_metrics(lag, cv_results, repetition=None, seed=None):
+    lag_metrics = {"lags": lag}
+    if repetition is not None:
+        lag_metrics["null_repetition"] = repetition
+        lag_metrics["null_seed"] = seed
+
+    fold_nums = cv_results.get("fold_nums")
+    for metric, values in cv_results.items():
+        if metric == "fold_nums":
+            continue
+        if len(values) > 0:
+            lag_metrics[f"{metric}_mean"] = np.mean(values)
+            lag_metrics[f"{metric}_std"] = np.std(values)
+            for i, val in enumerate(values):
+                fold_num = (
+                    fold_nums[i]
+                    if fold_nums is not None and i < len(fold_nums)
+                    else i + 1
+                )
+                lag_metrics[f"{metric}_fold_{fold_num}"] = val
+        else:
+            lag_metrics[f"{metric}_mean"] = np.nan
+            lag_metrics[f"{metric}_std"] = np.nan
+    return lag_metrics
+
+
+def _write_null_summary(existing_df, output_dir):
+    repeated_df = existing_df.dropna(subset=["null_repetition"])
+    summary = {"lags": repeated_df["lags"].iloc[0], "num_null_repetitions": len(repeated_df)}
+    for column in repeated_df.columns:
+        if not column.endswith("_mean"):
+            continue
+        values = pd.to_numeric(repeated_df[column], errors="coerce")
+        summary[f"{column}_null_mean"] = values.mean()
+        summary[f"{column}_null_std"] = values.std(ddof=0)
+    pd.DataFrame([summary]).to_csv(
+        os.path.join(output_dir, "null_summary.csv"), index=False
+    )
+
+
 def run_training_over_lags(
     lags,
     raws: list[mne.io.Raw],
@@ -1345,6 +1478,11 @@ def run_training_over_lags(
 ):
     data_params = task_config.data_params
     os.makedirs(output_dir, exist_ok=True)
+    lags = list(lags)
+    repetitions, preprocessor_random_init = _validate_null_repetitions(
+        lags, model_spec, training_params, data_params
+    )
+    repeated_run = repetitions > 1
 
     if training_params.save_test_predictions and task_name == "llm_decoding_task":
         raise ValueError(
@@ -1355,13 +1493,9 @@ def run_training_over_lags(
     filename = os.path.join(output_dir, f"lag_performance.csv")
     prediction_filename = os.path.join(output_dir, "test_predictions.h5")
 
-    # Load existing results if they exist
     if os.path.exists(filename):
-        roc_df = pd.read_csv(filename)
-        already_read_lags = roc_df["lags"].tolist()
-        existing_df = roc_df
+        existing_df = pd.read_csv(filename)
     else:
-        already_read_lags = []
         existing_df = pd.DataFrame()
 
     from utils.dataset import RawNeuralDataset
@@ -1376,120 +1510,154 @@ def run_training_over_lags(
         include_sample_ids=training_params.save_test_predictions,
     )
 
+    chunked_params = getattr(data_params, "chunked_preprocessing", None)
+    use_chunks = chunked_params is not None and _chunked_preprocessing_value(
+        chunked_params, "enabled", False
+    )
+
+    def prepare_lag(lag):
+        if use_chunks:
+            store = raw_dataset.build_preprocessed_chunks(
+                lag,
+                num_chunks=_chunked_preprocessing_value(chunked_params, "num_chunks", 1),
+                cache_dir=_chunked_preprocessing_value(
+                    chunked_params, "cache_dir", ".cache/preprocessed_chunks"
+                ),
+            )
+            print(
+                "chunked preprocessing rows: "
+                f"{len(store.data_df)}, chunks: {len(store.chunk_paths)}"
+            )
+            return store
+        tensors = raw_dataset.get_data_for_lag(lag)
+        print(f"neural_tensor shape: {tensors[0].shape}")
+        return tensors
+
     for lag in lags:
-        if lag in already_read_lags:
+        if not repeated_run and "lags" in existing_df and lag in existing_df["lags"].tolist():
             print(f"Lag {lag} already done, skipping...")
             continue
 
         print("=" * 60)
         print("running lag:", lag)
         print("=" * 60)
-
-        chunked_params = getattr(data_params, "chunked_preprocessing", None)
-        if chunked_params is not None and _chunked_preprocessing_value(
-            chunked_params, "enabled", False
-        ):
-            chunk_store = raw_dataset.build_preprocessed_chunks(
-                lag,
-                num_chunks=_chunked_preprocessing_value(
-                    chunked_params, "num_chunks", 1
-                ),
-                cache_dir=_chunked_preprocessing_value(
-                    chunked_params, "cache_dir", ".cache/preprocessed_chunks"
-                ),
-            )
-            try:
-                print(
-                    "chunked preprocessing rows: "
-                    f"{len(chunk_store.data_df)}, chunks: {len(chunk_store.chunk_paths)}"
+        reusable_prepared = None
+        prepared = None
+        models = histories = cv_results = prediction_records = lag_metrics = None
+        try:
+            if not preprocessor_random_init:
+                _set_null_repetition_seed(
+                    training_params.random_seed,
+                    training_params.cudnn_deterministic,
                 )
-                models, histories, cv_results, prediction_records = (
-                    train_decoding_model_chunked(
-                        chunk_store,
-                        model_spec,
-                        task_name,
-                        task_config,
+                reusable_prepared = prepare_lag(lag)
+
+            for repetition_index in range(repetitions):
+                repetition = repetition_index + 1
+                if repeated_run and not existing_df.empty and {
+                    "lags", "null_repetition"
+                }.issubset(existing_df.columns):
+                    completed = (
+                        (existing_df["lags"] == lag)
+                        & (existing_df["null_repetition"] == repetition)
+                    ).any()
+                    if completed:
+                        print(
+                            f"Lag {lag}, null repetition {repetition} already done, skipping..."
+                        )
+                        continue
+
+                repetition_seed = training_params.random_seed + repetition_index
+                repetition_training_params = deepcopy(training_params)
+                repetition_training_params.random_seed = repetition_seed
+                _set_null_repetition_seed(
+                    repetition_seed, training_params.cudnn_deterministic
+                )
+                if preprocessor_random_init:
+                    raw_dataset.preprocessor_params = _preprocessor_params_for_null_seed(
+                        data_params.preprocessor_params, repetition_seed
+                    )
+                prepared = (
+                    prepare_lag(lag) if preprocessor_random_init else reusable_prepared
+                )
+                repetition_component = (
+                    f"null_repetition_{repetition}" if repeated_run else None
+                )
+                repetition_checkpoint_dir = os.path.join(checkpoint_dir, f"lag_{lag}")
+                repetition_tensorboard_dir = tensorboard_dir
+                if repetition_component:
+                    repetition_checkpoint_dir = os.path.join(
+                        repetition_checkpoint_dir, repetition_component
+                    )
+                    repetition_tensorboard_dir = os.path.join(
+                        tensorboard_dir, repetition_component
+                    )
+
+                try:
+                    if use_chunks:
+                        models, histories, cv_results, prediction_records = (
+                            train_decoding_model_chunked(
+                                prepared,
+                                model_spec,
+                                task_name,
+                                task_config,
+                                lag,
+                                training_params=repetition_training_params,
+                                checkpoint_dir=repetition_checkpoint_dir,
+                                write_to_tensorboard=write_to_tensorboard,
+                                tensorboard_dir=repetition_tensorboard_dir,
+                            )
+                        )
+                    else:
+                        neural_tensor, targets_tensor, data_df, channel_counts = prepared
+                        models, histories, cv_results, prediction_records = train_decoding_model(
+                            neural_tensor,
+                            targets_tensor,
+                            data_df,
+                            model_spec,
+                            task_name,
+                            task_config,
+                            lag,
+                            training_params=repetition_training_params,
+                            checkpoint_dir=repetition_checkpoint_dir,
+                            write_to_tensorboard=write_to_tensorboard,
+                            tensorboard_dir=repetition_tensorboard_dir,
+                            subject_channel_counts=channel_counts,
+                        )
+
+                    if training_params.save_test_predictions:
+                        _write_prediction_artifact(
+                            prediction_filename,
+                            lag,
+                            task_name,
+                            prediction_records,
+                            null_repetition=repetition if repeated_run else None,
+                        )
+
+                    lag_metrics = _aggregate_lag_metrics(
                         lag,
-                        training_params=training_params,
-                        checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                        write_to_tensorboard=write_to_tensorboard,
-                        tensorboard_dir=tensorboard_dir,
+                        cv_results,
+                        repetition=repetition if repeated_run else None,
+                        seed=repetition_seed if repeated_run else None,
                     )
-                )
-            finally:
-                chunk_store.cleanup()
-        else:
-            (
-                neural_tensor,
-                targets_tensor,
-                data_df,
-                subject_channel_counts,
-            ) = raw_dataset.get_data_for_lag(lag)
-
-            print(f"neural_tensor shape: {neural_tensor.shape}")
-            models, histories, cv_results, prediction_records = (
-                train_decoding_model(
-                    neural_tensor,
-                    targets_tensor,
-                    data_df,
-                    model_spec,
-                    task_name,
-                    task_config,
-                    lag,
-                    training_params=training_params,
-                    checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                    write_to_tensorboard=write_to_tensorboard,
-                    tensorboard_dir=tensorboard_dir,
-                    subject_channel_counts=subject_channel_counts,
-                )
-            )
-
-        if training_params.save_test_predictions:
-            _write_prediction_artifact(
-                prediction_filename,
-                lag,
-                task_name,
-                prediction_records,
-            )
-
-        # Aggregate metrics
-        lag_metrics = {}
-        lag_metrics["lags"] = lag  # lag information first
-
-        fold_nums = cv_results.get("fold_nums", None)
-        for metric, values in cv_results.items():
-            if metric == "fold_nums":
-                continue
-            if len(values) > 0:
-                # 1. 기존: 평균과 표준편차 저장
-                lag_metrics[f"{metric}_mean"] = np.mean(values)
-                lag_metrics[f"{metric}_std"] = np.std(values)
-
-                # 2. Add: Individual values for each Fold (e.g., test_acc_fold_0, test_acc_fold_1 ...)
-                for i, val in enumerate(values):
-                    fold_num = (
-                        fold_nums[i]
-                        if (fold_nums is not None and i < len(fold_nums))
-                        else (i + 1)
+                    existing_df = pd.concat(
+                        [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
                     )
-                    lag_metrics[f"{metric}_fold_{fold_num}"] = val
-            else:
-                lag_metrics[f"{metric}_mean"] = np.nan
-                lag_metrics[f"{metric}_std"] = np.nan
-        # ---------------------------------------------------------
-
-        # Append new row to existing DataFrame and write to file
-        existing_df = pd.concat(
-            [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
-        )
-        existing_df.to_csv(filename, index=False)
+                    existing_df.to_csv(filename, index=False)
+                    if repeated_run:
+                        _write_null_summary(existing_df, output_dir)
+                finally:
+                    if preprocessor_random_init and use_chunks:
+                        prepared.cleanup()
+        finally:
+            if reusable_prepared is not None and use_chunks:
+                reusable_prepared.cleanup()
 
         # Do not retain fold models and lag-sized tensors while preprocessing the
         # next lag. Foundation feature extraction temporarily loads another large
         # model, so overlapping these objects can exceed host or accelerator RAM.
-        del models, histories, cv_results, prediction_records, lag_metrics
-        if "neural_tensor" in locals():
-            del neural_tensor, targets_tensor, data_df, subject_channel_counts
+        models = histories = cv_results = prediction_records = lag_metrics = None
+        prepared = reusable_prepared = None
         _release_accelerator_memory()
 
 

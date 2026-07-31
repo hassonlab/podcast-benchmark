@@ -72,4 +72,6 @@ training_params:
   smaller_is_better: false
   tensorboard_logging: false
   weight_decay: 1.0e-05
+  num_null_repetitions: 10
+  lag: 0
 trial_name: diver_subject6_full_content_noncontent_random_init

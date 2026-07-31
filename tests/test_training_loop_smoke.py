@@ -425,6 +425,64 @@ def test_run_training_over_lags_smoke_with_foundation_feature_cache(tmp_path):
     assert SMOKE_STATS["foundation_encode_calls"] == 3
 
 
+def test_repeated_combined_null_reruns_random_foundation_features(tmp_path):
+    SMOKE_STATS["foundation_encode_calls"] = 0
+    output_dir = tmp_path / "null_results"
+    checkpoint_dir = tmp_path / "null_checkpoints"
+    params = _training_params()
+    params.shuffle_targets = True
+    params.num_null_repetitions = 2
+    params.save_test_predictions = True
+
+    run_training_over_lags(
+        [0],
+        _fake_raws(),
+        _task_df(),
+        preprocessing_fns=[
+            models.foundation_feature_preprocessor.foundation_feature_cache
+        ],
+        model_spec=ModelSpec(
+            constructor_name="mlp_probe_decoder",
+            params={"layer_sizes": [1], "output_dim": 1},
+        ),
+        task_name="smoke_task",
+        training_params=params,
+        task_config=_task_config(
+            DataParams(
+                window_width=0.004,
+                preprocessor_params=[
+                    {
+                        "foundation_model_spec": {
+                            "constructor_name": "smoke_foundation_encoder",
+                            "params": {},
+                            "random_init": True,
+                        },
+                        "batch_size": 3,
+                    }
+                ],
+            )
+        ),
+        output_dir=str(output_dir),
+        checkpoint_dir=str(checkpoint_dir),
+        write_to_tensorboard=False,
+    )
+
+    results = pd.read_csv(output_dir / "lag_performance.csv")
+    assert results["null_repetition"].tolist() == [1, 2]
+    assert results["null_seed"].tolist() == [params.random_seed, params.random_seed + 1]
+    summary = pd.read_csv(output_dir / "null_summary.csv")
+    assert summary.loc[0, "num_null_repetitions"] == 2
+    for repetition in (1, 2):
+        repetition_dir = checkpoint_dir / "lag_0" / f"null_repetition_{repetition}"
+        assert (repetition_dir / "best_model_fold1.pt").exists()
+        assert (repetition_dir / "best_model_fold2.pt").exists()
+    with h5py.File(output_dir / "test_predictions.h5", "r") as artifact:
+        assert artifact.attrs["schema_version"] == 2
+        assert "lag_0/null_repetition_1/fold_1" in artifact
+        assert "lag_0/null_repetition_2/fold_2" in artifact
+    assert SMOKE_STATS["foundation_encode_calls"] == 6
+
+
 def test_run_training_over_lags_smoke_with_per_subject_feature_concat(tmp_path):
     SMOKE_STATS["foundation_encode_calls"] = 0
 

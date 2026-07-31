@@ -158,6 +158,9 @@ class TrainingParams:
     normalize_targets: bool = False
     # If true, shuffles targets to create a sanity check baseline (should break model performance).
     shuffle_targets: bool = False
+    # Number of independently seeded repetitions for a single-lag null-control run.
+    # Values greater than one require shuffle_targets and/or a random_init ModelSpec.
+    num_null_repetitions: int = 1
     # If true, writes best-checkpoint out-of-fold test predictions to the results
     # directory for paired downstream analyses.
     save_test_predictions: bool = False

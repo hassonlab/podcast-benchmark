@@ -28,6 +28,7 @@ LAGS_PER_JOB ?=
 CONFIGS ?=
 SBATCH_FLAGS ?=
 DRY_RUN ?=
+FOUNDATION_CONTROL_SCOPE ?= all
 
 # Specify a single config to use.
 # Usage:
@@ -247,15 +248,31 @@ train-diver-volume-lags-sequential:
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
 
-# Submit one random-init rough-pass job for each foundation condition represented
-# in benchmark-results. Each job runs -1000, -500, 0, 500, and 1000 ms.
+# Submit one repeated random-init job per lag and foundation condition represented
+# in benchmark-results. Defaults to -500, 0, and 500 ms with 10 repetitions.
 # Usage:
 #   make train-foundation-random-init-controls
+#   make train-foundation-random-init-controls FOUNDATION_CONTROL_SCOPE=super_subject
+#   make train-foundation-random-init-controls FOUNDATION_CONTROL_SCOPE=per_subject
 #   make train-foundation-random-init-controls SBATCH_FLAGS='-p debug' DRY_RUN=1
 train-foundation-random-init-controls:
 	@args=""; \
 	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
 	python scripts/submit_foundation_random_init_lags.py \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
+# Submit the matching shuffled-target controls with 100 repetitions per lag.
+# Usage: make train-foundation-shuffled-target-controls FOUNDATION_CONTROL_SCOPE=super_subject DRY_RUN=1
+train-foundation-shuffled-target-controls:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_random_init_lags.py \
+		--controls-root=configs/controls/foundation_shuffled_targets \
+		--control-name=shuffled-targets \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
 		--sbatch-flags="$(SBATCH_FLAGS)" \
 		--config-overrides="$(CONFIG_OVERRIDES)" \
 		$$args

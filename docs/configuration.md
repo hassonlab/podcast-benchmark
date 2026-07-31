@@ -211,8 +211,15 @@ training_params:
   # Target manipulation
   normalize_targets: false      # Normalize targets to zero mean / unit variance
   shuffle_targets: false        # Shuffle targets (sanity check baseline)
+  num_null_repetitions: 1       # Repeat a single-lag null control with new seeds
   save_test_predictions: false  # Save out-of-fold test outputs to HDF5
 ```
+
+`num_null_repetitions` values above 1 require exactly one resolved lag and at
+least one null control: `shuffle_targets: true` or a `random_init: true` model
+spec (including a nested foundation feature model). The controls can be combined.
+Repeated runs write one `lag_performance.csv` row per repetition and an
+across-repetition `null_summary.csv`.
 
 See `core/config.py:TrainingParams` for all available fields.
 

@@ -11,6 +11,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_CONFIG_ROOT = REPO_ROOT / "configs" / "foundation_models"
 CONTROL_CONFIG_ROOT = REPO_ROOT / "configs" / "controls" / "foundation_random_init"
+NUM_NULL_REPETITIONS = 10
+DEFAULT_LAG = 0
 
 
 def iter_control_templates() -> list[Path]:
@@ -26,6 +28,9 @@ def build_random_init_config(template_cfg: dict) -> dict:
         params for params in preprocessor_params if "foundation_model_spec" in params
     )
     foundation_params["foundation_model_spec"]["random_init"] = True
+    training_params = cfg.setdefault("training_params", {})
+    training_params["num_null_repetitions"] = NUM_NULL_REPETITIONS
+    training_params["lag"] = DEFAULT_LAG
     cfg["trial_name"] = f"{cfg['trial_name']}_random_init"
     return cfg
 

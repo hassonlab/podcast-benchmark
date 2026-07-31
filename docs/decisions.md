@@ -52,6 +52,19 @@ Test-prediction persistence is opt-in because vector targets can materially incr
 
 Target-shuffling controls randomize training labels inside each fold while preserving validation and test labels. Zero-shot word folds use stable first-occurrence ordering so separate model processes can produce genuinely paired test partitions.
 
+Repeated null controls are restricted to one lag per job and require target
+shuffling, explicit model random initialization, or both. Each repetition uses a
+derived seed and is the unit summarized in `null_summary.csv`. Foundation-model
+random-init repetitions rerun feature extraction so they cannot reuse embeddings
+from a previous initialization; shuffled-target-only repetitions reuse fixed
+preprocessed neural features.
+
+Foundation null-control configs are generated from the canonical BrainBERT,
+DIVER, and PopT templates for both super-subject and individual-subject runs.
+Random-init controls use 10 repetitions per lag; shuffled-target controls use
+100. Cluster submission splits -500, 0, and 500 ms into separate jobs because a
+repeated-null job intentionally resolves to exactly one lag.
+
 ## YAML Experiment Configuration
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.

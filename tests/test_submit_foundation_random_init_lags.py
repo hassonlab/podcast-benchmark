@@ -6,19 +6,19 @@ from scripts.submit_foundation_random_init_lags import (
 )
 
 
-def test_command_runs_one_five_lag_condition_job():
+def test_command_runs_one_repeated_null_lag_job():
     config = Path("configs/controls/foundation_random_init/example.yml")
 
     command = command_for_condition(
         config,
+        lag=-500,
         sbatch_flags="-p debug",
         config_overrides="--training_params.epochs=1",
     )
 
     assert "--dependency=singleton" in command
-    assert "--training_params.min_lag=-1000" in command
-    assert "--training_params.max_lag=1500" in command
-    assert "--training_params.lag_step_size=500" in command
+    assert "--training_params.lag=-500" in command
+    assert "--trial_name=example_random_init_lag_-500" in command
     assert command.count("-p") == 1
     assert command.count("debug") == 1
 
