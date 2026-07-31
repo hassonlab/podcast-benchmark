@@ -20,6 +20,8 @@ Task tables describe canonical stimulus events and targets. A dataset may option
 
 Dataset getters return MNE Raw objects and mark dataset-specific bad channels in `raw.info['bads']`; shared loading then handles configured dropping, resampling, unit conversion, and channel selection. Dataset preprocessing that affects referencing, such as Brain Treebank corrupted-channel removal before common-average reference, is performed when the reusable FIF artifact is built.
 
+Brain Treebank artifact construction resamples each HDF5 electrode while reading when a target rate is requested. Full-movie source recordings are too large to safely stack and copy at 2048 Hz before downsampling; channel-wise resampling preserves the artifact builder's output rate while bounding peak memory.
+
 ## Canonical Word Labels
 
 Reusable word-level label artifacts use unique `event_id`, stimulus-time `start`, and optional `end`, `word`, and task columns. Linguistic task getters are views over that table. Legacy Podcast paths and column aliases remain accepted, while new datasets can generate one table for surprisal, content/function, POS, and sentence-onset tasks.
@@ -41,6 +43,12 @@ Chunk files are written through temporary filenames and atomically moved into pl
 DIVER volume-level lag sweeps can still create too much concurrent cache and scratch pressure when every lag batch is submitted independently. The dedicated Slurm helper submits those batches with `--dependency=singleton` and stable per-config job names, so each config advances through lag batches serially while different configs can still run in parallel.
 
 DIVER volume-level configs use five temporary preprocessing chunks by default. This bounds peak memory while keeping each chunk large enough to avoid excessive disk-backed loader overhead; cluster submissions place these chunks in job-local temporary storage.
+
+Brain Treebank foundation configs run one subject per job and use twenty temporary
+preprocessing chunks. Their full frozen feature matrices can exceed host memory, and
+there is no Brain Treebank supersubject condition that benefits from serializing the
+subjects in one process. Their linear probes use input dropout and stronger weight
+decay to address the train/test gap seen with high-dimensional cached features.
 
 ## Neural-Only Training Loop
 
@@ -64,6 +72,14 @@ DIVER, and PopT templates for both super-subject and individual-subject runs.
 Random-init controls use 10 repetitions per lag; shuffled-target controls use
 100. Cluster submission splits -500, 0, and 500 ms into separate jobs because a
 repeated-null job intentionally resolves to exactly one lag.
+
+## Prediction-Artifact Significance Tests
+
+Paired significance analyses recompute registered scalar metrics over pooled out-of-fold predictions rather than treating fold scores as independent observations. Artifacts are joined strictly by stable sample ID and must agree on targets, onsets, task, and prediction shape at each compared lag.
+
+The randomization null swaps paired predictions between two results. Contiguous onset-ordered event blocks can be swapped as units to preserve short-range target dependence, and best-lag tests reuse each swap mask across lags before reselecting both best lags. Best-lag analyses use one common sample population across all candidate results and lags so missing boundary samples cannot determine the winner.
+
+Holm correction is the initial multiple-comparison policy. Baseline analyses correct across all result-by-lag hypotheses. Data-selected best-result analyses calculate the correction over every possible ordered result pair, then report the observed winner's contrasts. This controls familywise error without requiring the stronger joint multi-model exchangeability assumptions of a permutation max-statistic procedure.
 
 ## YAML Experiment Configuration
 

@@ -13,6 +13,7 @@ class MLPProbeDecoder(nn.Module):
         input_dim: int | None,
         layer_sizes: list[int],
         dropout: float = 0.0,
+        input_dropout: float = 0.0,
         use_layer_norm: bool = False,
         output_activation: str = "linear",
         output_dim: int | None = None,
@@ -27,6 +28,7 @@ class MLPProbeDecoder(nn.Module):
         self.layers = nn.ModuleList()
         self.layer_norms = nn.ModuleList() if use_layer_norm else None
         self.dropout = nn.Dropout(dropout)
+        self.input_dropout = nn.Dropout(input_dropout)
         self.use_layer_norm = use_layer_norm
         self.output_activation = output_activation
 
@@ -41,6 +43,7 @@ class MLPProbeDecoder(nn.Module):
             prev_dim = size
 
     def forward(self, x, **kwargs):
+        x = self.input_dropout(x)
         for i, layer in enumerate(self.layers):
             x = layer(x)
             if i < len(self.layers) - 1:
@@ -78,6 +81,7 @@ def create_mlp_probe_decoder(model_params):
         input_dim=model_params.get("input_dim"),
         layer_sizes=layer_sizes,
         dropout=model_params.get("dropout", 0.0),
+        input_dropout=model_params.get("input_dropout", 0.0),
         use_layer_norm=model_params.get("use_layer_norm", False),
         output_activation=model_params.get("output_activation", "linear"),
         output_dim=output_dim,

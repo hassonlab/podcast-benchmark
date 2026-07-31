@@ -13,6 +13,7 @@ import h5py
 import mne
 import numpy as np
 import pandas as pd
+from scipy import signal
 
 from core import registry
 
@@ -106,8 +107,13 @@ def _electrode_labels(path: str) -> dict[int, str]:
     return parsed
 
 
-def load_source_raw(record: dict):
-    """Load one source HDF5 trial into an MNE RawArray in volts."""
+def load_source_raw(record: dict, target_sfreq: float | None = None):
+    """Load one source HDF5 trial into an MNE RawArray in volts.
+
+    When ``target_sfreq`` is provided, channels are resampled as they are read. This
+    keeps long Brain Treebank recordings from being materialized several times at
+    their 2048 Hz source rate before the artifact builder can downsample them.
+    """
     recording_path = record["recording_path"]
     if not os.path.exists(recording_path):
         raise FileNotFoundError(f"Brain Treebank recording not found: {recording_path}")
@@ -127,10 +133,19 @@ def load_source_raw(record: dict):
             values = np.asarray(stream["data"][key], dtype=np.float32).squeeze()
             if values.ndim != 1:
                 raise ValueError(f"Expected one-dimensional {key}, got {values.shape}")
+            if target_sfreq is not None and not np.isclose(target_sfreq, SOURCE_SFREQ):
+                ratio = float(target_sfreq) / SOURCE_SFREQ
+                denominator = 1_000_000
+                numerator = int(round(ratio * denominator))
+                divisor = np.gcd(numerator, denominator)
+                values = signal.resample_poly(
+                    values, numerator // divisor, denominator // divisor
+                ).astype(np.float32, copy=False)
             arrays.append(values)
             names.append(labels.get(electrode_num, key))
     data = np.stack(arrays) * SOURCE_UNIT_SCALE_TO_VOLTS
-    info = mne.create_info(names, SOURCE_SFREQ, ch_types="seeg")
+    sfreq = SOURCE_SFREQ if target_sfreq is None else float(target_sfreq)
+    info = mne.create_info(names, sfreq, ch_types="seeg")
     info["subject_info"] = {"his_id": f"sub-{record['subject_id']}"}
     return mne.io.RawArray(data, info, verbose=False)
 
