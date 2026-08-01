@@ -29,6 +29,16 @@ python main.py --config configs/brain_treebank/popt/sentence_onset.yml
 Each config evaluates 21 lags from -1000 ms through +1000 ms in 100 ms steps.
 `max_lag` is set to 1100 because the training runner treats that bound as exclusive.
 
+Preview and then submit all 45 single-subject foundation jobs with:
+
+```bash
+make train-brain-treebank-foundations DRY_RUN=1
+make train-brain-treebank-foundations
+```
+
+Use `BTB_FOUNDATION_MODELS='brainbert diver'` to select model families and
+`SBATCH_FLAGS='-p gpu --time=20:00:00'` for site-specific Slurm overrides.
+
 Foundation configs are generated from the established Podcast subject configs by
 `scripts/generate_brain_treebank_foundation_configs.py`.
 

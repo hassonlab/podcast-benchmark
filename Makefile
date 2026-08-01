@@ -29,6 +29,7 @@ CONFIGS ?=
 SBATCH_FLAGS ?=
 DRY_RUN ?=
 FOUNDATION_CONTROL_SCOPE ?= all
+BTB_FOUNDATION_MODELS ?= brainbert diver popt
 
 # Specify a single config to use.
 # Usage:
@@ -247,6 +248,36 @@ train-diver-volume-lags-sequential:
 	CONFIG_OVERRIDES="$(CONFIG_OVERRIDES)" \
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
+
+# Submit every single-subject Brain Treebank foundation config as its own Slurm job.
+# Each config already selects one of subjects 3, 7, or 10 and uses chunked preprocessing.
+# Usage:
+#   make train-brain-treebank-foundations DRY_RUN=1
+#   make train-brain-treebank-foundations
+#   make train-brain-treebank-foundations BTB_FOUNDATION_MODELS='brainbert diver'
+#   make train-brain-treebank-foundations SBATCH_FLAGS='-p gpu --time=20:00:00'
+train-brain-treebank-foundations:
+	@mkdir -p logs
+	@submitted=0; \
+	for model in $(BTB_FOUNDATION_MODELS); do \
+		config_dir="configs/brain_treebank/$$model"; \
+		if [ ! -d "$$config_dir" ]; then \
+			echo "Unknown Brain Treebank foundation model directory: $$config_dir" >&2; \
+			exit 1; \
+		fi; \
+		for config in $$config_dir/*.yml; do \
+			config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/brain_treebank/##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g'); \
+			job_name="btb-foundation-$$config_tag-$(USR)-$(DT)"; \
+			if [ "$(DRY_RUN)" = "1" ]; then \
+				echo sbatch $(SBATCH_FLAGS) --job-name="$$job_name" submit.sh main.py --config "$$config" $(CONFIG_OVERRIDES); \
+			else \
+				echo "Submitting $$config as $$job_name"; \
+				sbatch $(SBATCH_FLAGS) --job-name="$$job_name" submit.sh main.py --config "$$config" $(CONFIG_OVERRIDES); \
+			fi; \
+			submitted=$$((submitted + 1)); \
+		done; \
+	done; \
+	echo "Brain Treebank foundation jobs: $$submitted"
 
 # Submit one repeated random-init job per lag and foundation condition represented
 # in benchmark-results. Defaults to -500, 0, and 500 ms with 10 repetitions.
