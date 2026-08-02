@@ -32,6 +32,34 @@ This will:
 You can combine options, for example `./setup.sh --dev --paper`, to install
 only the optional workflows you need.
 
+## Interactive Tutorial
+
+The [first-model marimo notebook](https://github.com/hassonlab/podcast-benchmark/blob/main/tutorials/getting_started.py) is the
+smallest real-data introduction to the benchmark. Its default demo downloads
+only subject 8's preprocessed high-gamma recording (about 265 MB); the
+sentence-onset labels are already included in the repository.
+
+```bash
+pip install -e ".[tutorial]"
+marimo edit tutorials/getting_started.py
+```
+
+The notebook defines and registers a temporal preprocessor and linear decoder,
+runs a two-fold sentence-onset experiment at three lags with one
+`run_benchmark(config)` call, and plots held-out ROC-AUC. A second section
+constructs and registers a four-electrode synthetic MNE Raw dataset, then reuses
+the same model, preprocessor, and task with only configuration changes.
+
+A generated [Jupyter notebook](https://github.com/hassonlab/podcast-benchmark/blob/main/tutorials/getting_started.ipynb)
+contains the same tutorial in sequential form and can be
+[opened directly in Colab](https://colab.research.google.com/github/hassonlab/podcast-benchmark/blob/main/tutorials/getting_started.ipynb).
+Run all cells, then save or commit the notebook to preserve its tables and plots.
+Regenerate it after editing the marimo source with:
+
+```bash
+python scripts/export_tutorial_ipynb.py
+```
+
 ## Training Your First Model
 
 The framework comes with several pre-configured models you can train immediately.

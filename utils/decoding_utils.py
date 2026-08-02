@@ -375,20 +375,6 @@ def _init_cv_results(
     return cv_results, embedding_metrics
 
 
-def _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx):
-    print(f"Fold {fold}")
-    print(f"Train indices: {tr_idx}")
-    print(f"Validation indices: {va_idx}")
-    print(f"Test indices: {te_idx}")
-    print(f"Train size: {len(tr_idx)}")
-    print(f"Validation size: {len(va_idx)}")
-    print(f"Test size: {len(te_idx)}")
-    print(f"Train Input shape: {neural_data[tr_idx].shape}")
-    print(f"Train targets: {Y[tr_idx]}, shape: {Y[tr_idx].shape}")
-    print(f"Validation targets: {Y[va_idx]}, shape: {Y[va_idx].shape}")
-    print(f"Test targets: {Y[te_idx]}, shape: {Y[te_idx].shape}")
-
-
 def _create_tensorboard_writer(write_to_tensorboard, tensorboard_dir, lag, fold):
     if not write_to_tensorboard:
         return None
@@ -1089,7 +1075,6 @@ def train_decoding_model(
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
-        _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
         cv_results["fold_nums"].append(fold)
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
         writer = _create_tensorboard_writer(
@@ -1224,13 +1209,6 @@ def train_decoding_model_chunked(
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
-        print(f"Fold {fold}")
-        print(f"Train indices: {tr_idx}")
-        print(f"Validation indices: {va_idx}")
-        print(f"Test indices: {te_idx}")
-        print(f"Train size: {len(tr_idx)}")
-        print(f"Validation size: {len(va_idx)}")
-        print(f"Test size: {len(te_idx)}")
         cv_results["fold_nums"].append(fold)
 
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
@@ -1529,9 +1507,7 @@ def run_training_over_lags(
                 f"{len(store.data_df)}, chunks: {len(store.chunk_paths)}"
             )
             return store
-        tensors = raw_dataset.get_data_for_lag(lag)
-        print(f"neural_tensor shape: {tensors[0].shape}")
-        return tensors
+        return raw_dataset.get_data_for_lag(lag)
 
     for lag in lags:
         if not repeated_run and "lags" in existing_df and lag in existing_df["lags"].tolist():

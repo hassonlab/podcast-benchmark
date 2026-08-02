@@ -6,6 +6,8 @@ with various metric dictionary configurations.
 """
 
 import numpy as np
+import pandas as pd
+import pytest
 import matplotlib
 import matplotlib.pyplot as plt
 import argparse
@@ -25,7 +27,51 @@ from utils.plot_utils import (
     extract_metric_names,
     format_metric_name,
     get_subplot_layout,
+    plot_lag_results,
 )
+
+
+def test_plot_lag_results_sorts_lags_and_adds_uncertainty_band():
+    results = pd.DataFrame(
+        {
+            "lags": [500, -500, 0],
+            "test_roc_auc_mean": [0.7, 0.55, 0.8],
+            "test_roc_auc_std": [0.02, 0.04, 0.03],
+        }
+    )
+
+    figure, axes = plot_lag_results(results)
+
+    assert axes.lines[0].get_xdata().tolist() == [-500, 0, 500]
+    assert axes.lines[0].get_ydata().tolist() == [0.55, 0.8, 0.7]
+    assert len(axes.collections) == 1
+    assert axes.get_ylabel() == "AUC-ROC"
+    plt.close(figure)
+
+
+def test_plot_lag_results_reads_csv_and_groups_run_units(tmp_path):
+    result_path = tmp_path / "lag_performance.csv"
+    pd.DataFrame(
+        {
+            "run_unit": ["subject_8", "subject_9"],
+            "lags": [0, 0],
+            "test_roc_auc_mean": [0.6, 0.7],
+        }
+    ).to_csv(result_path, index=False)
+
+    figure, axes = plot_lag_results(result_path, metric="roc_auc")
+
+    assert [line.get_label() for line in axes.lines[:2]] == [
+        "subject_8",
+        "subject_9",
+    ]
+    assert axes.get_legend() is not None
+    plt.close(figure)
+
+
+def test_plot_lag_results_rejects_missing_metric():
+    with pytest.raises(ValueError, match="Available mean metrics"):
+        plot_lag_results(pd.DataFrame({"lags": [0], "score": [1.0]}))
 
 
 def test_extract_metric_names():

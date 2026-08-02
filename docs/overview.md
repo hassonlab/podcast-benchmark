@@ -18,7 +18,7 @@ The main pipeline is:
 
 ## Important Folders and Files
 
-`main.py` contains the top-level single-task and multi-task execution logic, including run modes for combined, per-subject, and per-region experiments.
+`main.py` contains the top-level single-task and multi-task execution logic, including run modes for combined, per-subject, and per-region experiments. `run_benchmark` is the supported programmatic entry point; it returns resolved artifact paths and lag results while the CLI continues to use the same training path.
 
 `core/registry.py` defines the decorator registries for datasets, model constructors, task data getters, preprocessors, config setters, metrics, and model-specific data getters. This is the main extension surface.
 
@@ -54,9 +54,11 @@ Model configs use `model_params.output_dim` for decoder output size across regre
 
 `docs/` contains user-facing documentation, including quickstart, model onboarding, task creation, configuration, task reference, baseline results, API reference, and these repository notes.
 
+`tutorials/` contains executable tutorials. `tutorials/getting_started.py` is the Git-friendly marimo source for the one-subject sentence-onset walkthrough and synthetic dataset-registration example. `tutorials/getting_started.ipynb` is its generated, sequential Jupyter/Colab counterpart; regenerate it with `scripts/export_tutorial_ipynb.py` rather than editing both formats by hand.
+
 `README.md` gives a concise project summary and links to the hosted documentation.
 
-`pyproject.toml` declares package metadata and dependency groups for runtime, tests, docs, paper results, audio tooling, data preprocessing, and full GPU support.
+`pyproject.toml` declares package metadata and dependency groups for runtime, tests, docs, tutorials, paper results, audio tooling, data preprocessing, and full GPU support.
 
 `mkdocs.yml` configures the documentation site built from `docs/`.
 

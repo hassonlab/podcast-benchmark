@@ -1,9 +1,11 @@
 import os
 from datetime import datetime
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 
 from utils import data_utils
@@ -38,6 +40,17 @@ import_all_from_package("metrics", recursive=True)
 import_all_from_package("datasets", recursive=True)
 
 
+@dataclass(frozen=True)
+class BenchmarkRun:
+    """Artifacts and lag metrics produced by :func:`run_benchmark`."""
+
+    output_dir: Path
+    checkpoint_dir: Path
+    tensorboard_dir: Path
+    config_path: Path
+    lag_results: pd.DataFrame
+
+
 def set_seed(seed=42, cudnn_deterministic=False):
     """
     Set random seeds for reproducibility across numpy, pytorch, and python's random module.
@@ -64,14 +77,19 @@ def set_seed(seed=42, cudnn_deterministic=False):
         torch.backends.cudnn.benchmark = False
 
 
-def run_single_task(experiment_config: ExperimentConfig) -> str:
+def run_single_task(
+    experiment_config: ExperimentConfig, *, _return_run: bool = False
+) -> str | BenchmarkRun:
     """Run a single training task.
 
     Args:
         experiment_config: Configuration for this task
+        _return_run: Internal switch used by ``run_benchmark`` to collect the
+            generated artifacts and metrics.
 
     Returns:
-        str: Checkpoint directory for this task (with timestamp)
+        Checkpoint directory for legacy callers, or a ``BenchmarkRun`` for the
+        programmatic runner.
     """
     task_name = experiment_config.task_config.task_name
     task_info = registry.task_registry[task_name]
@@ -134,6 +152,7 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
         )
 
     run_units = _build_run_units(experiment_config, base_raws)
+    result_units = []
     for run_unit in run_units:
         unit_config = deepcopy(experiment_config)
         unit_task_df = base_task_df.copy(deep=True)
@@ -202,6 +221,7 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
         os.makedirs(unit_output_dir, exist_ok=True)
         os.makedirs(unit_checkpoint_dir, exist_ok=True)
         os.makedirs(unit_tensorboard_dir, exist_ok=True)
+        result_units.append((run_unit["dir_name"] or "combined", unit_output_dir))
 
         decoding_utils.run_training_over_lags(
             lags,
@@ -219,7 +239,45 @@ def run_single_task(experiment_config: ExperimentConfig) -> str:
             per_raw_event_times=per_raw_event_times,
         )
 
-    return checkpoint_dir
+    if not _return_run:
+        return checkpoint_dir
+
+    lag_results = []
+    for run_unit_name, unit_output_dir in result_units:
+        result_path = Path(unit_output_dir) / "lag_performance.csv"
+        if not result_path.exists():
+            raise FileNotFoundError(
+                f"Benchmark completed without writing expected results: {result_path}"
+            )
+        unit_results = pd.read_csv(result_path)
+        unit_results.insert(0, "run_unit", run_unit_name)
+        lag_results.append(unit_results)
+
+    return BenchmarkRun(
+        output_dir=Path(output_dir),
+        checkpoint_dir=Path(checkpoint_dir),
+        tensorboard_dir=Path(tensorboard_dir),
+        config_path=Path(output_dir) / "config.yml",
+        lag_results=pd.concat(lag_results, ignore_index=True),
+    )
+
+
+def run_benchmark(experiment_config: ExperimentConfig) -> BenchmarkRun:
+    """Run one configured benchmark and return its artifacts and lag metrics.
+
+    This is the programmatic counterpart to the YAML/CLI entry point. It performs
+    the same deterministic seeding as :func:`main` and keeps ``run_single_task``'s
+    legacy checkpoint-directory return value unchanged.
+    """
+
+    if not isinstance(experiment_config, ExperimentConfig):
+        raise TypeError("run_benchmark expects an ExperimentConfig")
+
+    seed = experiment_config.training_params.random_seed
+    cudnn_deterministic = experiment_config.training_params.cudnn_deterministic
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    set_seed(seed, cudnn_deterministic)
+    return run_single_task(experiment_config, _return_run=True)
 
 
 def _resolve_preprocessing_fns(experiment_config: ExperimentConfig):
