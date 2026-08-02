@@ -13,6 +13,7 @@ To download data and set up your local virtual environment:
 This will:
 - Create a Python virtual environment (conda or venv)
 - Install the core benchmark runtime dependencies
+- Download the WordNet corpora required by word-embedding tasks into the environment
 - Download the necessary podcast listening data
 
 **Setup options**:

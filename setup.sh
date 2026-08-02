@@ -286,5 +286,13 @@ echo "Upgrading pip, setuptools, and wheel in virtual environment..."
 # Install the package in editable mode (pip will skip already installed conda packages)
 pip install -e ".$DEPS"
 
+# Download corpora required by the word-embedding task into the active environment.
+# NLTK includes <sys.prefix>/nltk_data in its default search path, so batch jobs that
+# activate this environment can use the corpora without network access or NLTK_DATA.
+NLTK_DATA_DIR="$(python -c 'import os, sys; print(os.path.join(sys.prefix, "nltk_data"))')"
+echo "Downloading required NLTK data to $NLTK_DATA_DIR..."
+python -m nltk.downloader -d "$NLTK_DATA_DIR" wordnet omw-1.4
+python -c 'from nltk.corpus import wordnet; wordnet.ensure_loaded()'
+
 echo "Setup complete."
 echo "To activate the environment later, run: source $ENV_NAME/bin/activate"

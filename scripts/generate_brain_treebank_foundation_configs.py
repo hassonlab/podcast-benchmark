@@ -18,6 +18,7 @@ TASKS = {
     "pos": "pos_task",
     "sentence_onset": "sentence_onset_task",
 }
+PREPROCESSING_CHUNKS = 20
 
 
 def _task_specific_config(task: str) -> dict:
@@ -72,7 +73,7 @@ def build_config(model: str, task: str, subject_id: int) -> dict:
     )
     data_params["chunked_preprocessing"] = {
         "enabled": True,
-        "num_chunks": 20,
+        "num_chunks": PREPROCESSING_CHUNKS,
         "cache_dir": ".cache/preprocessed_chunks",
     }
     if model == "popt":

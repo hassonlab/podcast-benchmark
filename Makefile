@@ -308,6 +308,18 @@ train-foundation-shuffled-target-controls:
 		--config-overrides="$(CONFIG_OVERRIDES)" \
 		$$args
 
+# Submit random-init and shuffled-target controls as ordinary one-repetition
+# multi-lag jobs. Includes supersubject and subjects 1-9, excludes llm_decoding,
+# and splits -1000..1000 into [-1000, 0) and [0, 1000) jobs.
+# Usage: make train-foundation-one-shot-controls DRY_RUN=1
+train-foundation-one-shot-controls:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_control_ranges.py \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
 # Development and testing targets
 setup:
 	./setup.sh

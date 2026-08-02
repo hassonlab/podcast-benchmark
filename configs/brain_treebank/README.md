@@ -28,6 +28,8 @@ python main.py --config configs/brain_treebank/popt/sentence_onset.yml
 
 Each config evaluates 21 lags from -1000 ms through +1000 ms in 100 ms steps.
 `max_lag` is set to 1100 because the training runner treats that bound as exclusive.
+Foundation preprocessing is split into 20 disk-backed chunks per lag to reduce peak
+host memory usage.
 
 Preview and then submit all 45 single-subject foundation jobs with:
 
