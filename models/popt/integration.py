@@ -23,6 +23,7 @@ from torch.nn import functional as F
 from core import registry
 from models.shared_decoders import MLPProbeDecoder as MLPDecoder
 from models.stft_config import configure_explicit_stft_preprocessor
+from utils.device import pick_device
 
 
 @registry.register_config_setter("set_sample_rate_for_stft")
@@ -67,7 +68,7 @@ def stft_preprocessing(data, preprocessor_params):
 
     # Apply STFT to all data: [batch, channels, time] → [batch, channels, time_stft, freq_channels]
     # Check if GPU is available for STFT acceleration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
 
     # GPU STFT over the entire dataset can easily blow up memory because preprocessing
     # runs before DataLoader minibatching. Process sample chunks instead.
@@ -385,7 +386,7 @@ def _prepare_upstream_state_dict(state_dict, *, drop_position_encoding=False):
 
 def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
 
     _setup_popt_path()
     if foundation_dir_or_model_dir and os.path.isfile(foundation_dir_or_model_dir):
@@ -449,7 +450,7 @@ BRAINBERT_MIDDLE_WINDOW = 5
 def _load_brainbert_upstream(brainbert_foundation_dir):
     from models.brainbert import integration as brainbert_integration
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     upstream = brainbert_integration.load_reference_pretrained_model(
         brainbert_foundation_dir, device=device
     )
@@ -793,7 +794,7 @@ def create_finetuning_decoder(model_params):
             brainbert_electrode_sequence=brainbert_electrode_sequence,
             output_activation=_resolve_output_activation(model_params),
         )
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
         decoder.to(device)
         return decoder
     finally:

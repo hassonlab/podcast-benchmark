@@ -9,6 +9,7 @@ from core import registry
 from core.config import ModelSpec, dict_to_config
 from utils import data_utils
 from utils.model_utils import build_model_from_spec
+from utils.device import pick_device
 
 
 _FEATURE_CACHE_OMITTED_PARAM_KEYS = {
@@ -37,7 +38,7 @@ def _resolve_device(params):
     configured = params.get("device")
     if configured:
         return torch.device(configured)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return pick_device()
 
 
 def _build_input_tensors(selected_rows, input_fields, device):

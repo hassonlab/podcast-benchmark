@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from core import registry
 from .simple_transformer import load_pretrained_model, SimpleTransformer
+from utils.device import pick_device
 
 # =============================================================================
 # PATTERN 1: FEATURE EXTRACTION (FROZEN MODEL)
@@ -51,7 +52,7 @@ def extract_foundation_features(data, preprocessor_params):
     batch_size = preprocessor_params.get("batch_size", 32)
 
     # Load pretrained model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     model = load_pretrained_model(model_dir, device=device)
     model.eval()
     model.freeze()
@@ -199,7 +200,7 @@ class FoundationModelDecoder(nn.Module):
         super().__init__()
 
         # Load pretrained foundation model
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
         self.foundation_model = load_pretrained_model(model_dir, device=device)
 
         # Fix: If input_channels is provided and different from pretrained model,

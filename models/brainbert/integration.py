@@ -23,6 +23,7 @@ from torch.nn import functional as F
 from core import registry
 from models.shared_decoders import MLPProbeDecoder as MLPDecoder
 from models.stft_config import configure_explicit_stft_preprocessor
+from utils.device import pick_device
 
 
 @registry.register_data_preprocessor("stft_preprocessing")
@@ -32,7 +33,7 @@ def stft_preprocessing(data, preprocessor_params):
     stft_preprocessor = STFTPreprocessor(**preprocessor_params)
     stft_preprocessor.eval()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     datas_torch = torch.from_numpy(data).to(device)
     stft_preprocessor = stft_preprocessor.to(device)
 
@@ -222,7 +223,7 @@ def _get_upstream_cfg_from_checkpoint(ckpt):
 
 def load_reference_pretrained_model(foundation_dir_or_model_dir, device=None):
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
 
     _setup_brainbert_path()
 
@@ -512,7 +513,7 @@ def create_finetuning_decoder(model_params):
             dropout=dropout,
             output_activation=_resolve_output_activation(model_params, output_dim),
         )
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = pick_device()
         decoder.to(device)
         return decoder
     finally:

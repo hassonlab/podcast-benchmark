@@ -14,6 +14,7 @@ import gc
 from torch.nn import functional as F
 
 from core import registry
+from utils.device import pick_device
 
 # =============================================================================
 # PYTHON PATH SETUP
@@ -693,7 +694,7 @@ def create_diver_finetuning_model(model_params):
             sys.modules[module_name] = module_obj
 
     # Move to device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     diver_model.to(device)
 
     # Freeze backbone if requested

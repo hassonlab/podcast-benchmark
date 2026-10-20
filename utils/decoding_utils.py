@@ -37,6 +37,7 @@ import metrics
 from utils.plot_utils import plot_cv_results, plot_training_history
 from core.registry import metric_registry
 import time
+from .device import pick_device
 
 
 def log_metrics_to_tensorboard(writer, metrics, model_name, phase, step):
@@ -1052,7 +1053,7 @@ def train_decoding_model(
     tensorboard_dir: str = "event_logs",
     subject_channel_counts: list[int] = None,
 ):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     if not model_spec.constructor_name:
         raise ValueError("model_spec.constructor_name is required for neural training")
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -1185,7 +1186,7 @@ def train_decoding_model_chunked(
     if not model_spec.constructor_name:
         raise ValueError("model_spec.constructor_name is required for neural training")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     Y = chunk_store.targets

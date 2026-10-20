@@ -32,6 +32,7 @@ from utils.decoding_utils import (
 from main import _build_run_units
 from utils.model_utils import build_model_from_spec
 from utils.module_loader_utils import import_all_from_package
+from utils.device import pick_device
 
 
 import_all_from_package("models", recursive=True)
@@ -90,7 +91,7 @@ def _reset_cuda_peak(device: torch.device):
 
 def _resolve_device(device_name: str) -> torch.device:
     if device_name == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return pick_device()
     return torch.device(device_name)
 
 
