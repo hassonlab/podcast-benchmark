@@ -8,6 +8,19 @@ from mne_bids import BIDSPath
 
 from core import registry
 
+# Subjects whose ecogprep FIF files hold microvolts although the FIF unit says volts. The raw BIDS EDF
+# of sub-01 has physical dimension "n/a" on every channel (sub-02..09: "uV"), so MNE kept its uV
+# numbers and labelled them V, and ecogprep wrote them unchanged: median |x| ~23 "V" for sub-01 vs
+# 2e-5..5e-5 V for the others, in both the broadband and the high-gamma file. Rescaling here makes
+# every subject volts, so `signal_unit: uV` gives microvolts for all of them.
+STORED_IN_MICROVOLTS = {1}
+
+
+def _to_volts(raw, subject_id):
+    if subject_id in STORED_IN_MICROVOLTS:
+        raw.apply_function(lambda x: x * 1e-6, channel_wise=False)
+    return raw
+
 
 def _channels_tsv_candidates(file_path, data_root, subject_id):
     if not hasattr(file_path, "copy"):
@@ -64,4 +77,4 @@ def load_podcast_raw(subject_id, data_params):
                 [*raw.info["bads"], *(ch for ch in bads if ch in raw.ch_names)]
             ))
         break
-    return raw
+    return _to_volts(raw, subject_id)

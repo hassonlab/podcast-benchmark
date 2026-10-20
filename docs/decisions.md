@@ -20,6 +20,8 @@ Task tables describe canonical stimulus events and targets. A dataset may option
 
 Dataset getters return MNE Raw objects and mark dataset-specific bad channels in `raw.info['bads']`; shared loading then handles configured dropping, resampling, unit conversion, and channel selection. Dataset preprocessing that affects referencing, such as Brain Treebank corrupted-channel removal before common-average reference, is performed when the reusable FIF artifact is built.
 
+Dataset getters also return every subject in volts. The Podcast ecogprep files of sub-01 hold microvolts labelled as volts (its raw BIDS EDF has no physical unit), so `datasets/podcast.py` rescales that subject; without it, `signal_unit: uV` made sub-01 about 10^6 times larger than the other subjects.
+
 Brain Treebank artifact construction resamples each HDF5 electrode while reading when a target rate is requested. Full-movie source recordings are too large to safely stack and copy at 2048 Hz before downsampling; channel-wise resampling preserves the artifact builder's output rate while bounding peak memory.
 
 ## Canonical Word Labels
