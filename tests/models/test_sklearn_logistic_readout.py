@@ -122,3 +122,29 @@ def test_train_decoding_model_fits_once_per_fold(tmp_path, n_classes):
     assert all(len(h[f"val_{metric}"]) == 1 for h in histories)
     # Well-separated synthetic classes: a working read-out is far above chance.
     assert np.mean(cv_results[f"test_{metric}"]) > 0.8
+
+
+@pytest.mark.parametrize("n_classes", [2, 3])
+def test_row_space_reaches_the_feature_space_optimum(n_classes):
+    # Many more features than training rows, as for frozen foundation features.
+    X, y = _data(n=90, d=600, n_classes=n_classes, seed=5)
+    kw = dict(tol=1e-10, output_dim=n_classes if n_classes > 2 else None, gram_device="cpu", gram_chunk=128)
+    full = SklearnLogisticReadout(**kw).fit(X[:60], y[:60])
+    row = SklearnLogisticReadout(row_space=True, **kw).fit(X[:60], y[:60])
+    assert row.selection["rank"] <= 59  # centred rows: at most n_train - 1 directions
+    np.testing.assert_allclose(row.decision_function(X[60:]), full.decision_function(X[60:]), atol=2e-3)
+    np.testing.assert_allclose(row.coef.numpy(), full.coef.numpy(), atol=1e-4)
+
+
+def test_row_space_with_c_grid_uses_validation_rows():
+    X, y = _data(n=200, d=300, seed=6)
+    score = registry.metric_registry["roc_auc"]
+    model = SklearnLogisticReadout(C_grid=[1e-4, 1.0], row_space=True, gram_device="cpu").fit(
+        X[:100], y[:100], X_val=X[100:150], y_val=torch.tensor(y[100:150]), score_fn=score
+    )
+    ref = SklearnLogisticReadout(C_grid=[1e-4, 1.0], gram_device="cpu").fit(
+        X[:100], y[:100], X_val=X[100:150], y_val=torch.tensor(y[100:150]), score_fn=score
+    )
+    assert model.C == ref.C
+    for C, val in ref.selection["val_scores"].items():
+        assert abs(model.selection["val_scores"][C] - val) < 1e-3
