@@ -95,3 +95,7 @@ result discovery without creating a second training path.
 `ModelSpec.random_init` supports checkpoint-architecture controls. Model construction and checkpoint loading happen normally, after which native PyTorch initialization hooks reset standard layers. Any parameter left unchanged receives a `normal(0, 0.02)` fallback, ensuring custom directly registered parameters are also replaced while remaining reproducible under the global PyTorch random seed.
 
 Paper-result consolidation may use explicit model/task lag bounds under `cleaning.lag_bounds`. Filtering is performed before coverage validation and runnable-config generation so a deliberately narrower analysis range does not require rewriting source result CSVs.
+
+## Evaluation Metrics Over The Whole Split
+
+By default `_run_epoch` computes every metric per batch and averages over batches, in evaluation as in training. For rank metrics this is biased towards 0.5 at small batch sizes: ROC-AUC is computed within each batch only, and a batch holding one class scores 0.5. The foundation-model configs use `batch_size: 4`, and the CNN 32. `training_params.eval_metrics_over_full_split: true` scores the validation and test splits once, on the concatenated outputs, so the test ROC-AUC is the ROC-AUC of the test split and does not depend on batch size. It defaults to false, so earlier results reproduce unchanged.
