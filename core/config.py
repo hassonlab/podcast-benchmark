@@ -164,6 +164,11 @@ class TrainingParams:
     # If true, writes best-checkpoint out-of-fold test predictions to the results
     # directory for paired downstream analyses.
     save_test_predictions: bool = False
+    # If true, validation and test metrics (and loss) are computed once on the whole split's outputs. If false
+    # (the default, and how earlier results were produced), they are computed per batch and averaged over
+    # batches, which biases rank metrics such as ROC-AUC towards 0.5 at small batch sizes: a batch of 4 often
+    # holds one class only (scored 0.5) and ranks only within itself. Training-phase metrics stay per batch.
+    eval_metrics_over_full_split: bool = False
 
     # --------------------------------------------------------------------------
     # Optimizer extras (optional)

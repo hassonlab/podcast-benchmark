@@ -613,6 +613,23 @@ def _compute_streaming_corr(state):
     return corr.item() if torch.isfinite(corr) else 0.0
 
 
+def _run_eval_full_split(model, loader, device, training_params, all_fns, model_params):
+    """Evaluation pass that scores the loss and every metric once, on the concatenated outputs of the split."""
+    outs, ys = [], []
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, yb = _move_batch_to_device(batch_data, device)
+            outs.append(model(Xb, **inputs_dict).detach())
+            ys.append(yb.detach())
+    out, yb = torch.cat(outs), torch.cat(ys)
+    result = compute_all_metrics(out, yb, all_fns, model_params)
+    loss = compute_loss(out, yb, training_params, all_fns)
+    result["loss"] = loss.detach().mean().item() if torch.is_tensor(loss) else float(loss)
+    if "cross_entropy" in result:
+        result["perplexity"] = np.exp(result["cross_entropy"])
+    return result
+
+
 def _run_epoch(
     model,
     loader,
@@ -629,6 +646,10 @@ def _run_epoch(
         model.train()
     else:
         model.eval()
+    if not is_train and getattr(training_params, "eval_metrics_over_full_split", False):
+        return _run_eval_full_split(
+            model, loader, device, training_params, all_fns, model_params
+        )
 
     accumulate_corr = "corr" in metric_names
     batch_metric_fns = {
