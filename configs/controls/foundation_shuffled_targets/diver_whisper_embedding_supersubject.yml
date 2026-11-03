@@ -55,7 +55,7 @@ training_params:
   - 1.0
   losses:
   - mse
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - mse
   - corr
@@ -64,12 +64,11 @@ training_params:
   - nll_embedding
   - pairwise_accuracy
   - similarity_entropy
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   smaller_is_better: false
   tensorboard_logging: false
   weight_decay: 1.0e-05
   shuffle_targets: true
   num_null_repetitions: 100
-  lag: 0
 trial_name: diver_supersubject_whisper_embedding_shuffled_targets

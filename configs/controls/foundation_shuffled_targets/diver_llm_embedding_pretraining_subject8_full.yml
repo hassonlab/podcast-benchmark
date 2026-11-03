@@ -63,7 +63,7 @@ training_params:
   - 1.0
   losses:
   - mse
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - mse
   - corr
@@ -72,7 +72,7 @@ training_params:
   - nll_embedding
   - pairwise_accuracy
   - similarity_entropy
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   normalize_targets: false
   smaller_is_better: true
@@ -80,5 +80,4 @@ training_params:
   weight_decay: 1.0e-05
   shuffle_targets: true
   num_null_repetitions: 100
-  lag: 0
 trial_name: diver_subject8_full_llm_embedding_pretraining_shuffled_targets

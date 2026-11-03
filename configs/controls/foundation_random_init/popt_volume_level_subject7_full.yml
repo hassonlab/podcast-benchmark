@@ -70,16 +70,15 @@ training_params:
   - 1.0
   losses:
   - mse
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - mse
   - corr
   - r2
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   smaller_is_better: false
   tensorboard_logging: false
   weight_decay: 1.0e-05
-  num_null_repetitions: 10
-  lag: 0
+  num_null_repetitions: 1
 trial_name: popt_subject7_full_volume_level_random_init

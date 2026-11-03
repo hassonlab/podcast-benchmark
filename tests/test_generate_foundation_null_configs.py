@@ -24,14 +24,17 @@ def _template():
     }
 
 
-def test_random_init_config_uses_ten_repetitions_at_default_single_lag():
+def test_random_init_config_uses_one_repetition_over_configured_lags():
     config = build_random_init_config(_template())
     foundation_spec = config["task_config"]["data_params"]["preprocessor_params"][1][
         "foundation_model_spec"
     ]
     assert foundation_spec["random_init"] is True
-    assert config["training_params"]["num_null_repetitions"] == 10
-    assert config["training_params"]["lag"] == 0
+    assert config["training_params"]["num_null_repetitions"] == 1
+    assert config["training_params"]["min_lag"] == -500
+    assert config["training_params"]["max_lag"] == 1000
+    assert config["training_params"]["lag_step_size"] == 500
+    assert "lag" not in config["training_params"]
     assert config["training_params"]["shuffle_targets"] is False
 
 
@@ -43,4 +46,7 @@ def test_shuffled_target_config_uses_one_hundred_repetitions_without_random_init
     assert foundation_spec["random_init"] is False
     assert config["training_params"]["shuffle_targets"] is True
     assert config["training_params"]["num_null_repetitions"] == 100
-    assert config["training_params"]["lag"] == 0
+    assert config["training_params"]["min_lag"] == -500
+    assert config["training_params"]["max_lag"] == 1000
+    assert config["training_params"]["lag_step_size"] == 500
+    assert "lag" not in config["training_params"]

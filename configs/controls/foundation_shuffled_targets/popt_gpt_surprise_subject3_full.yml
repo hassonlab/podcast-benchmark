@@ -58,17 +58,16 @@ training_params:
   - 1.0
   losses:
   - mse
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - mse
   - corr
   - r2
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   smaller_is_better: true
   tensorboard_logging: false
   weight_decay: 1.0e-05
   shuffle_targets: true
   num_null_repetitions: 100
-  lag: 0
 trial_name: popt_subject3_full_gpt_surprise_shuffled_targets

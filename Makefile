@@ -248,8 +248,8 @@ train-diver-volume-lags-sequential:
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
 
-# Submit one repeated random-init job per lag and foundation condition represented
-# in benchmark-results. Defaults to -500, 0, and 500 ms with 10 repetitions.
+# Submit one random-init job per foundation condition represented in
+# benchmark-results. Configs default to -500, 0, and 500 ms with one repetition.
 # Usage:
 #   make train-foundation-random-init-controls
 #   make train-foundation-random-init-controls FOUNDATION_CONTROL_SCOPE=super_subject
@@ -259,6 +259,21 @@ train-foundation-random-init-controls:
 	@args=""; \
 	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
 	python scripts/submit_foundation_random_init_lags.py \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
+# Run random-init controls over the full trained lag grid (-1000..1000 step 100),
+# one seed, split into <=10h lag chunks.
+# Usage:
+#   make train-foundation-random-init-full
+#   make train-foundation-random-init-full FOUNDATION_CONTROL_SCOPE=super_subject DRY_RUN=1
+train-foundation-random-init-full:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_random_init_lags.py \
+		--full-lags \
 		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
 		--sbatch-flags="$(SBATCH_FLAGS)" \
 		--config-overrides="$(CONFIG_OVERRIDES)" \

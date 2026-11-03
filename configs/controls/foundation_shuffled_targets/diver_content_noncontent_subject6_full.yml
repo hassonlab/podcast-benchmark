@@ -58,7 +58,7 @@ training_params:
   - 1.0
   losses:
   - bce_with_logits
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - roc_auc
   - sensitivity_logits
@@ -66,12 +66,11 @@ training_params:
   - f1_logits
   - precision_logits
   - acc_logits
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   smaller_is_better: false
   tensorboard_logging: false
   weight_decay: 1.0e-05
   shuffle_targets: true
   num_null_repetitions: 100
-  lag: 0
 trial_name: diver_subject6_full_content_noncontent_shuffled_targets

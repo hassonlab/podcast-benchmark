@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_CONFIG_ROOT = REPO_ROOT / "configs" / "foundation_models"
 CONTROL_CONFIG_ROOT = REPO_ROOT / "configs" / "controls" / "foundation_shuffled_targets"
 NUM_NULL_REPETITIONS = 100
-DEFAULT_LAG = 0
+MIN_LAG = -500
+MAX_LAG = 1000
+LAG_STEP = 500
 
 
 def iter_control_templates() -> list[Path]:
@@ -25,7 +27,10 @@ def build_shuffled_target_config(template_cfg: dict) -> dict:
     training_params = cfg.setdefault("training_params", {})
     training_params["shuffle_targets"] = True
     training_params["num_null_repetitions"] = NUM_NULL_REPETITIONS
-    training_params["lag"] = DEFAULT_LAG
+    training_params.pop("lag", None)
+    training_params["min_lag"] = MIN_LAG
+    training_params["max_lag"] = MAX_LAG
+    training_params["lag_step_size"] = LAG_STEP
     cfg["trial_name"] = f"{cfg['trial_name']}_shuffled_targets"
     return cfg
 

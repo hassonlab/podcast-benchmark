@@ -59,18 +59,17 @@ training_params:
   - 1.0
   losses:
   - cross_entropy
-  max_lag: 1500
+  max_lag: 1000
   metrics:
   - acc_llm
   - top_1_acc_llm
   - top_5_acc_llm
   - top_10_acc_llm
-  min_lag: -1000
+  min_lag: -500
   n_folds: 5
   smaller_is_better: true
   tensorboard_logging: false
   weight_decay: 1.0e-05
   shuffle_targets: true
   num_null_repetitions: 100
-  lag: 0
 trial_name: brainbert_subject4_full_llm_decoding_shuffled_targets

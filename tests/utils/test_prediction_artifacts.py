@@ -68,16 +68,15 @@ def test_null_repetitions_allow_combined_nested_random_init_and_shuffle():
     assert second_params["_null_repetition_seed"] == 43
 
 
-def test_null_repetitions_require_one_lag_and_a_control():
+def test_null_repetitions_allow_multiple_lags_but_require_a_control():
     model_spec = ModelSpec(constructor_name="probe")
     data_params = DataParams()
-    with pytest.raises(ValueError, match="exactly one"):
-        _validate_null_repetitions(
-            [0, 100],
-            model_spec,
-            TrainingParams(shuffle_targets=True, num_null_repetitions=2),
-            data_params,
-        )
+    assert _validate_null_repetitions(
+        [-500, 0, 500],
+        model_spec,
+        TrainingParams(shuffle_targets=True, num_null_repetitions=2),
+        data_params,
+    ) == (2, False)
     with pytest.raises(ValueError, match="requires shuffle_targets"):
         _validate_null_repetitions(
             [0],
