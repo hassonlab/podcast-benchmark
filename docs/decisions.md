@@ -56,6 +56,12 @@ decay to address the train/test gap seen with high-dimensional cached features.
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
 
+## Closed-Form Read-Outs
+
+A registered model may set `closed_form = True` and implement `fit(X_train, y_train, X_val=None, y_val=None, score_fn=None, smaller_is_better=False)`. The training loop then skips the optimizer and the epoch loop for it: it gathers the fold's train and val tensors, calls `fit` once, and scores train, val and test with the same `_run_epoch` metric path as a trained model. Folds, test rows and metric code stay identical, so a closed-form read-out can be compared directly with a trained head on the same config. No checkpoint is written; the fitted model is kept in memory for prediction artifacts.
+
+`sklearn_logistic_readout` (`models/sklearn_logistic_readout.py`) is the first such model. It is the logistic regression of the iMindBench harness: scikit-learn `LogisticRegression(C=1.0, penalty="l2", solver="lbfgs", max_iter=10000, tol=1e-3, random_state=42)` on flattened inputs, standardised with the training split's statistics. It replaces `mlp_probe_decoder` on classification tasks by changing only `model_spec.constructor_name`, keeping `output_activation` and `output_dim`. C is fixed by default; `C_grid` chooses C on the validation split with `early_stopping_metric`, with no refit on train+val.
+
 ## Out-of-Fold Prediction Artifacts
 
 Test-prediction persistence is opt-in because vector targets can materially increase result storage. Enabled runs write original-scale predictions, targets, stable sample identifiers, onsets, folds, and target-normalization statistics to one HDF5 artifact per run unit. This supports paired downstream tests without retaining training or validation predictions. LLM decoding logits are excluded because their vocabulary dimension would make these artifacts tens to hundreds of gigabytes per run.
