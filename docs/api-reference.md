@@ -2,6 +2,22 @@
 
 Reference for all registry decorators and their function signatures.
 
+## Programmatic benchmark runner
+
+`main.run_benchmark(config)` runs an `ExperimentConfig` through the same seeded
+pipeline as the CLI and returns a `BenchmarkRun` with `output_dir`,
+`checkpoint_dir`, `tensorboard_dir`, `config_path`, and `lag_results`. The
+`lag_results` DataFrame combines every run unit and identifies it with a
+`run_unit` column.
+
+```python
+from main import run_benchmark
+
+run = run_benchmark(config)
+print(run.output_dir)
+print(run.lag_results)
+```
+
 ## Overview
 
 The framework uses registries to discover and manage model components. Decorate your functions with the appropriate registry decorator to make them available to the training pipeline.

@@ -1,0 +1,83 @@
+config_setter_name: foundation_feature_cache
+model_spec:
+  constructor_name: mlp_probe_decoder
+  params:
+    layer_sizes:
+    - 1
+    dropout: 0.0
+    use_layer_norm: true
+    output_dim: 1
+    input_dropout: 0.5
+    coordinate_root: processed_data/brain_treebank/coordinates
+  sub_models: {}
+task_config:
+  data_params:
+    data_root: data/brain-treebank
+    do_drop_bads: true
+    electrode_file_path: null
+    signal_unit: uV
+    target_sr: 500
+    use_high_gamma: false
+    window_width: 1.0
+    subject_ids:
+    - 3
+    channel_reg_ex: null
+    per_subject_electrodes: null
+    preprocessing_fn_name:
+    - foundation_feature_cache
+    preprocessor_params:
+    - mode: normal
+      batch_size: 4
+      foundation_config_setter_name: diver_finetune
+      foundation_model_spec:
+        constructor_name: diver_finetune
+        params:
+          d_model: 256
+          deepspeed_pth_format: true
+          e_layer: 12
+          foundation_dir: /scratch/gpfs/HASSON/lucy/PODCAST/podcast-benchmark/models/diver/pretrained_model/256_mp_rank_00_model_states.pt
+          ft_config: flatten_linear
+          ft_mup: false
+          mup_weights: true
+          patch_sampling_rate: 500
+          patch_size: 50
+          feature_cache: true
+        feature_cache: true
+        per_subject_feature_concat: false
+        sub_models: {}
+    dataset_name: brain_treebank
+    dataset_params:
+      movie: cars-2
+    chunked_preprocessing:
+      enabled: true
+      num_chunks: 20
+      cache_dir: .cache/preprocessed_chunks
+  task_name: content_noncontent_task
+  task_specific_config:
+    labels_path: processed_data/brain_treebank/cars-2/word_labels.csv
+training_params:
+  tensorboard_logging: false
+  batch_size: 4
+  early_stopping_metric: roc_auc
+  early_stopping_patience: 10
+  epochs: 100
+  lag_step_size: 100
+  learning_rate: 1.0e-05
+  loss_weights:
+  - 1.0
+  losses:
+  - bce_with_logits
+  max_lag: 1100
+  metrics:
+  - roc_auc
+  - sensitivity_logits
+  - specificity_logits
+  - f1_logits
+  - precision_logits
+  - acc_logits
+  min_lag: -1000
+  n_folds: 5
+  smaller_is_better: false
+  weight_decay: 0.001
+trial_name: brain_treebank_cars2_diver_content_noncontent_subject3
+run_mode: per_subject

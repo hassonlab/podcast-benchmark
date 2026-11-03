@@ -53,7 +53,7 @@ dependencies = [
 test = [
     "pytest==8.3.4",
     "pytest-mock==3.12.0",
-    "podcast-benchmark[paper]",
+    "podcast-benchmark[paper,tutorial]",
 ]
 
 # Documentation site
@@ -63,6 +63,13 @@ docs = [
     "pymdown-extensions>=10.0",
 ]
 
+# Interactive first-run tutorial
+tutorial = [
+    "ipywidgets>=8.1.0",
+    "marimo>=0.19.2",
+    "nbformat>=5.10.0",
+]
+
 # Paper result generation and atlas visualization
 paper = [
     "nilearn>=0.10.0",
@@ -70,7 +77,7 @@ paper = [
 
 # Audio/prosody transcription notebooks and scripts
 audio = [
-    "marimo>=0.19.2",
+    "podcast-benchmark[tutorial]",
     "librosa>=0.10.0",
 ]
 

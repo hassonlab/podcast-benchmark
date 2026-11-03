@@ -1,7 +1,13 @@
 """Create cleaned Brain Treebank broadband/high-gamma MNE artifacts."""
 
 import argparse
+import sys
 from pathlib import Path
+
+# Support the documented ``python scripts/preprocess_brain_treebank.py`` entry point.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from datasets.brain_treebank import (
     artifact_paths,
@@ -37,7 +43,7 @@ def preprocess_subject(data_root, movie, subject_id, representations, target_sfr
             "for the 70-200 Hz band"
         )
     record = resolve_movie_record(data_root, subject_id, movie)
-    source = load_source_raw(record)
+    source = load_source_raw(record, target_sfreq=target_sfreq)
     attach_mni_coordinates(source, data_root, subject_id)
     mark_corrupted_channels(source, data_root, subject_id)
     broadband = prepare_broadband_raw(source, target_sfreq=target_sfreq)

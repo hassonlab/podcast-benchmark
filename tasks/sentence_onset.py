@@ -74,33 +74,43 @@ def sentence_onset_task(task_config: TaskConfig):
             word_matches_sentence = matches.any(axis=1)
             sentence_matches_word = matches.any(axis=0)
 
+    word_positions = np.arange(len(word_onsets), dtype=int)
+    positive_positions = word_positions[word_matches_sentence]
     pos = pd.DataFrame(
         {
-            "start": word_onsets[word_matches_sentence],
+            "source_position": positive_positions,
+            "start": word_onsets[positive_positions],
             "target": 1.0,
         }
     )
 
-    negative_candidates = word_onsets[~word_matches_sentence]
+    negative_candidates = word_positions[~word_matches_sentence]
     negatives_per_positive = config.negatives_per_positive
     requested_negatives = len(pos) * negatives_per_positive
-    replacement_needed = requested_negatives > len(negative_candidates)
+    sampling_capped = requested_negatives > len(negative_candidates)
+    sampled_negatives = min(requested_negatives, len(negative_candidates))
 
     rng = np.random.default_rng(0)
     if requested_negatives == 0:
-        neg_starts = np.array([], dtype=float)
+        negative_positions = np.array([], dtype=int)
     elif len(negative_candidates) == 0:
         raise ValueError(
             "Cannot sample sentence onset negatives: no non-sentence word onsets found"
         )
     else:
-        neg_starts = rng.choice(
+        negative_positions = rng.choice(
             negative_candidates,
-            size=requested_negatives,
-            replace=replacement_needed,
+            size=sampled_negatives,
+            replace=False,
         )
 
-    neg = pd.DataFrame({"start": neg_starts, "target": 0.0})
+    neg = pd.DataFrame(
+        {
+            "source_position": negative_positions,
+            "start": word_onsets[negative_positions],
+            "target": 0.0,
+        }
+    )
 
     unmatched_sentence_onsets = int((~sentence_matches_word).sum())
 
@@ -110,10 +120,12 @@ def sentence_onset_task(task_config: TaskConfig):
         .reset_index(drop=True)
     )
     if canonical_table is not None and len(df_out):
-        metadata = canonical_table.drop_duplicates("start").set_index("start")
         for column in ("event_id", "word", "end"):
-            if column in metadata:
-                df_out[column] = df_out["start"].map(metadata[column])
+            if column in canonical_table:
+                df_out[column] = canonical_table.iloc[
+                    df_out["source_position"].to_numpy(dtype=int)
+                ][column].to_numpy()
+    df_out = df_out.drop(columns="source_position")
 
     # Print dataset summary for inspection
     print(f"\n=== SENTENCE ONSET DATASET ===")
@@ -122,7 +134,7 @@ def sentence_onset_task(task_config: TaskConfig):
     print(f"Negatives: {len(neg)}")
     print(f"Requested negative ratio: {negatives_per_positive}")
     print(f"Unmatched sentence onsets dropped: {unmatched_sentence_onsets}")
-    print(f"Replacement sampling needed: {replacement_needed}")
+    print(f"Negative sampling capped: {sampling_capped}")
     if len(df_out) > 0:
         print(f"Time range: {df_out['start'].min():.2f}s - {df_out['start'].max():.2f}s")
     print(f"First 10 examples:")

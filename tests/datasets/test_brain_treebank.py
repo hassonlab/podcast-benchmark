@@ -74,3 +74,26 @@ def test_load_source_hdf5_uses_labels_and_converts_microvolts(tmp_path):
     np.testing.assert_allclose(
         raw.get_data(), np.array([[1.0, 2.0], [3.0, 4.0]]) * 1e-6
     )
+
+
+def test_load_source_hdf5_can_resample_while_reading(tmp_path):
+    recording = tmp_path / "recording.h5"
+    samples = np.sin(2 * np.pi * 10 * np.arange(2048) / 2048)
+    with h5py.File(recording, "w") as stream:
+        data = stream.create_group("data")
+        data.create_dataset("electrode_0", data=samples)
+        data.create_dataset("electrode_1", data=samples * 2)
+    labels = tmp_path / "labels.json"
+    labels.write_text(json.dumps(["A1", "A2"]))
+
+    raw = load_source_raw(
+        {
+            "recording_path": str(recording),
+            "electrode_labels_path": str(labels),
+            "subject_id": 8,
+        },
+        target_sfreq=512,
+    )
+
+    assert raw.info["sfreq"] == 512
+    assert raw.n_times == 512

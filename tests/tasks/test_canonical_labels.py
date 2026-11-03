@@ -45,3 +45,28 @@ def test_four_word_tasks_share_canonical_table(tmp_path):
     assert content["target"].tolist() == [1, 0, 1, 0]
     assert pos["target"].tolist() == [0, 4, 1, 4]
     assert sorted(sentence["target"].tolist()) == [0.0, 0.0, 1.0, 1.0]
+
+
+def test_sentence_onset_preserves_event_ids_when_start_times_repeat(tmp_path):
+    path = tmp_path / "labels.csv"
+    pd.DataFrame(
+        {
+            "event_id": [10, 11, 12, 13],
+            "start": [1.0, 1.0, 2.0, 3.0],
+            "word": ["first", "second", "third", "fourth"],
+            "sentence_onset": [True, False, True, False],
+        }
+    ).to_csv(path, index=False)
+
+    result = sentence_onset_task(
+        TaskConfig(
+            task_specific_config=SentenceOnsetConfig(
+                labels_path=str(path), negatives_per_positive=1
+            )
+        )
+    )
+
+    assert result["event_id"].is_unique
+    assert set(result["event_id"]) == {10, 11, 12, 13}
+    assert result.loc[result["event_id"] == 10, "target"].item() == 1.0
+    assert result.loc[result["event_id"] == 11, "target"].item() == 0.0

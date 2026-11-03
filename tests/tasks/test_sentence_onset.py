@@ -136,7 +136,7 @@ def test_sentence_onset_task_reports_unmatched_sentence_onsets_dropped(tmp_path,
     assert (df["target"] == 1.0).sum() == 2
 
 
-def test_sentence_onset_task_samples_with_replacement_when_needed(tmp_path, capsys):
+def test_sentence_onset_task_caps_sampling_instead_of_repeating_events(tmp_path, capsys):
     sentence_path = _write_csv(
         tmp_path,
         "sentences.csv",
@@ -154,8 +154,8 @@ def test_sentence_onset_task_samples_with_replacement_when_needed(tmp_path, caps
 
     output = capsys.readouterr().out
     negatives = df.loc[df["target"] == 0.0, "start"].to_numpy()
-    assert "Replacement sampling needed: True" in output
-    assert len(negatives) == 4
+    assert "Negative sampling capped: True" in output
+    assert len(negatives) == 1
     assert set(negatives) == {2.0}
 
 
