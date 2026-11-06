@@ -533,6 +533,9 @@ def _build_model_optimizer_scheduler(
     device,
 ):
     model = build_model_from_spec(model_spec, lag=lag, fold=fold).to(device)
+    if getattr(model, "closed_form", False):
+        # Fitted once per fold by `_fit_closed_form_fold`; no optimizer or scheduler.
+        return model, None, None
     optimizer = _create_optimizer(model, training_params)
     scheduler = _create_training_scheduler(optimizer, loaders, training_params)
     return model, optimizer, scheduler
@@ -758,6 +761,11 @@ def _train_fold(
     device,
     writer=None,
 ):
+    if getattr(model, "closed_form", False):
+        return _fit_closed_form_fold(
+            model, loaders, training_params, all_fns, metric_names, model_params, device
+        )
+
     best_val, patience = setup_early_stopping_state(training_params)
     best_epoch = 0
     history = _create_training_history(metric_names)
@@ -829,6 +837,46 @@ def _train_fold(
         model_params,
     )
     return history, test_mets, best_epoch
+
+
+def _fit_closed_form_fold(
+    model, loaders, training_params, all_fns, metric_names, model_params, device
+):
+    """One fit per fold for a closed-form read-out (a model with `closed_form = True`, e.g.
+    `sklearn_logistic_readout`), in place of the epoch loop.
+
+    The model is fitted on the training split; the validation split is passed for models that choose a
+    hyperparameter on it (scored with `early_stopping_metric`). Train, val and test are then scored with the same
+    `_run_epoch` as a trained model, so metrics are computed identically. The history holds a single "epoch".
+    """
+    X_train, y_train = _collect_loader_features(loaders["train"])
+    X_val, y_val = _collect_loader_features(loaders["val"])
+    model.fit(
+        X_train,
+        y_train,
+        X_val=X_val,
+        y_val=y_val,
+        score_fn=all_fns[training_params.early_stopping_metric],
+        smaller_is_better=training_params.smaller_is_better,
+    )
+    print(f"Closed-form read-out fitted: {getattr(model, 'selection', {})}")
+
+    history = _create_training_history(metric_names)
+    phase_mets = {
+        phase: _run_epoch(
+            model,
+            loaders[phase],
+            device,
+            training_params,
+            all_fns,
+            metric_names,
+            model_params,
+        )
+        for phase in ("train", "val", "test")
+    }
+    _append_epoch_metrics(history, phase_mets["train"], phase_mets["val"])
+    history["num_epochs"] = 1
+    return history, phase_mets["test"], 0
 
 
 def _record_fold_results(cv_results, history, test_mets, metric_names, best_epoch):
