@@ -5,6 +5,7 @@ from tasks.gpt_surprise import gpt_surprise_task, gpt_surprise_multiclass_task
 from tasks.iu_boundaries import iu_boundary_task
 from tasks.pos_task import pos_task
 from tasks.sentence_onset import sentence_onset_task
+from tasks.sentence_onset_pausematched import sentence_onset_pausematched_task
 from tasks.volume_level import (
     volume_level_decoding_task,
     volume_level_config_setter,
@@ -19,6 +20,7 @@ __all__ = [
     "iu_boundary_task",
     "pos_task",
     "sentence_onset_task",
+    "sentence_onset_pausematched_task",
     "volume_level_decoding_task",
     "volume_level_config_setter",
     "whisper_embedding_decoding_task",
