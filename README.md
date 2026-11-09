@@ -4,7 +4,7 @@ A benchmarking framework for neural decoding from podcast listening data.
 
 ## Documentation
 
-**📚 Full documentation available at: https://hassonlab.github.io/podcast-benchmark/**
+**📚 Full documentation available at: https://hassonlab.github.io/NeuroCast/**
 
 ## Quick Start
 
