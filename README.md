@@ -1,4 +1,4 @@
-# Podcast Benchmark
+# NeuroCast
 
 A benchmarking framework for neural decoding from podcast listening data.
 
