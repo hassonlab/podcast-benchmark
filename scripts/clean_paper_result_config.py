@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import yaml
 
+RANDOM_INIT_KEY = "random_init"
 CONDITIONS = ("super_subject", "per_subject", "per_region")
 LAG_KEYS = ("lag", "min_lag", "max_lag", "lag_step_size")
 RUN_MODES = {
@@ -171,37 +172,32 @@ def collect_entity_frames(
 def collect_per_subject_frames(
     run_dirs: Sequence[Path], label: str
 ) -> dict[str, pd.DataFrame]:
-    has_root_csv = [(run_dir / "lag_performance.csv").exists() for run_dir in run_dirs]
-    has_subject_csvs = [
-        any(run_dir.glob("subject_*/lag_performance.csv")) for run_dir in run_dirs
-    ]
-    if any(has_root_csv) and any(has_subject_csvs):
-        raise ValueError(
-            f"Result directories for {label} mix direct lag_performance.csv files "
-            "and subject_*/lag_performance.csv files"
-        )
-    if any(has_root_csv):
-        if not all(has_root_csv):
-            raise FileNotFoundError(
-                f"Some result directories for {label} have no lag CSVs"
-            )
-        subject_frames: dict[str, list[pd.DataFrame]] = {}
-        for run_dir in run_dirs:
-            match = re.search(r"subject[_-]?(\d+)", run_dir.name)
+    subject_frames: dict[str, list[pd.DataFrame]] = {}
+    for run_dir in run_dirs:
+        root_csv = run_dir / "lag_performance.csv"
+        subject_csvs = sorted(run_dir.glob("subject_*/lag_performance.csv"))
+        if root_csv.exists():
+            match = re.search(r"(?:subject|sub)[_-]?(\d+)", run_dir.name)
             if not match:
                 raise ValueError(
                     f"Direct lag_performance.csv directory {run_dir} for {label} "
                     "must identify its subject in the directory name"
                 )
             subject = f"subject_{int(match.group(1))}"
-            subject_frames.setdefault(subject, []).append(
-                pd.read_csv(run_dir / "lag_performance.csv")
+            subject_frames.setdefault(subject, []).append(pd.read_csv(root_csv))
+        for csv_path in subject_csvs:
+            subject_frames.setdefault(csv_path.parent.name, []).append(
+                pd.read_csv(csv_path)
             )
-        return {
-            subject: combine_lag_dataframes(frames, f"{label}/{subject}")
-            for subject, frames in sorted(subject_frames.items())
-        }
-    return collect_entity_frames(run_dirs, "subject_", label)
+        if not root_csv.exists() and not subject_csvs:
+            raise FileNotFoundError(
+                f"Expected lag_performance.csv or subject_*/lag_performance.csv "
+                f"under {run_dir} for {label}"
+            )
+    return {
+        subject: combine_lag_dataframes(frames, f"{label}/{subject}")
+        for subject, frames in sorted(subject_frames.items())
+    }
 
 
 def collect_condition_frames(
@@ -223,6 +219,13 @@ def normalized_for_comparison(config: Mapping) -> dict:
     # Older saved configs omitted this optional field while newer configs write
     # it explicitly as null. Those forms have the same runtime meaning.
     normalized.setdefault("atlas_path", None)
+    model_spec = normalized.get("model_spec")
+    if isinstance(model_spec, Mapping):
+        model_spec = dict(model_spec)
+        # Random initialization was added after some benchmark runs were saved.
+        # An omitted value and an explicit false both select pretrained weights.
+        model_spec.setdefault("random_init", False)
+        normalized["model_spec"] = model_spec
     for key in ("run_mode", "regions", "trial_name", "format_fields"):
         normalized.pop(key, None)
     training = normalized.get("training_params")
@@ -387,6 +390,7 @@ def joined_run_config(
     model: str,
     task: str,
     label: str,
+    trial_prefix: str | None = None,
 ) -> dict:
     configs = [load_run_config(run_dir, label) for run_dir in run_dirs]
     reference = normalized_for_comparison(configs[0])
@@ -399,7 +403,7 @@ def joined_run_config(
 
     joined = copy.deepcopy(configs[-1])
     joined["run_mode"] = RUN_MODES[condition]
-    joined["trial_name"] = f"{model}_{task}_{condition}"
+    joined["trial_name"] = f"{trial_prefix or f'{model}_{task}'}_{condition}"
     joined["format_fields"] = None
     subject_ids, electrodes = merged_subject_metadata(configs, label)
     data = joined.setdefault("task_config", {}).setdefault("data_params", {})
@@ -453,31 +457,55 @@ def clean_config(
         for task, conditions in tasks.items():
             if not isinstance(conditions, Mapping):
                 continue
-            for condition in CONDITIONS:
-                raw_value = conditions.get(condition)
-                if not raw_value:
-                    continue
-                run_dirs = [
-                    resolve_path(path, path_base) for path in result_paths(raw_value)
-                ]
-                label = f"{model}/{task}/{condition}"
-                output_dir = output_root / str(model) / str(task) / condition
+            # Random-init controls hang off the trained run they control for.
+            variants = [("", conditions)]
+            random_init = conditions.get(RANDOM_INIT_KEY)
+            if random_init:
+                if not isinstance(random_init, Mapping):
+                    raise ValueError(
+                        f"{model}/{task}/{RANDOM_INIT_KEY} must map conditions to paths"
+                    )
+                variants.append((RANDOM_INIT_KEY, random_init))
+            for variant, variant_conditions in variants:
+                for condition in CONDITIONS:
+                    raw_value = variant_conditions.get(condition)
+                    if not raw_value:
+                        continue
+                    run_dirs = [
+                        resolve_path(path, path_base)
+                        for path in result_paths(raw_value)
+                    ]
+                    label = "/".join(
+                        part for part in (model, task, variant, condition) if part
+                    )
+                    task_dir = output_root / str(model) / str(task)
+                    output_dir = (
+                        task_dir / variant / condition if variant else task_dir / condition
+                    )
 
-                # Collect and validate everything before replacing existing output.
-                frames = collect_condition_frames(run_dirs, condition, label)
-                frames = apply_lag_bounds(
-                    frames,
-                    configured_lag_bounds(config, str(model), str(task)),
-                    label,
-                )
-                run_config = joined_run_config(
-                    run_dirs, frames, condition, str(model), str(task), label
-                )
-                write_condition(output_dir, frames, run_config)
-                cleaned["results"][model][task][condition] = display_path(
-                    output_dir, absolute_paths
-                )
-                print(f"Wrote {label} -> {output_dir}")
+                    # Collect and validate everything before replacing existing output.
+                    frames = collect_condition_frames(run_dirs, condition, label)
+                    frames = apply_lag_bounds(
+                        frames,
+                        configured_lag_bounds(config, str(model), str(task)),
+                        label,
+                    )
+                    trial_prefix = f"{model}_{task}_{variant}" if variant else None
+                    run_config = joined_run_config(
+                        run_dirs,
+                        frames,
+                        condition,
+                        str(model),
+                        str(task),
+                        label,
+                        trial_prefix,
+                    )
+                    write_condition(output_dir, frames, run_config)
+                    target = cleaned["results"][model][task]
+                    if variant:
+                        target = target[variant]
+                    target[condition] = display_path(output_dir, absolute_paths)
+                    print(f"Wrote {label} -> {output_dir}")
 
     return cleaned
 

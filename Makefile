@@ -28,6 +28,8 @@ LAGS_PER_JOB ?=
 CONFIGS ?=
 SBATCH_FLAGS ?=
 DRY_RUN ?=
+FOUNDATION_CONTROL_SCOPE ?= all
+BTB_FOUNDATION_MODELS ?= brainbert diver popt
 
 # Specify a single config to use.
 # Usage:
@@ -246,6 +248,92 @@ train-diver-volume-lags-sequential:
 	CONFIG_OVERRIDES="$(CONFIG_OVERRIDES)" \
 	DRY_RUN="$(DRY_RUN)" \
 	./submit_diver_volume_lags.sh
+	
+# Submit every single-subject Brain Treebank foundation config as its own Slurm job.
+# Each config already selects one of subjects 3, 7, or 10 and uses chunked preprocessing.
+# Usage:
+#   make train-brain-treebank-foundations DRY_RUN=1
+#   make train-brain-treebank-foundations
+#   make train-brain-treebank-foundations BTB_FOUNDATION_MODELS='brainbert diver'
+#   make train-brain-treebank-foundations SBATCH_FLAGS='-p gpu --time=20:00:00'
+train-brain-treebank-foundations:
+	@mkdir -p logs
+	@submitted=0; \
+	for model in $(BTB_FOUNDATION_MODELS); do \
+		config_dir="configs/brain_treebank/$$model"; \
+		if [ ! -d "$$config_dir" ]; then \
+			echo "Unknown Brain Treebank foundation model directory: $$config_dir" >&2; \
+			exit 1; \
+		fi; \
+		for config in $$config_dir/*.yml; do \
+			config_tag=$$(printf '%s' "$$config" | sed -e 's#^configs/brain_treebank/##' -e 's#\.yml$$##' -e 's#[^A-Za-z0-9._-]#-#g'); \
+			job_name="btb-foundation-$$config_tag-$(USR)-$(DT)"; \
+			if [ "$(DRY_RUN)" = "1" ]; then \
+				echo sbatch $(SBATCH_FLAGS) --job-name="$$job_name" submit.sh main.py --config "$$config" $(CONFIG_OVERRIDES); \
+			else \
+				echo "Submitting $$config as $$job_name"; \
+				sbatch $(SBATCH_FLAGS) --job-name="$$job_name" submit.sh main.py --config "$$config" $(CONFIG_OVERRIDES); \
+			fi; \
+			submitted=$$((submitted + 1)); \
+		done; \
+	done; \
+	echo "Brain Treebank foundation jobs: $$submitted"
+
+# Submit one repeated random-init job per lag and foundation condition represented
+# in benchmark-results. Defaults to -500, 0, and 500 ms with 10 repetitions.
+# Usage:
+#   make train-foundation-random-init-controls
+#   make train-foundation-random-init-controls FOUNDATION_CONTROL_SCOPE=super_subject
+#   make train-foundation-random-init-controls FOUNDATION_CONTROL_SCOPE=per_subject
+#   make train-foundation-random-init-controls SBATCH_FLAGS='-p debug' DRY_RUN=1
+train-foundation-random-init-controls:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_random_init_lags.py \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
+# Run random-init controls over the full trained lag grid (-1000..1000 step 100),
+# one seed, split into <=10h lag chunks.
+# Usage:
+#   make train-foundation-random-init-full
+#   make train-foundation-random-init-full FOUNDATION_CONTROL_SCOPE=super_subject DRY_RUN=1
+train-foundation-random-init-full:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_random_init_lags.py \
+		--full-lags \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
+# Submit the matching shuffled-target controls with 100 repetitions per lag.
+# Usage: make train-foundation-shuffled-target-controls FOUNDATION_CONTROL_SCOPE=super_subject DRY_RUN=1
+train-foundation-shuffled-target-controls:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_random_init_lags.py \
+		--controls-root=configs/controls/foundation_shuffled_targets \
+		--control-name=shuffled-targets \
+		--run-scope="$(FOUNDATION_CONTROL_SCOPE)" \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
+
+# Submit random-init and shuffled-target controls as ordinary one-repetition
+# multi-lag jobs. Includes supersubject and subjects 1-9, excludes llm_decoding,
+# and splits -1000..1000 into [-1000, 0) and [0, 1000) jobs.
+# Usage: make train-foundation-one-shot-controls DRY_RUN=1
+train-foundation-one-shot-controls:
+	@args=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then args="$$args --dry-run"; fi; \
+	python scripts/submit_foundation_control_ranges.py \
+		--sbatch-flags="$(SBATCH_FLAGS)" \
+		--config-overrides="$(CONFIG_OVERRIDES)" \
+		$$args
 
 # Development and testing targets
 setup:

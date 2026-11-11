@@ -12,7 +12,19 @@ This keeps the core benchmark surface controlled and comparable while still allo
 
 ## Registry-Based Extension Points
 
-Models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported model or task into `main.py`.
+Datasets, models, tasks, preprocessors, metrics, config setters, and model data getters are registered through `core/registry.py`. This choice makes the codebase extensible without hard-coding every supported component into `main.py`.
+
+## Canonical Stimulus Events and Subject Neural Clocks
+
+Task tables describe canonical stimulus events and targets. A dataset may optionally map those rows to a different onset array for each subject. Lag slicing intersects rows that are valid for every selected Raw, then slices each Raw using its own neural-clock onsets. This supports shared-stimulus combined runs without resampling or warping recordings onto an artificial common clock.
+
+Dataset getters return MNE Raw objects and mark dataset-specific bad channels in `raw.info['bads']`; shared loading then handles configured dropping, resampling, unit conversion, and channel selection. Dataset preprocessing that affects referencing, such as Brain Treebank corrupted-channel removal before common-average reference, is performed when the reusable FIF artifact is built.
+
+Brain Treebank artifact construction resamples each HDF5 electrode while reading when a target rate is requested. Full-movie source recordings are too large to safely stack and copy at 2048 Hz before downsampling; channel-wise resampling preserves the artifact builder's output rate while bounding peak memory.
+
+## Canonical Word Labels
+
+Reusable word-level label artifacts use unique `event_id`, stimulus-time `start`, and optional `end`, `word`, and task columns. Linguistic task getters are views over that table. Legacy Podcast paths and column aliases remain accepted, while new datasets can generate one table for surprisal, content/function, POS, and sentence-onset tasks.
 
 ## Foundation Preprocessor Pipelines
 
@@ -32,12 +44,58 @@ DIVER volume-level lag sweeps can still create too much concurrent cache and scr
 
 DIVER volume-level configs use five temporary preprocessing chunks by default. This bounds peak memory while keeping each chunk large enough to avoid excessive disk-backed loader overhead; cluster submissions place these chunks in job-local temporary storage.
 
+Brain Treebank foundation configs run one subject per job and use twenty temporary
+preprocessing chunks. Their full frozen feature matrices can exceed host memory, and
+there is no Brain Treebank supersubject condition that benefits from serializing the
+subjects in one process. Their linear probes use input dropout and stronger weight
+decay to address the train/test gap seen with high-dimensional cached features.
+
 ## Neural-Only Training Loop
 
 The shared training loop no longer runs auxiliary sklearn/Himalaya baseline estimators or baseline-only mode. Baseline model families that are implemented as registered torch models, such as `neural_conv_decoder` or `linear_model`, remain regular model configs. This keeps fold training, metrics, checkpoints, and streaming chunk support on one neural model path.
+
+## Out-of-Fold Prediction Artifacts
+
+Test-prediction persistence is opt-in because vector targets can materially increase result storage. Enabled runs write original-scale predictions, targets, stable sample identifiers, onsets, folds, and target-normalization statistics to one HDF5 artifact per run unit. This supports paired downstream tests without retaining training or validation predictions. LLM decoding logits are excluded because their vocabulary dimension would make these artifacts tens to hundreds of gigabytes per run.
+
+Target-shuffling controls randomize training labels inside each fold while preserving validation and test labels. Zero-shot word folds use stable first-occurrence ordering so separate model processes can produce genuinely paired test partitions.
+
+Repeated null controls are restricted to one lag per job and require target
+shuffling, explicit model random initialization, or both. Each repetition uses a
+derived seed and is the unit summarized in `null_summary.csv`. Foundation-model
+random-init repetitions rerun feature extraction so they cannot reuse embeddings
+from a previous initialization; shuffled-target-only repetitions reuse fixed
+preprocessed neural features.
+
+Foundation null-control configs are generated from the canonical BrainBERT,
+DIVER, and PopT templates for both super-subject and individual-subject runs.
+Random-init controls use 10 repetitions per lag; shuffled-target controls use
+100. Cluster submission splits -500, 0, and 500 ms into separate jobs because a
+repeated-null job intentionally resolves to exactly one lag.
+
+## Prediction-Artifact Significance Tests
+
+Paired significance analyses recompute registered scalar metrics over pooled out-of-fold predictions rather than treating fold scores as independent observations. Artifacts are joined strictly by stable sample ID and must agree on targets, onsets, task, and prediction shape at each compared lag.
+
+The randomization null swaps paired predictions between two results. Contiguous onset-ordered event blocks can be swapped as units to preserve short-range target dependence, and best-lag tests reuse each swap mask across lags before reselecting both best lags. Best-lag analyses use one common sample population across all candidate results and lags so missing boundary samples cannot determine the winner.
+
+Holm correction is the initial multiple-comparison policy. Baseline analyses correct across all result-by-lag hypotheses. Data-selected best-result analyses calculate the correction over every possible ordered result pair, then report the observed winner's contrasts. This controls familywise error without requiring the stronger joint multi-model exchangeability assumptions of a permutation max-statistic procedure.
 
 ## YAML Experiment Configuration
 
 Experiments are primarily configured through YAML files in `configs/`. This makes benchmark runs reproducible, easy to generate in bulk, and comparable across models, tasks, subjects, regions, lags, folds, and training settings.
 
+Interactive and library users may pass the same `ExperimentConfig` to
+`run_benchmark`. The programmatic runner deliberately delegates to the shared
+single-task path, performs the CLI's deterministic seeding, and returns a
+`BenchmarkRun` containing artifact paths and normalized lag-result tables. This
+keeps tutorials and downstream Python workflows from reimplementing timestamped
+result discovery without creating a second training path.
+
+`ModelSpec.random_init` supports checkpoint-architecture controls. Model construction and checkpoint loading happen normally, after which native PyTorch initialization hooks reset standard layers. Any parameter left unchanged receives a `normal(0, 0.02)` fallback, ensuring custom directly registered parameters are also replaced while remaining reproducible under the global PyTorch random seed.
+
 Paper-result consolidation may use explicit model/task lag bounds under `cleaning.lag_bounds`. Filtering is performed before coverage validation and runnable-config generation so a deliberately narrower analysis range does not require rewriting source result CSVs.
+
+## Evaluation Metrics Over The Whole Split
+
+By default `_run_epoch` computes every metric per batch and averages over batches, in evaluation as in training. For rank metrics this is biased towards 0.5 at small batch sizes: ROC-AUC is computed within each batch only, and a batch holding one class scores 0.5. The foundation-model configs use `batch_size: 4`, and the CNN 32. `training_params.eval_metrics_over_full_split: true` scores the validation and test splits once, on the concatenated outputs, so the test ROC-AUC is the ROC-AUC of the test split and does not depend on batch size. It defaults to false, so earlier results reproduce unchanged.

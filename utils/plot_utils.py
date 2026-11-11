@@ -1,8 +1,92 @@
 import math
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
+import pandas as pd
+
+
+def _resolve_lag_metric_column(results, metric):
+    candidates = [metric]
+    if not metric.endswith("_mean"):
+        candidates.extend([f"{metric}_mean", f"test_{metric}_mean"])
+    for candidate in candidates:
+        if candidate in results.columns:
+            return candidate
+    raise ValueError(
+        f"Metric '{metric}' was not found. Available mean metrics: "
+        f"{sorted(column for column in results.columns if column.endswith('_mean'))}"
+    )
+
+
+def plot_lag_results(data, metric="test_roc_auc", ax=None):
+    """Plot a lag-level metric with optional fold-standard-deviation bands.
+
+    Args:
+        data: A lag results DataFrame or path to ``lag_performance.csv``.
+        metric: Metric column or friendly stem such as ``"test_roc_auc"`` or
+            ``"roc_auc"``.
+        ax: Optional matplotlib axes to draw on.
+
+    Returns:
+        Tuple of ``(figure, axes)``.
+    """
+
+    if isinstance(data, (str, Path)):
+        results = pd.read_csv(data)
+    elif isinstance(data, pd.DataFrame):
+        results = data.copy()
+    else:
+        raise TypeError("data must be a pandas DataFrame or CSV path")
+
+    if "lags" not in results.columns:
+        raise ValueError("Lag results must contain a 'lags' column")
+    if results.empty:
+        raise ValueError("Lag results are empty")
+
+    mean_column = _resolve_lag_metric_column(results, metric)
+    std_column = (
+        mean_column.removesuffix("_mean") + "_std"
+        if mean_column.endswith("_mean")
+        else None
+    )
+
+    if ax is None:
+        figure, ax = plt.subplots(figsize=(7, 4))
+    else:
+        figure = ax.figure
+
+    if "run_unit" not in results.columns:
+        results["run_unit"] = "combined"
+
+    for run_unit, unit_results in results.groupby("run_unit", sort=False):
+        unit_results = unit_results.sort_values("lags")
+        lags = pd.to_numeric(unit_results["lags"], errors="raise").to_numpy()
+        means = pd.to_numeric(unit_results[mean_column], errors="raise").to_numpy()
+        (line,) = ax.plot(lags, means, marker="o", label=str(run_unit))
+        if std_column and std_column in unit_results.columns:
+            stds = pd.to_numeric(
+                unit_results[std_column], errors="coerce"
+            ).to_numpy()
+            if np.isfinite(stds).any():
+                ax.fill_between(
+                    lags,
+                    means - stds,
+                    means + stds,
+                    color=line.get_color(),
+                    alpha=0.2,
+                )
+
+    label_stem = mean_column.removeprefix("test_").removesuffix("_mean")
+    ax.set_xlabel("Lag (ms)")
+    ax.set_ylabel(format_metric_name(label_stem))
+    ax.set_title(f"{format_metric_name(label_stem)} across lags")
+    ax.axvline(0, color="0.5", linewidth=1, linestyle="--")
+    ax.grid(alpha=0.25)
+    if results["run_unit"].nunique() > 1:
+        ax.legend(title="Run unit")
+    figure.tight_layout()
+    return figure, ax
 
 
 def extract_metric_names(history_dict):
@@ -50,6 +134,7 @@ def format_metric_name(metric_name):
         "cosine_dist": "Cosine Distance",
         "nll_embedding": "NLL Embedding",
         "auc_roc": "AUC-ROC",
+        "roc_auc": "AUC-ROC",
         "perplexity": "Perplexity",
     }
 
@@ -240,4 +325,3 @@ def plot_cv_results(cv_results):
 
     plt.tight_layout()
     plt.show()
-

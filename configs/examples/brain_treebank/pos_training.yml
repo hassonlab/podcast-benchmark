@@ -1,0 +1,42 @@
+config_setter_name: neural_conv
+run_mode: per_subject
+task_config:
+  task_name: pos_task
+  data_params:
+    dataset_name: brain_treebank
+    dataset_params:
+      movie: cars-2
+    data_root: data/brain-treebank
+    subject_ids: [3]
+    use_high_gamma: false
+    window_width: 1.0
+    preprocessing_fn_name: window_average_neural_data
+    preprocessor_params:
+      num_average_samples: 32
+  task_specific_config:
+    labels_path: processed_data/brain_treebank/cars-2/word_labels.csv
+training_params:
+  batch_size: 128
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 8
+  n_folds: 5
+  lag: 0
+  losses: [cross_entropy]
+  metrics: [roc_auc_multiclass, f1, acc]
+  early_stopping_metric: roc_auc_multiclass
+  smaller_is_better: false
+  tensorboard_logging: false
+trial_name: brain_treebank_cars2_pos_training
+model_spec:
+  constructor_name: pitom_model
+  params:
+    conv_filters: 64
+    dropout: 0.2
+    output_dim: 5
+    output_activation: linear
+  sub_models: {}
+output_dir: results/brain_treebank_training
+checkpoint_dir: checkpoints/brain_treebank_training
+tensorboard_dir: event_logs/brain_treebank_training

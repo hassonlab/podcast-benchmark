@@ -25,6 +25,12 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 
 CONDITIONS = ("super_subject", "per_subject")
+RANDOM_INIT_KEY = "random_init"
+RANDOM_INIT_WIDTH_FRACTION = 0.57  # of the trained bar width
+RANDOM_INIT_CENTER_FRACTION = 0.35  # of the trained width, right of its center
+RANDOM_INIT_FACE_COLOR = "white"
+RANDOM_INIT_FACE_ALPHA = 0.65
+RANDOM_INIT_EDGE_COLOR = "#222222"
 PER_REGION_CONDITION = "per_region"
 DEFAULT_NILEARN_DATA_DIR = (
     Path("processed_data") / "atlas_region_visualization" / "nilearn_data"
@@ -398,6 +404,46 @@ def load_results(config: Mapping) -> Dict[str, Dict[str, Dict[str, pd.DataFrame]
             load_current_style_runs(
                 spec.paths,
                 f"{spec.model}/{spec.task}/{spec.condition}",
+            )
+        )
+    return loaded
+
+
+def iter_random_init_result_specs(config: Mapping) -> Iterable[ResultSpec]:
+    """Yield random-init controls nested under each trained model/task entry."""
+    results = config.get("results", {})
+    if not isinstance(results, Mapping):
+        raise ValueError("Config key 'results' must be a mapping")
+
+    for model, tasks in results.items():
+        if not isinstance(tasks, Mapping):
+            continue
+        for task, conditions in tasks.items():
+            if not isinstance(conditions, Mapping):
+                continue
+            random_init = conditions.get(RANDOM_INIT_KEY)
+            if not isinstance(random_init, Mapping):
+                continue
+            for condition in CONDITIONS:
+                path = random_init.get(condition)
+                if path:
+                    yield ResultSpec(
+                        model=model,
+                        task=task,
+                        condition=condition,
+                        paths=result_paths(path),
+                    )
+
+
+def load_random_init_results(
+    config: Mapping,
+) -> Dict[str, Dict[str, Dict[str, pd.DataFrame]]]:
+    loaded: Dict[str, Dict[str, Dict[str, pd.DataFrame]]] = {}
+    for spec in iter_random_init_result_specs(config):
+        loaded.setdefault(spec.condition, {}).setdefault(spec.task, {})[spec.model] = (
+            load_current_style_runs(
+                spec.paths,
+                f"{spec.model}/{spec.task}/{RANDOM_INIT_KEY}/{spec.condition}",
             )
         )
     return loaded
@@ -1913,6 +1959,73 @@ def standard_error(values: Sequence[float]) -> float:
     return float(np.std(finite_values, ddof=1) / np.sqrt(len(finite_values)))
 
 
+def random_init_bar_stats(
+    random_init_task_results: Mapping[str, pd.DataFrame] | None,
+    model: str,
+    lag,
+    metric: MetricConfig,
+) -> tuple[float, float] | None:
+    """Mean and SEM of the random-init control at the lag nearest the trained best lag.
+
+    Controls are run on a coarser lag grid than trained models, so an exact match
+    is usually unavailable.
+    """
+    if random_init_task_results is None or model not in random_init_task_results:
+        return None
+    available = pd.to_numeric(
+        random_init_task_results[model]["lags"], errors="coerce"
+    ).dropna()
+    if available.empty:
+        return None
+    nearest = available.iloc[(available - float(lag)).abs().argmin()]
+    fold_values = best_lag_fold_values(random_init_task_results, model, nearest, metric)
+    if not fold_values:
+        return None
+    return float(np.nanmean(fold_values)), standard_error(fold_values)
+
+
+def draw_random_init_bar(
+    ax,
+    x_position: float,
+    stats: tuple[float, float],
+    bar_start: float,
+    show_error_bars: bool,
+    trained_width: float,
+) -> None:
+    """Draw a narrower control bar offset toward the trained bar's right edge."""
+    mean_value, sem = stats
+    ax.bar(
+        [x_position + trained_width * RANDOM_INIT_CENTER_FRACTION],
+        [mean_value - bar_start],
+        bottom=bar_start,
+        yerr=[sem] if show_error_bars else None,
+        error_kw={
+            "elinewidth": 0.9,
+            "capsize": 2,
+            "capthick": 0.9,
+            "ecolor": RANDOM_INIT_EDGE_COLOR,
+        },
+        color=RANDOM_INIT_FACE_COLOR,
+        edgecolor=RANDOM_INIT_EDGE_COLOR,
+        linewidth=0.8,
+        alpha=RANDOM_INIT_FACE_ALPHA,
+        width=trained_width * RANDOM_INIT_WIDTH_FRACTION,
+        zorder=5,
+    )
+
+
+def random_init_legend_handle() -> plt.Rectangle:
+    return plt.Rectangle(
+        (0, 0),
+        1,
+        1,
+        facecolor=RANDOM_INIT_FACE_COLOR,
+        edgecolor=RANDOM_INIT_EDGE_COLOR,
+        alpha=RANDOM_INIT_FACE_ALPHA,
+        label="Random init",
+    )
+
+
 def summary_std_error(match: pd.DataFrame) -> float:
     if "std" not in match or match.empty or pd.isna(match["std"].iloc[0]):
         return 0.0
@@ -2882,6 +2995,7 @@ def plot_best_lag_summary(
     colors: Mapping[str, str],
     config: Mapping | None = None,
     condition_results: Mapping[str, Mapping[str, pd.DataFrame]] | None = None,
+    random_init_results: Mapping[str, Mapping[str, pd.DataFrame]] | None = None,
 ) -> None:
     config = config or {}
     models = configured_model_order(summary["model"].unique(), config)
@@ -2903,6 +3017,7 @@ def plot_best_lag_summary(
 
     # Neutral color for non-winners
     neutral_color = "#95a5a6"
+    has_random_init = False
 
     for task, ax in layout.task_axes.items():
         task_summary = summary[summary["task"] == task]
@@ -2967,6 +3082,22 @@ def plot_best_lag_summary(
                     width=0.7,
                     zorder=3 if is_best else 2,
                 )
+                random_init_stats = random_init_bar_stats(
+                    (random_init_results or {}).get(task),
+                    model,
+                    match["lag"].iloc[0],
+                    metric,
+                )
+                if random_init_stats is not None:
+                    has_random_init = True
+                    draw_random_init_bar(
+                        ax,
+                        x_position,
+                        random_init_stats,
+                        bar_start,
+                        show_bar_error_bars,
+                        0.7,
+                    )
             else:
                 pt_alpha = 0.7 if is_best else 0.3
                 if fold_values:
@@ -3067,6 +3198,8 @@ def plot_best_lag_summary(
             )
             for model in models
         ]
+        if has_random_init:
+            handles.append(random_init_legend_handle())
     else:
         handles = [
             Line2D(
@@ -3096,7 +3229,7 @@ def plot_best_lag_summary(
         handles=handles,
         loc="upper center",
         bbox_to_anchor=(0.5, 0.995),
-        ncol=len(models),
+        ncol=len(handles),
         frameon=False,
     )
     fig.subplots_adjust(left=0.055, right=0.985, bottom=0.1, top=0.86)
@@ -3111,6 +3244,8 @@ def plot_combined_best_lag_summary(
     formats: Sequence[str],
     colors: Mapping[str, str],
     config: Mapping | None = None,
+    random_init_loaded: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]]
+    | None = None,
 ) -> None:
     if summary.empty or "condition" not in summary.columns:
         return
@@ -3157,6 +3292,7 @@ def plot_combined_best_lag_summary(
         "per_subject": "///",
     }
     model_bar_textures = best_lag_model_bar_textures(config)
+    has_random_init = False
 
     for task, ax in layout.task_axes.items():
         task_summary = summary[summary["task"] == task]
@@ -3211,6 +3347,22 @@ def plot_combined_best_lag_summary(
                         width=bar_width,
                         zorder=3,
                     )
+                    random_init_stats = random_init_bar_stats(
+                        (random_init_loaded or {}).get(condition, {}).get(task),
+                        model,
+                        match["lag"].iloc[0],
+                        metric,
+                    )
+                    if random_init_stats is not None:
+                        has_random_init = True
+                        draw_random_init_bar(
+                            ax,
+                            x_position,
+                            random_init_stats,
+                            bar_start,
+                            show_bar_error_bars,
+                            bar_width,
+                        )
                 else:
                     if fold_values:
                         jitter = (
@@ -3338,6 +3490,8 @@ def plot_combined_best_lag_summary(
             )
             for condition in conditions
         ]
+        if has_random_init:
+            condition_handles.append(random_init_legend_handle())
     else:
         condition_handles = [
             Line2D(
@@ -5727,6 +5881,9 @@ def generate_paper_results(
     configured_destrieux_atlas_path = destrieux_atlas_path(config, config_path)
     tasks_to_exclude = excluded_tasks(config)
     loaded = filter_loaded_tasks(load_results(config), tasks_to_exclude)
+    random_init_loaded = filter_loaded_tasks(
+        load_random_init_results(config), tasks_to_exclude
+    )
     configured_valid_best_lags = valid_best_lags(config)
     per_region_results = filter_per_region_tasks(
         load_per_region_results(config),
@@ -5770,6 +5927,7 @@ def generate_paper_results(
             colors,
             config,
             condition_results,
+            random_init_loaded.get(condition),
         )
 
     if all_summaries:
@@ -5797,6 +5955,7 @@ def generate_paper_results(
             formats,
             colors,
             config,
+            random_init_loaded,
         )
         plot_baseline_condition_comparison(
             baseline_condition_comparison_rows(loaded, metrics),

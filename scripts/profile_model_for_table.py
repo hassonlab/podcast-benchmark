@@ -23,7 +23,7 @@ from utils.decoding_utils import (
     _build_fold_loaders,
     _create_optimizer,
     _get_fold_indices,
-    _maybe_shuffle_targets,
+    _maybe_shuffle_training_targets,
     _normalize_fold_targets,
     _run_epoch,
     _select_requested_folds,
@@ -324,8 +324,6 @@ def profile_config(
         unit_config.task_config.data_params.preprocessor_params,
     )
     neural_data, Y, data_df, subject_channel_counts = raw_dataset.get_data_for_lag(lag)
-    Y = _maybe_shuffle_targets(Y, training_params)
-
     fold_indices = _get_fold_indices(
         neural_data, data_df, unit_config.task_config, training_params
     )
@@ -333,6 +331,9 @@ def profile_config(
     fold_num, (tr_idx, va_idx, te_idx) = _pick_fold(fold_indices, fold_nums, fold)
     split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
     target_splits = _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params)
+    target_splits = _maybe_shuffle_training_targets(
+        target_splits, training_params, fold_num
+    )
 
     cache_build_seconds = 0.0
     cache_peak = "n/a"

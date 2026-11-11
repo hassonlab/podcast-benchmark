@@ -2,7 +2,10 @@ from typing import Optional
 import gc
 import os
 import math
+import random
+from copy import deepcopy
 import matplotlib.pyplot as plt
+import h5py
 import numpy as np
 import pandas as pd
 import torch
@@ -261,14 +264,24 @@ def should_update_gradient_accumulation(
     ) == total_batches
 
 
-def _maybe_shuffle_targets(Y: torch.Tensor, training_params: TrainingParams):
+def _maybe_shuffle_training_targets(
+    target_splits, training_params: TrainingParams, fold: int
+):
+    """Shuffle only a fold's training labels for the sanity-check control."""
     if not training_params.shuffle_targets:
-        return Y
+        return target_splits
 
-    print("WARNING: Shuffling targets for sanity check. Model should perform poorly.")
-    rng = np.random.default_rng(training_params.random_seed)
-    shuffle_indices = rng.permutation(len(Y))
-    return Y[shuffle_indices]
+    print(
+        "WARNING: Shuffling training targets for sanity check. "
+        "Model should perform poorly."
+    )
+    rng = np.random.default_rng(training_params.random_seed + fold * 9173)
+    shuffle_indices = torch.as_tensor(
+        rng.permutation(len(target_splits["train"])), dtype=torch.long
+    )
+    shuffled = dict(target_splits)
+    shuffled["train"] = target_splits["train"][shuffle_indices]
+    return shuffled
 
 
 def _get_fold_indices(
@@ -362,20 +375,6 @@ def _init_cv_results(
     return cv_results, embedding_metrics
 
 
-def _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx):
-    print(f"Fold {fold}")
-    print(f"Train indices: {tr_idx}")
-    print(f"Validation indices: {va_idx}")
-    print(f"Test indices: {te_idx}")
-    print(f"Train size: {len(tr_idx)}")
-    print(f"Validation size: {len(va_idx)}")
-    print(f"Test size: {len(te_idx)}")
-    print(f"Train Input shape: {neural_data[tr_idx].shape}")
-    print(f"Train targets: {Y[tr_idx]}, shape: {Y[tr_idx].shape}")
-    print(f"Validation targets: {Y[va_idx]}, shape: {Y[va_idx].shape}")
-    print(f"Test targets: {Y[te_idx]}, shape: {Y[te_idx].shape}")
-
-
 def _create_tensorboard_writer(write_to_tensorboard, tensorboard_dir, lag, fold):
     if not write_to_tensorboard:
         return None
@@ -402,6 +401,16 @@ def _normalize_fold_targets(Y, tr_idx, va_idx, te_idx, training_params: Training
         "val": (Y[va_idx] - y_mean) / y_std,
         "test": (Y[te_idx] - y_mean) / y_std,
     }
+
+
+def _fold_target_normalization_stats(Y, tr_idx, training_params: TrainingParams):
+    if not training_params.normalize_targets:
+        return None
+    Y_train = Y[tr_idx]
+    y_mean = Y_train.mean(dim=0, keepdim=True)
+    y_std = Y_train.std(dim=0, keepdim=True)
+    y_std = torch.where(y_std < 1e-6, torch.ones_like(y_std), y_std)
+    return y_mean, y_std
 
 
 def _normalize_full_targets(Y, tr_idx, va_idx, te_idx, training_params: TrainingParams):
@@ -603,6 +612,23 @@ def _compute_streaming_corr(state):
     return corr.item() if torch.isfinite(corr) else 0.0
 
 
+def _run_eval_full_split(model, loader, device, training_params, all_fns, model_params):
+    """Evaluation pass that scores the loss and every metric once, on the concatenated outputs of the split."""
+    outs, ys = [], []
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, yb = _move_batch_to_device(batch_data, device)
+            outs.append(model(Xb, **inputs_dict).detach())
+            ys.append(yb.detach())
+    out, yb = torch.cat(outs), torch.cat(ys)
+    result = compute_all_metrics(out, yb, all_fns, model_params)
+    loss = compute_loss(out, yb, training_params, all_fns)
+    result["loss"] = loss.detach().mean().item() if torch.is_tensor(loss) else float(loss)
+    if "cross_entropy" in result:
+        result["perplexity"] = np.exp(result["cross_entropy"])
+    return result
+
+
 def _run_epoch(
     model,
     loader,
@@ -619,6 +645,10 @@ def _run_epoch(
         model.train()
     else:
         model.eval()
+    if not is_train and getattr(training_params, "eval_metrics_over_full_split", False):
+        return _run_eval_full_split(
+            model, loader, device, training_params, all_fns, model_params
+        )
 
     accumulate_corr = "corr" in metric_names
     batch_metric_fns = {
@@ -837,6 +867,124 @@ def _collect_loader_features(loader):
     return torch.cat(test_features, dim=0), torch.cat(test_targets, dim=0)
 
 
+def _collect_model_outputs(model, loader, device):
+    predictions = []
+    model.eval()
+    with torch.no_grad():
+        for batch_data in loader:
+            Xb, inputs_dict, _ = _move_batch_to_device(batch_data, device)
+            predictions.append(model(Xb, **inputs_dict).detach().cpu())
+    return torch.cat(predictions, dim=0)
+
+
+def _loader_output_indices(loader, split_indices):
+    if hasattr(loader, "ordered_indices"):
+        return np.asarray(loader.ordered_indices(), dtype=np.int64)
+    return np.asarray(split_indices, dtype=np.int64)
+
+
+def _prediction_record(
+    model,
+    loader,
+    device,
+    data_df,
+    original_targets,
+    te_idx,
+    fold,
+    normalization_stats,
+):
+    predictions = _collect_model_outputs(model, loader, device)
+    output_indices = _loader_output_indices(loader, te_idx)
+    if len(output_indices) != len(predictions):
+        raise RuntimeError("Prediction rows do not align with test sample indices")
+
+    if normalization_stats is not None:
+        y_mean, y_std = normalization_stats
+        predictions = predictions * y_std.cpu() + y_mean.cpu()
+
+    rows = data_df.iloc[output_indices]
+    raw_targets = original_targets[
+        torch.as_tensor(output_indices, dtype=torch.long)
+    ].detach().cpu()
+    record = {
+        "fold": int(fold),
+        "sample_id": rows["sample_id"].astype(str).to_numpy(),
+        "start": rows["start"].to_numpy(dtype=np.float64),
+        "prediction": predictions.numpy().astype(np.float32, copy=False),
+        "target": raw_targets.numpy().astype(np.float32, copy=False),
+    }
+    if normalization_stats is not None:
+        record["target_mean"] = normalization_stats[0].detach().cpu().numpy()
+        record["target_std"] = normalization_stats[1].detach().cpu().numpy()
+    return record
+
+
+def _create_compressed_dataset(group, name, values):
+    values = np.asarray(values)
+    kwargs = {}
+    if values.size:
+        kwargs = {"compression": "gzip", "shuffle": True}
+    group.create_dataset(name, data=values, **kwargs)
+
+
+def _write_prediction_artifact(
+    filename, lag, task_name, records, null_repetition=None
+):
+    """Commit one completed lag of out-of-fold predictions to HDF5."""
+    lag_group_name = f"lag_{int(lag)}"
+    final_group_name = (
+        lag_group_name
+        if null_repetition is None
+        else f"{lag_group_name}/null_repetition_{int(null_repetition)}"
+    )
+    pending_group_name = (
+        f"_pending_lag_{int(lag)}"
+        if null_repetition is None
+        else f"_pending_lag_{int(lag)}_null_repetition_{int(null_repetition)}"
+    )
+    string_dtype = h5py.string_dtype(encoding="utf-8")
+
+    with h5py.File(filename, "a") as artifact:
+        artifact.attrs["schema_version"] = 1 if null_repetition is None else 2
+        artifact.attrs["task_name"] = task_name
+        if null_repetition is not None:
+            artifact.require_group(lag_group_name).attrs["lag_ms"] = int(lag)
+        for stale_name in (pending_group_name, final_group_name):
+            if stale_name in artifact:
+                del artifact[stale_name]
+        lag_group = artifact.create_group(pending_group_name)
+        lag_group.attrs["lag_ms"] = int(lag)
+        if null_repetition is not None:
+            lag_group.attrs["null_repetition"] = int(null_repetition)
+
+        for record in records:
+            fold_group = lag_group.create_group(f"fold_{record['fold']}")
+            fold_group.attrs["fold"] = record["fold"]
+            fold_group.attrs["normalized_during_training"] = (
+                "target_mean" in record
+            )
+            fold_group.create_dataset(
+                "sample_id",
+                data=np.asarray(record["sample_id"], dtype=object),
+                dtype=string_dtype,
+            )
+            _create_compressed_dataset(fold_group, "start", record["start"])
+            _create_compressed_dataset(
+                fold_group, "prediction", record["prediction"]
+            )
+            _create_compressed_dataset(fold_group, "target", record["target"])
+            if "target_mean" in record:
+                _create_compressed_dataset(
+                    fold_group, "target_mean", record["target_mean"]
+                )
+                _create_compressed_dataset(
+                    fold_group, "target_std", record["target_std"]
+                )
+
+        artifact.move(pending_group_name, final_group_name)
+        artifact.flush()
+
+
 def _maybe_compute_word_embedding_metrics(
     cv_results,
     embedding_metrics,
@@ -930,7 +1078,6 @@ def train_decoding_model(
         raise ValueError("model_spec.constructor_name is required for neural training")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    Y = _maybe_shuffle_targets(Y, training_params)
     fold_indices = _get_fold_indices(neural_data, data_df, task_config, training_params)
     fold_indices, fold_nums = _select_requested_folds(fold_indices, training_params)
     _maybe_visualize_fold_distribution(Y, fold_indices, task_name, lag, training_params)
@@ -945,10 +1092,10 @@ def train_decoding_model(
     )
 
     models, histories = [], []
+    prediction_records = []
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
-        _print_fold_debug(fold, neural_data, Y, tr_idx, va_idx, te_idx)
         cv_results["fold_nums"].append(fold)
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
         writer = _create_tensorboard_writer(
@@ -958,6 +1105,9 @@ def train_decoding_model(
         split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
         target_splits = _normalize_fold_targets(
             Y, tr_idx, va_idx, te_idx, training_params
+        )
+        target_splits = _maybe_shuffle_training_targets(
+            target_splits, training_params, fold
         )
         loaders = _build_fold_loaders(
             neural_data,
@@ -1011,6 +1161,21 @@ def train_decoding_model(
             te_idx,
             training_params,
         )
+        if training_params.save_test_predictions:
+            prediction_records.append(
+                _prediction_record(
+                    model,
+                    loaders["test"],
+                    device,
+                    data_df,
+                    Y,
+                    te_idx,
+                    fold,
+                    _fold_target_normalization_stats(
+                        Y, tr_idx, training_params
+                    ),
+                )
+            )
 
         models.append(model)
         histories.append(history)
@@ -1023,7 +1188,7 @@ def train_decoding_model(
     if plot_results:
         plot_cv_results(cv_results)
 
-    return models, histories, cv_results
+    return models, histories, cv_results, prediction_records
 
 
 def train_decoding_model_chunked(
@@ -1044,7 +1209,7 @@ def train_decoding_model_chunked(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    Y = _maybe_shuffle_targets(chunk_store.targets, training_params)
+    Y = chunk_store.targets
     fold_indices = _get_fold_indices_for_length(
         len(Y), chunk_store.data_df, task_config, training_params
     )
@@ -1061,16 +1226,10 @@ def train_decoding_model_chunked(
     )
 
     models, histories = [], []
+    prediction_records = []
     conf_matrices = {}
 
     for fold, (tr_idx, va_idx, te_idx) in zip(fold_nums, fold_indices):
-        print(f"Fold {fold}")
-        print(f"Train indices: {tr_idx}")
-        print(f"Validation indices: {va_idx}")
-        print(f"Test indices: {te_idx}")
-        print(f"Train size: {len(tr_idx)}")
-        print(f"Validation size: {len(va_idx)}")
-        print(f"Test size: {len(te_idx)}")
         cv_results["fold_nums"].append(fold)
 
         model_path = os.path.join(checkpoint_dir, f"best_model_fold{fold}.pt")
@@ -1078,10 +1237,16 @@ def train_decoding_model_chunked(
             write_to_tensorboard, tensorboard_dir, lag, fold
         )
 
-        full_targets = _normalize_full_targets(
+        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        target_splits = _normalize_fold_targets(
             Y, tr_idx, va_idx, te_idx, training_params
         )
-        split_indices = {"train": tr_idx, "val": va_idx, "test": te_idx}
+        target_splits = _maybe_shuffle_training_targets(
+            target_splits, training_params, fold
+        )
+        full_targets = torch.empty_like(Y)
+        for phase, indices in split_indices.items():
+            full_targets[_as_index_tensor(indices)] = target_splits[phase]
         loaders = {
             phase: chunk_store.get_loader(
                 indices,
@@ -1137,6 +1302,21 @@ def train_decoding_model_chunked(
             te_idx,
             training_params,
         )
+        if training_params.save_test_predictions:
+            prediction_records.append(
+                _prediction_record(
+                    model,
+                    loaders["test"],
+                    device,
+                    chunk_store.data_df,
+                    Y,
+                    te_idx,
+                    fold,
+                    _fold_target_normalization_stats(
+                        Y, tr_idx, training_params
+                    ),
+                )
+            )
 
         models.append(model)
         histories.append(history)
@@ -1149,7 +1329,7 @@ def train_decoding_model_chunked(
     if plot_results:
         plot_cv_results(cv_results)
 
-    return models, histories, cv_results
+    return models, histories, cv_results, prediction_records
 
 
 def _chunked_preprocessing_value(chunked_params, name, default=None):
@@ -1162,6 +1342,122 @@ def _release_accelerator_memory():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _contains_enabled_random_init(value) -> bool:
+    """Find an enabled random-init flag in nested model/preprocessor config."""
+    if isinstance(value, ModelSpec):
+        return value.random_init or any(
+            _contains_enabled_random_init(spec) for spec in value.sub_models.values()
+        )
+    if isinstance(value, dict):
+        if value.get("random_init") is True:
+            return True
+        return any(_contains_enabled_random_init(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_enabled_random_init(item) for item in value)
+    return False
+
+
+def _preprocessor_params_for_null_seed(value, seed):
+    """Copy params and salt caches that wrap a random foundation model."""
+    copied = deepcopy(value)
+
+    def add_seed_marker(item):
+        if isinstance(item, dict):
+            foundation_spec = item.get("foundation_model_spec")
+            if foundation_spec is not None and _contains_enabled_random_init(
+                foundation_spec
+            ):
+                item["_null_repetition_seed"] = seed
+            for nested in item.values():
+                add_seed_marker(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                add_seed_marker(nested)
+
+    add_seed_marker(copied)
+    return copied
+
+
+def _set_null_repetition_seed(seed: int, cudnn_deterministic: bool) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if cudnn_deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def _validate_null_repetitions(lags, model_spec, training_params, data_params):
+    repetitions = training_params.num_null_repetitions
+    if isinstance(repetitions, bool) or not isinstance(repetitions, int):
+        raise ValueError("num_null_repetitions must be a positive integer")
+    if repetitions < 1:
+        raise ValueError("num_null_repetitions must be a positive integer")
+
+    model_random_init = _contains_enabled_random_init(model_spec)
+    preprocessor_random_init = _contains_enabled_random_init(
+        data_params.preprocessor_params
+    )
+    if repetitions > 1:
+        if len(lags) != 1:
+            raise ValueError(
+                "num_null_repetitions > 1 requires exactly one resolved lag"
+            )
+        if not (
+            training_params.shuffle_targets
+            or model_random_init
+            or preprocessor_random_init
+        ):
+            raise ValueError(
+                "num_null_repetitions > 1 requires shuffle_targets and/or "
+                "an enabled random_init ModelSpec"
+            )
+    return repetitions, preprocessor_random_init
+
+
+def _aggregate_lag_metrics(lag, cv_results, repetition=None, seed=None):
+    lag_metrics = {"lags": lag}
+    if repetition is not None:
+        lag_metrics["null_repetition"] = repetition
+        lag_metrics["null_seed"] = seed
+
+    fold_nums = cv_results.get("fold_nums")
+    for metric, values in cv_results.items():
+        if metric == "fold_nums":
+            continue
+        if len(values) > 0:
+            lag_metrics[f"{metric}_mean"] = np.mean(values)
+            lag_metrics[f"{metric}_std"] = np.std(values)
+            for i, val in enumerate(values):
+                fold_num = (
+                    fold_nums[i]
+                    if fold_nums is not None and i < len(fold_nums)
+                    else i + 1
+                )
+                lag_metrics[f"{metric}_fold_{fold_num}"] = val
+        else:
+            lag_metrics[f"{metric}_mean"] = np.nan
+            lag_metrics[f"{metric}_std"] = np.nan
+    return lag_metrics
+
+
+def _write_null_summary(existing_df, output_dir):
+    repeated_df = existing_df.dropna(subset=["null_repetition"])
+    summary = {"lags": repeated_df["lags"].iloc[0], "num_null_repetitions": len(repeated_df)}
+    for column in repeated_df.columns:
+        if not column.endswith("_mean"):
+            continue
+        values = pd.to_numeric(repeated_df[column], errors="coerce")
+        summary[f"{column}_null_mean"] = values.mean()
+        summary[f"{column}_null_std"] = values.std(ddof=0)
+    pd.DataFrame([summary]).to_csv(
+        os.path.join(output_dir, "null_summary.csv"), index=False
+    )
 
 
 def run_training_over_lags(
@@ -1177,19 +1473,28 @@ def run_training_over_lags(
     checkpoint_dir="checkpoints/",
     write_to_tensorboard=False,
     tensorboard_dir="event_log",
+    per_raw_event_times=None,
 ):
     data_params = task_config.data_params
     os.makedirs(output_dir, exist_ok=True)
+    lags = list(lags)
+    repetitions, preprocessor_random_init = _validate_null_repetitions(
+        lags, model_spec, training_params, data_params
+    )
+    repeated_run = repetitions > 1
+
+    if training_params.save_test_predictions and task_name == "llm_decoding_task":
+        raise ValueError(
+            "save_test_predictions is not supported for llm_decoding_task because "
+            "full token-vocabulary logits are prohibitively large"
+        )
 
     filename = os.path.join(output_dir, f"lag_performance.csv")
+    prediction_filename = os.path.join(output_dir, "test_predictions.h5")
 
-    # Load existing results if they exist
     if os.path.exists(filename):
-        roc_df = pd.read_csv(filename)
-        already_read_lags = roc_df["lags"].tolist()
-        existing_df = roc_df
+        existing_df = pd.read_csv(filename)
     else:
-        already_read_lags = []
         existing_df = pd.DataFrame()
 
     from utils.dataset import RawNeuralDataset
@@ -1200,110 +1505,156 @@ def run_training_over_lags(
         data_params.window_width,
         preprocessing_fns,
         data_params.preprocessor_params,
+        per_raw_event_times=per_raw_event_times,
+        include_sample_ids=training_params.save_test_predictions,
     )
 
+    chunked_params = getattr(data_params, "chunked_preprocessing", None)
+    use_chunks = chunked_params is not None and _chunked_preprocessing_value(
+        chunked_params, "enabled", False
+    )
+
+    def prepare_lag(lag):
+        if use_chunks:
+            store = raw_dataset.build_preprocessed_chunks(
+                lag,
+                num_chunks=_chunked_preprocessing_value(chunked_params, "num_chunks", 1),
+                cache_dir=_chunked_preprocessing_value(
+                    chunked_params, "cache_dir", ".cache/preprocessed_chunks"
+                ),
+            )
+            print(
+                "chunked preprocessing rows: "
+                f"{len(store.data_df)}, chunks: {len(store.chunk_paths)}"
+            )
+            return store
+        return raw_dataset.get_data_for_lag(lag)
+
     for lag in lags:
-        if lag in already_read_lags:
+        if not repeated_run and "lags" in existing_df and lag in existing_df["lags"].tolist():
             print(f"Lag {lag} already done, skipping...")
             continue
 
         print("=" * 60)
         print("running lag:", lag)
         print("=" * 60)
-
-        chunked_params = getattr(data_params, "chunked_preprocessing", None)
-        if chunked_params is not None and _chunked_preprocessing_value(
-            chunked_params, "enabled", False
-        ):
-            chunk_store = raw_dataset.build_preprocessed_chunks(
-                lag,
-                num_chunks=_chunked_preprocessing_value(
-                    chunked_params, "num_chunks", 1
-                ),
-                cache_dir=_chunked_preprocessing_value(
-                    chunked_params, "cache_dir", ".cache/preprocessed_chunks"
-                ),
-            )
-            try:
-                print(
-                    "chunked preprocessing rows: "
-                    f"{len(chunk_store.data_df)}, chunks: {len(chunk_store.chunk_paths)}"
+        reusable_prepared = None
+        prepared = None
+        models = histories = cv_results = prediction_records = lag_metrics = None
+        try:
+            if not preprocessor_random_init:
+                _set_null_repetition_seed(
+                    training_params.random_seed,
+                    training_params.cudnn_deterministic,
                 )
-                models, histories, cv_results = train_decoding_model_chunked(
-                    chunk_store,
-                    model_spec,
-                    task_name,
-                    task_config,
-                    lag,
-                    training_params=training_params,
-                    checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                    write_to_tensorboard=write_to_tensorboard,
-                    tensorboard_dir=tensorboard_dir,
+                reusable_prepared = prepare_lag(lag)
+
+            for repetition_index in range(repetitions):
+                repetition = repetition_index + 1
+                if repeated_run and not existing_df.empty and {
+                    "lags", "null_repetition"
+                }.issubset(existing_df.columns):
+                    completed = (
+                        (existing_df["lags"] == lag)
+                        & (existing_df["null_repetition"] == repetition)
+                    ).any()
+                    if completed:
+                        print(
+                            f"Lag {lag}, null repetition {repetition} already done, skipping..."
+                        )
+                        continue
+
+                repetition_seed = training_params.random_seed + repetition_index
+                repetition_training_params = deepcopy(training_params)
+                repetition_training_params.random_seed = repetition_seed
+                _set_null_repetition_seed(
+                    repetition_seed, training_params.cudnn_deterministic
                 )
-            finally:
-                chunk_store.cleanup()
-        else:
-            (
-                neural_tensor,
-                targets_tensor,
-                data_df,
-                subject_channel_counts,
-            ) = raw_dataset.get_data_for_lag(lag)
-
-            print(f"neural_tensor shape: {neural_tensor.shape}")
-            models, histories, cv_results = train_decoding_model(
-                neural_tensor,
-                targets_tensor,
-                data_df,
-                model_spec,
-                task_name,
-                task_config,
-                lag,
-                training_params=training_params,
-                checkpoint_dir=os.path.join(checkpoint_dir, f"lag_{lag}"),
-                write_to_tensorboard=write_to_tensorboard,
-                tensorboard_dir=tensorboard_dir,
-                subject_channel_counts=subject_channel_counts,
-            )
-
-        # Aggregate metrics
-        lag_metrics = {}
-        lag_metrics["lags"] = lag  # lag information first
-
-        fold_nums = cv_results.get("fold_nums", None)
-        for metric, values in cv_results.items():
-            if metric == "fold_nums":
-                continue
-            if len(values) > 0:
-                # 1. 기존: 평균과 표준편차 저장
-                lag_metrics[f"{metric}_mean"] = np.mean(values)
-                lag_metrics[f"{metric}_std"] = np.std(values)
-
-                # 2. Add: Individual values for each Fold (e.g., test_acc_fold_0, test_acc_fold_1 ...)
-                for i, val in enumerate(values):
-                    fold_num = (
-                        fold_nums[i]
-                        if (fold_nums is not None and i < len(fold_nums))
-                        else (i + 1)
+                if preprocessor_random_init:
+                    raw_dataset.preprocessor_params = _preprocessor_params_for_null_seed(
+                        data_params.preprocessor_params, repetition_seed
                     )
-                    lag_metrics[f"{metric}_fold_{fold_num}"] = val
-            else:
-                lag_metrics[f"{metric}_mean"] = np.nan
-                lag_metrics[f"{metric}_std"] = np.nan
-        # ---------------------------------------------------------
+                prepared = (
+                    prepare_lag(lag) if preprocessor_random_init else reusable_prepared
+                )
+                repetition_component = (
+                    f"null_repetition_{repetition}" if repeated_run else None
+                )
+                repetition_checkpoint_dir = os.path.join(checkpoint_dir, f"lag_{lag}")
+                repetition_tensorboard_dir = tensorboard_dir
+                if repetition_component:
+                    repetition_checkpoint_dir = os.path.join(
+                        repetition_checkpoint_dir, repetition_component
+                    )
+                    repetition_tensorboard_dir = os.path.join(
+                        tensorboard_dir, repetition_component
+                    )
 
-        # Append new row to existing DataFrame and write to file
-        existing_df = pd.concat(
-            [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
-        )
-        existing_df.to_csv(filename, index=False)
+                try:
+                    if use_chunks:
+                        models, histories, cv_results, prediction_records = (
+                            train_decoding_model_chunked(
+                                prepared,
+                                model_spec,
+                                task_name,
+                                task_config,
+                                lag,
+                                training_params=repetition_training_params,
+                                checkpoint_dir=repetition_checkpoint_dir,
+                                write_to_tensorboard=write_to_tensorboard,
+                                tensorboard_dir=repetition_tensorboard_dir,
+                            )
+                        )
+                    else:
+                        neural_tensor, targets_tensor, data_df, channel_counts = prepared
+                        models, histories, cv_results, prediction_records = train_decoding_model(
+                            neural_tensor,
+                            targets_tensor,
+                            data_df,
+                            model_spec,
+                            task_name,
+                            task_config,
+                            lag,
+                            training_params=repetition_training_params,
+                            checkpoint_dir=repetition_checkpoint_dir,
+                            write_to_tensorboard=write_to_tensorboard,
+                            tensorboard_dir=repetition_tensorboard_dir,
+                            subject_channel_counts=channel_counts,
+                        )
+
+                    if training_params.save_test_predictions:
+                        _write_prediction_artifact(
+                            prediction_filename,
+                            lag,
+                            task_name,
+                            prediction_records,
+                            null_repetition=repetition if repeated_run else None,
+                        )
+
+                    lag_metrics = _aggregate_lag_metrics(
+                        lag,
+                        cv_results,
+                        repetition=repetition if repeated_run else None,
+                        seed=repetition_seed if repeated_run else None,
+                    )
+                    existing_df = pd.concat(
+                        [existing_df, pd.DataFrame([lag_metrics])], ignore_index=True
+                    )
+                    existing_df.to_csv(filename, index=False)
+                    if repeated_run:
+                        _write_null_summary(existing_df, output_dir)
+                finally:
+                    if preprocessor_random_init and use_chunks:
+                        prepared.cleanup()
+        finally:
+            if reusable_prepared is not None and use_chunks:
+                reusable_prepared.cleanup()
 
         # Do not retain fold models and lag-sized tensors while preprocessing the
         # next lag. Foundation feature extraction temporarily loads another large
         # model, so overlapping these objects can exceed host or accelerator RAM.
-        del models, histories, cv_results, lag_metrics
-        if "neural_tensor" in locals():
-            del neural_tensor, targets_tensor, data_df, subject_channel_counts
+        models = histories = cv_results = prediction_records = lag_metrics = None
+        prepared = reusable_prepared = None
         _release_accelerator_memory()
 
 

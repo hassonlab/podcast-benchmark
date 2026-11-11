@@ -309,7 +309,11 @@ def test_run_single_task_per_region_mode_filters_regions(
         },
     )
 
-    monkeypatch.setattr(main.registry, "config_setter_registry", {"test_setter": lambda config, *_args: config})
+    monkeypatch.setattr(
+        main.registry,
+        "config_setter_registry",
+        {"test_setter": lambda config, *_args: config},
+    )
     monkeypatch.setattr(main.registry, "model_constructor_registry", {"test_model": {}})
     monkeypatch.setattr(
         main.registry,
@@ -385,3 +389,88 @@ def test_run_single_task_rejects_split_concat_mode(
         ValueError, match="Split run modes only support non-concat runs"
     ):
         main.run_single_task(base_experiment_config)
+
+
+def test_run_benchmark_returns_paths_and_combined_lag_results(
+    monkeypatch, base_experiment_config, task_df
+):
+    raws = [
+        SimpleNamespace(name="raw-2", ch_names=["A1"]),
+        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+    ]
+    _configure_common_mocks(monkeypatch, raws, task_df)
+    monkeypatch.setattr(
+        main.registry,
+        "config_setter_registry",
+        {"test_setter": lambda config, *_args: config},
+    )
+    monkeypatch.setattr(main.registry, "model_constructor_registry", {"test_model": {}})
+    monkeypatch.setattr(
+        main.registry,
+        "model_data_getter_registry",
+        {"test_getter": lambda df, _raws, _params: (df, [])},
+    )
+
+    def fake_training(*_args, **kwargs):
+        output_dir = Path(kwargs["output_dir"])
+        pd.DataFrame(
+            {"lags": [250], "test_roc_auc_mean": [0.75]}
+        ).to_csv(output_dir / "lag_performance.csv", index=False)
+
+    monkeypatch.setattr(main.decoding_utils, "run_training_over_lags", fake_training)
+    seed_calls = []
+    monkeypatch.setattr(
+        main,
+        "set_seed",
+        lambda seed, deterministic: seed_calls.append((seed, deterministic)),
+    )
+
+    result = main.run_benchmark(base_experiment_config)
+
+    assert isinstance(result, main.BenchmarkRun)
+    assert result.output_dir.name == "trial_2026-04-23-12-34-56"
+    assert result.checkpoint_dir.name == result.output_dir.name
+    assert result.tensorboard_dir.name == result.output_dir.name
+    assert result.config_path == result.output_dir / "config.yml"
+    assert result.config_path.exists()
+    assert result.lag_results.to_dict("records") == [
+        {"run_unit": "combined", "lags": 250, "test_roc_auc_mean": 0.75}
+    ]
+    assert seed_calls == [(42, False)]
+
+
+def test_run_benchmark_combines_split_run_results(
+    monkeypatch, base_experiment_config, task_df
+):
+    base_experiment_config.run_mode = RunMode.PER_SUBJECT
+    raws = [
+        SimpleNamespace(name="raw-2", ch_names=["A1"]),
+        SimpleNamespace(name="raw-5", ch_names=["B1"]),
+    ]
+    _configure_common_mocks(monkeypatch, raws, task_df)
+    monkeypatch.setattr(main.registry, "config_setter_registry", {"test_setter": lambda config, *_args: config})
+    monkeypatch.setattr(main.registry, "model_constructor_registry", {"test_model": {}})
+    monkeypatch.setattr(
+        main.registry,
+        "model_data_getter_registry",
+        {"test_getter": lambda df, _raws, _params: (df, [])},
+    )
+
+    def fake_training(*_args, **kwargs):
+        output_dir = Path(kwargs["output_dir"])
+        subject = int(output_dir.name.removeprefix("subject_"))
+        pd.DataFrame({"lags": [250], "score_mean": [subject / 10]}).to_csv(
+            output_dir / "lag_performance.csv", index=False
+        )
+
+    monkeypatch.setattr(main.decoding_utils, "run_training_over_lags", fake_training)
+
+    result = main.run_benchmark(base_experiment_config)
+
+    assert result.lag_results["run_unit"].tolist() == ["subject_2", "subject_5"]
+    assert result.lag_results["score_mean"].tolist() == [0.2, 0.5]
+
+
+def test_run_benchmark_requires_experiment_config():
+    with pytest.raises(TypeError, match="ExperimentConfig"):
+        main.run_benchmark({})

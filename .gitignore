@@ -232,3 +232,10 @@ model_cache/
 **/.ipynb_checkpoints
 paper-results/
 __marimo__/
+logs-v2/
+test-results/
+test_results/
+data/brain-treebank/
+results_old/
+old-results/
+results-v2/

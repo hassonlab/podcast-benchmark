@@ -204,9 +204,9 @@ def bids_temp_files(mock_raw_with_channels):
 class TestLoadRaws:
     """Test load_raws function for loading multiple subjects with different configurations."""
 
-    @patch("utils.data_utils.os.path.exists", return_value=True)
+    @patch("datasets.podcast.os.path.exists", return_value=True)
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_multiple_subjects(
         self, mock_bids_path, mock_read_raw_fif, mock_exists, mock_raw_with_channels
     ):
@@ -262,9 +262,9 @@ class TestLoadRaws:
             for key, value in expected.items():
                 assert call_kwargs[key] == value
 
-    @patch("utils.data_utils.os.path.exists", return_value=True)
+    @patch("datasets.podcast.os.path.exists", return_value=True)
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_single_subject(
         self, mock_bids_path, mock_read_raw_fif, mock_exists, mock_raw_with_channels
     ):
@@ -285,7 +285,7 @@ class TestLoadRaws:
         assert call_kwargs["subject"] == "05"
 
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_no_subjects(self, mock_bids_path, mock_read_raw_fif):
         """Test loading raw data with empty subject list."""
         data_params = DataParams(subject_ids=[], data_root="/fake/data")
@@ -296,9 +296,9 @@ class TestLoadRaws:
         assert mock_read_raw_fif.call_count == 0
         assert mock_bids_path.call_count == 0
 
-    @patch("utils.data_utils.os.path.exists", return_value=True)
+    @patch("datasets.podcast.os.path.exists", return_value=True)
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_per_subject_electrodes(
         self, mock_bids_path, mock_read_raw_fif, mock_exists, mock_raw_with_channels
     ):
@@ -333,9 +333,9 @@ class TestLoadRaws:
         # but we can verify that the function completed without errors
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("utils.data_utils.os.path.exists", return_value=True)
+    @patch("datasets.podcast.os.path.exists", return_value=True)
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_channel_reg_ex(
         self, mock_bids_path, mock_read_raw_fif, mock_exists, mock_raw_with_channels
     ):
@@ -355,9 +355,9 @@ class TestLoadRaws:
         assert len(raws) == 2
         assert mock_read_raw_fif.call_count == 2
 
-    @patch("utils.data_utils.os.path.exists", return_value=True)
+    @patch("datasets.podcast.os.path.exists", return_value=True)
     @patch("utils.data_utils.mne.io.read_raw_fif")
-    @patch("utils.data_utils.BIDSPath")
+    @patch("datasets.podcast.BIDSPath")
     def test_load_raws_per_subject_electrodes_priority(
         self, mock_bids_path, mock_read_raw_fif, mock_exists, mock_raw_with_channels
     ):

@@ -46,6 +46,8 @@ from scripts.generate_paper_results import (
     ordered_tasks_by_group_average,
     significance_label,
     normalize_region_name,
+    iter_random_init_result_specs,
+    iter_result_specs,
     plot_best_lag_summary,
     plot_lag_curves,
     plot_per_region_brains,
@@ -1833,3 +1835,66 @@ def test_neural_conv_model_summary_rows_and_latex_table():
     assert r"\caption{Neural convolution decoder model summary." in latex
     assert "content\\_noncontent\\_task" in latex
     assert r"\textbf{Total} &  &  & 28 \\" in latex
+
+
+def test_iter_random_init_result_specs_reads_nested_controls():
+    config = {
+        "results": {
+            "diver": {
+                "pos": {
+                    "super_subject": "trained",
+                    "random_init": {"super_subject": "control", "per_subject": ["a", "b"]},
+                }
+            }
+        }
+    }
+
+    specs = list(iter_random_init_result_specs(config))
+
+    assert [(s.model, s.task, s.condition, list(map(str, s.paths))) for s in specs] == [
+        ("diver", "pos", "super_subject", ["control"]),
+        ("diver", "pos", "per_subject", ["a", "b"]),
+    ]
+    assert [s.condition for s in iter_result_specs(config)] == ["super_subject"]
+
+
+def test_plot_best_lag_summary_overlays_narrower_random_init_bar_offset_right(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "scripts.generate_paper_results.save_figure",
+        lambda fig, output_base, formats: captured.setdefault("fig", fig),
+    )
+    config = {"plotting": {"best_lag_summary_plot_style": "bar"}}
+    summary = pd.DataFrame(
+        [
+            {
+                "condition": "super_subject",
+                "task": "task",
+                "model": "diver",
+                "metric": "score_mean",
+                "metric_label": "Score",
+                "value": 0.8,
+                "lag": 200,
+                "higher_is_better": True,
+            }
+        ]
+    )
+    control = pd.DataFrame({"lags": [0], "score_mean": [0.5], "score_fold_1": [0.5]})
+
+    plot_best_lag_summary(
+        summary,
+        "super_subject",
+        tmp_path,
+        formats=["png"],
+        colors={"diver": "#ff0000"},
+        config=config,
+        random_init_results={"task": {"diver": control}},
+    )
+
+    ax = captured["fig"].axes[0]
+    widths = sorted(round(patch.get_width(), 2) for patch in ax.patches if patch.get_width())
+    assert widths == [0.4, 0.7]
+    heights = {round(patch.get_height() + patch.get_y(), 3) for patch in ax.patches}
+    assert 0.5 in heights
+    centers = {round(p.get_x() + p.get_width() / 2, 3) for p in ax.patches}
+    assert {0.0, 0.245} <= centers

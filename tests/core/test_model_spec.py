@@ -43,6 +43,17 @@ class ParentModel(nn.Module):
         return self.classifier(features.mean(dim=-1))
 
 
+class DirectParameterModel(nn.Module):
+    """Model whose direct parameter has no reset_parameters hook."""
+
+    def __init__(self, width):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(width))
+
+    def forward(self, x):
+        return x * self.scale
+
+
 # Register test model constructors
 @register_model_constructor("simple_test_model")
 def simple_test_model(params):
@@ -61,6 +72,11 @@ def parent_test_model(params):
     return ParentModel(
         encoder_model=params["encoder_model"], num_classes=params["num_classes"]
     )
+
+
+@register_model_constructor("direct_parameter_test_model")
+def direct_parameter_test_model(params):
+    return DirectParameterModel(width=params["width"])
 
 
 def test_build_simple_model():
@@ -110,6 +126,21 @@ def test_dict_to_model_spec():
     assert isinstance(spec, ModelSpec)
     assert spec.constructor_name == "simple_test_model"
     assert spec.params == {"input_dim": 10, "output_dim": 5}
+    assert spec.random_init is False
+
+
+def test_dict_to_model_spec_with_random_init():
+    """Test enabling random initialization through config parsing."""
+    spec = dict_to_config(
+        {
+            "constructor_name": "simple_test_model",
+            "params": {"input_dim": 10, "output_dim": 5},
+            "random_init": True,
+        },
+        ModelSpec,
+    )
+
+    assert spec.random_init is True
 
 
 def test_model_forward_pass():
@@ -180,6 +211,79 @@ def test_checkpoint_loading_valid():
         )
     finally:
         # Clean up temp file
+        os.unlink(checkpoint_path)
+
+
+def test_random_init_overwrites_checkpoint_weights():
+    """Test that random initialization is applied after checkpoint loading."""
+    spec = ModelSpec(
+        constructor_name="simple_test_model", params={"input_dim": 10, "output_dim": 5}
+    )
+    checkpoint_model = build_model_from_spec(spec)
+    with torch.no_grad():
+        checkpoint_model.linear.weight.fill_(42.0)
+        checkpoint_model.linear.bias.fill_(7.0)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
+        checkpoint_path = f.name
+        torch.save(checkpoint_model.state_dict(), checkpoint_path)
+
+    try:
+        randomly_initialized_model = build_model_from_spec(
+            ModelSpec(
+                constructor_name="simple_test_model",
+                params={"input_dim": 10, "output_dim": 5},
+                checkpoint_path=checkpoint_path,
+                random_init=True,
+            )
+        )
+
+        assert not torch.allclose(
+            randomly_initialized_model.linear.weight,
+            checkpoint_model.linear.weight,
+        )
+        assert not torch.allclose(
+            randomly_initialized_model.linear.bias,
+            checkpoint_model.linear.bias,
+        )
+    finally:
+        os.unlink(checkpoint_path)
+
+
+def test_random_init_falls_back_for_direct_parameters():
+    """Test fallback initialization for parameters without a native reset hook."""
+    checkpoint_model = DirectParameterModel(width=8)
+    with torch.no_grad():
+        checkpoint_model.scale.fill_(1.0)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
+        checkpoint_path = f.name
+        torch.save(checkpoint_model.state_dict(), checkpoint_path)
+
+    try:
+        torch.manual_seed(123)
+        randomly_initialized_model = build_model_from_spec(
+            ModelSpec(
+                constructor_name="direct_parameter_test_model",
+                params={"width": 8},
+                checkpoint_path=checkpoint_path,
+                random_init=True,
+            )
+        )
+
+        assert not torch.equal(randomly_initialized_model.scale, checkpoint_model.scale)
+
+        torch.manual_seed(123)
+        repeated_model = build_model_from_spec(
+            ModelSpec(
+                constructor_name="direct_parameter_test_model",
+                params={"width": 8},
+                checkpoint_path=checkpoint_path,
+                random_init=True,
+            )
+        )
+        assert torch.equal(randomly_initialized_model.scale, repeated_model.scale)
+    finally:
         os.unlink(checkpoint_path)
 
 

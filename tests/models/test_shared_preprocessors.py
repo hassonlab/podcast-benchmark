@@ -379,6 +379,7 @@ class TestDiskCachePreprocessor:
                         "per_subject_feature_concat": False,
                         "sub_models": {},
                         "checkpoint_path": None,
+                        "random_init": False,
                         "model_data_getter": None,
                     }
                 }

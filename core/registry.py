@@ -13,6 +13,39 @@ task_registry = {}
 # Registry of model data getter functions that add model-specific columns to task DataFrames.
 # Structure: {name: function}
 model_data_getter_registry = {}
+# Registry of dataset getters and optional per-subject event-time getters.
+# Structure: {name: {"getter": function, "event_time_getter": function|None}}
+dataset_registry = {}
+
+
+def register_dataset(name=None, event_time_getter=None):
+    """Register a dataset Raw getter and optional event-time mapper.
+
+    Dataset getters follow ``getter(subject_id, data_params) -> mne.io.BaseRaw``.
+    Event-time getters follow
+    ``getter(task_df, subject_id, data_params) -> array-like`` and must return
+    one neural-clock onset in seconds for every row of ``task_df``.
+    """
+
+    def decorator(fn):
+        dataset_name = name or fn.__name__
+        dataset_registry[dataset_name] = {
+            "getter": fn,
+            "event_time_getter": event_time_getter,
+        }
+        return fn
+
+    return decorator
+
+
+def get_dataset(name):
+    """Return a registered dataset entry with a useful unknown-name error."""
+    if name not in dataset_registry:
+        raise ValueError(
+            f"Dataset '{name}' is not registered. "
+            f"Available datasets: {sorted(dataset_registry)}"
+        )
+    return dataset_registry[name]
 
 
 def register_model_constructor(name=None, required_data_getter=None):

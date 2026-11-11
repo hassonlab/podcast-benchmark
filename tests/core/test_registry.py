@@ -409,3 +409,21 @@ class TestModelDataGetterRegistry:
         assert "test_col" in enriched_df.columns
         assert added_cols == ["test_col"]
         assert len(enriched_df["test_col"]) == 3
+
+
+class TestDatasetRegistry:
+    def test_registers_raw_getter_and_event_mapper(self):
+        def event_times(task_df, subject_id, data_params):
+            return task_df["start"] + subject_id
+
+        @registry.register_dataset("test_dataset", event_time_getter=event_times)
+        def raw_getter(subject_id, data_params):
+            return subject_id, data_params
+
+        entry = registry.get_dataset("test_dataset")
+        assert entry["getter"] is raw_getter
+        assert entry["event_time_getter"] is event_times
+
+    def test_unknown_dataset_lists_available_names(self):
+        with pytest.raises(ValueError, match="Available datasets"):
+            registry.get_dataset("does_not_exist")

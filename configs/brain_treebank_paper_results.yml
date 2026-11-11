@@ -1,0 +1,104 @@
+colors:
+  linear: "#B07AA1"
+  baseline: "#4C78A8"
+
+model_summary:
+  neural_conv_decoder:
+    enabled: false
+
+plotting:
+  lag_curve_conditions:
+    - per_subject
+  lag_curve_models:
+    - linear
+    - baseline
+  lag_plot_xlim:
+    - -1000
+    - 1000
+  valid_best_lags:
+    - -1000
+    - -900
+    - -800
+    - -700
+    - -600
+    - -500
+    - -400
+    - -300
+    - -200
+    - -100
+    - 0
+    - 100
+    - 200
+    - 300
+    - 400
+    - 500
+    - 600
+    - 700
+    - 800
+    - 900
+    - 1000
+  exclude_llm_decoding_and_gpt_surprise: false
+  include_overall_scores: false
+  include_error_bars: true
+  check_best_lag_significance: false
+  correct_best_lag_significance: false
+  best_lag_summary_plot_style: bar
+  task_groups:
+    Semantic:
+      - gpt_surprise
+      - gpt_surprise_multiclass
+    Syntactic:
+      - content_noncontent
+      - pos
+  task_display_names:
+    content_noncontent: Content vs. Non-Content
+    gpt_surprise: LLM Surprise
+    gpt_surprise_multiclass: LLM Surprise Multiclass
+    pos: Part of Speech
+  model_display_names:
+    linear: Linear
+    baseline: CNN
+  half_peak_profile:
+    enabled: false
+
+metrics:
+  content_noncontent:
+    column: test_roc_auc_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+  gpt_surprise:
+    column: test_corr_mean
+    higher_is_better: true
+    label: Correlation
+    chance_level: 0.0
+  gpt_surprise_multiclass:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+  pos:
+    column: test_roc_auc_multiclass_mean
+    higher_is_better: true
+    label: ROC-AUC
+    chance_level: 0.5
+
+results:
+  linear:
+    content_noncontent:
+      per_subject: results/brain_treebank-linear_model-content_noncontent_2026-07-29-14-01-56
+    gpt_surprise:
+      per_subject: results/brain_treebank-linear_model-gpt_surprise_2026-07-29-14-01-56
+    gpt_surprise_multiclass:
+      per_subject: results/brain_treebank-linear_model-gpt_surprise_multiclass_2026-07-29-14-01-56
+    pos:
+      per_subject: results/brain_treebank-linear_model-pos_2026-07-29-14-02-23
+  baseline:
+    content_noncontent:
+      per_subject: results/brain_treebank-neural_conv_decoder-content_noncontent_2026-07-29-14-03-58
+    gpt_surprise:
+      per_subject: results/brain_treebank-neural_conv_decoder-gpt_surprise_2026-07-29-14-12-08
+    gpt_surprise_multiclass:
+      per_subject: results/brain_treebank-neural_conv_decoder-gpt_surprise_multiclass_2026-07-29-14-04-00
+    pos:
+      per_subject: results/brain_treebank-neural_conv_decoder-pos_2026-07-29-14-12-03

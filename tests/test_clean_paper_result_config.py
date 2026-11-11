@@ -290,3 +290,28 @@ def test_rejects_entity_lag_coverage_that_one_config_cannot_reproduce(tmp_path):
             tmp_path,
             False,
         )
+
+
+def test_cleans_random_init_next_to_trained_run(tmp_path):
+    trained = tmp_path / "trained"
+    control = tmp_path / "control"
+    for run_dir, score in ((trained, 0.9), (control, 0.5)):
+        write_config(run_dir)
+        write_csv(run_dir / "lag_performance.csv", {"lags": [-100, 0], "score": [score] * 2})
+
+    index = result_index("super_subject", [trained])
+    index["results"]["model"]["task"]["random_init"] = {
+        "super_subject": [str(control)]
+    }
+
+    output_root = tmp_path / "cleaned"
+    cleaned = clean_config(index, output_root, tmp_path, False)
+
+    task_dir = output_root / "model" / "task"
+    assert pd.read_csv(task_dir / "super_subject" / "lag_performance.csv")["score"].eq(0.9).all()
+    assert pd.read_csv(task_dir / "random_init" / "super_subject" / "lag_performance.csv")["score"].eq(0.5).all()
+    assert cleaned["results"]["model"]["task"]["random_init"]["super_subject"] == str(
+        task_dir / "random_init" / "super_subject"
+    )
+    with (task_dir / "random_init" / "super_subject" / "config.yml").open() as f:
+        assert yaml.safe_load(f)["trial_name"] == "model_task_random_init_super_subject"

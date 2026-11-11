@@ -216,6 +216,44 @@ class TestRawNeuralDataset:
         assert targets.shape[0] == len(task_df_in_bounds)
         assert len(df) == len(task_df_in_bounds)
 
+    def test_uses_subject_specific_event_clocks(self):
+        sfreq = 10.0
+        info_a = mne.create_info(["A"], sfreq, ch_types="seeg")
+        info_b = mne.create_info(["B"], sfreq, ch_types="seeg")
+        raw_a = mne.io.RawArray(np.arange(60, dtype=float)[None, :], info_a, verbose=False)
+        raw_b = mne.io.RawArray(
+            (100 + np.arange(60, dtype=float))[None, :], info_b, verbose=False
+        )
+        task_df = pd.DataFrame({"start": [0.0, 1.0], "target": [4.0, 5.0]})
+
+        dataset = RawNeuralDataset(
+            [raw_a, raw_b],
+            task_df,
+            window_width=0.2,
+            per_raw_event_times=[np.array([1.0, 2.0]), np.array([1.5, 2.5])],
+        )
+        neural, targets, selected, counts = dataset.get_data_for_lag(0)
+
+        assert counts == [1, 1]
+        assert selected["target"].tolist() == [4.0, 5.0]
+        assert targets.tolist() == [4.0, 5.0]
+        np.testing.assert_array_equal(neural[:, 0, 0].numpy(), [9.0, 19.0])
+        np.testing.assert_array_equal(neural[:, 1, 0].numpy(), [114.0, 124.0])
+
+    def test_intersects_valid_rows_across_subject_clocks(self, mock_raw_pair):
+        task_df = pd.DataFrame({"start": [1.0, 2.0], "target": [1.0, 2.0]})
+        dataset = RawNeuralDataset(
+            mock_raw_pair,
+            task_df,
+            window_width=0.5,
+            per_raw_event_times=[np.array([1.0, 2.0]), np.array([1.0, 9.9])],
+        )
+
+        _, targets, selected, _ = dataset.get_data_for_lag(0)
+
+        assert selected["target"].tolist() == [1.0]
+        assert targets.tolist() == [1.0]
+
     def test_correct_window_shape(self, mock_raw, task_df_in_bounds):
         """get_data_for_lag returns the expected time-axis length."""
         sfreq = mock_raw.info["sfreq"]

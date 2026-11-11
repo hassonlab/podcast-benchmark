@@ -3,12 +3,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from core.config import BaseTaskConfig, TaskConfig
+from core.config import BaseWordLabelTaskConfig, TaskConfig
 from core import registry
+from utils.label_utils import task_frame_from_labels
 
 
 @dataclass
-class GptSurpriseConfig(BaseTaskConfig):
+class GptSurpriseConfig(BaseWordLabelTaskConfig):
     """Configuration for gpt_surprise_task and gpt_surprise_multiclass_task."""
     content_noncontent_path: str = "processed_data/df_word_onset_with_pos_class.csv"
 
@@ -28,15 +29,8 @@ def gpt_surprise_task(task_config: TaskConfig):
 
     """
     config: GptSurpriseConfig = task_config.task_specific_config
-    csv_path = config.content_noncontent_path
-
-    df1 = pd.read_csv(csv_path, index_col=0)
-
-    df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
-    df["target"] = df1["surprise"]
-
-    return df
+    csv_path = config.labels_path or config.content_noncontent_path
+    return task_frame_from_labels(csv_path, "surprisal")
 
 
 @registry.register_task_data_getter(config_type=GptSurpriseConfig)
@@ -55,12 +49,5 @@ def gpt_surprise_multiclass_task(task_config: TaskConfig):
 
     """
     config: GptSurpriseConfig = task_config.task_specific_config
-    csv_path = config.content_noncontent_path
-
-    df1 = pd.read_csv(csv_path, index_col=0)
-
-    df = pd.DataFrame()
-    df["start"] = df1["onset"]  # convert samples to seconds
-    df["target"] = df1["surprise_class"]
-
-    return df
+    csv_path = config.labels_path or config.content_noncontent_path
+    return task_frame_from_labels(csv_path, "surprisal_class")
