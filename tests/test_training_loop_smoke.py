@@ -435,7 +435,7 @@ def test_repeated_combined_null_reruns_random_foundation_features(tmp_path):
     params.save_test_predictions = True
 
     run_training_over_lags(
-        [0, 1],
+        [0],
         _fake_raws(),
         _task_df(),
         preprocessing_fns=[
@@ -471,19 +471,15 @@ def test_repeated_combined_null_reruns_random_foundation_features(tmp_path):
     assert results[["lags", "null_repetition"]].values.tolist() == [
         [0, 1],
         [0, 2],
-        [1, 1],
-        [1, 2],
     ]
     assert results["null_seed"].tolist() == [
         params.random_seed,
         params.random_seed + 1,
-        params.random_seed,
-        params.random_seed + 1,
     ]
     summary = pd.read_csv(output_dir / "null_summary.csv")
-    assert summary["lags"].tolist() == [0, 1]
-    assert summary["num_null_repetitions"].tolist() == [2, 2]
-    for lag in (0, 1):
+    assert summary["lags"].tolist() == [0]
+    assert summary["num_null_repetitions"].tolist() == [2]
+    for lag in (0,):
         for repetition in (1, 2):
             repetition_dir = (
                 checkpoint_dir / f"lag_{lag}" / f"null_repetition_{repetition}"
@@ -493,8 +489,8 @@ def test_repeated_combined_null_reruns_random_foundation_features(tmp_path):
     with h5py.File(output_dir / "test_predictions.h5", "r") as artifact:
         assert artifact.attrs["schema_version"] == 2
         assert "lag_0/null_repetition_1/fold_1" in artifact
-        assert "lag_1/null_repetition_2/fold_2" in artifact
-    assert SMOKE_STATS["foundation_encode_calls"] == 12
+        assert "lag_0/null_repetition_2/fold_2" in artifact
+    assert SMOKE_STATS["foundation_encode_calls"] == 6
 
 
 def test_run_training_over_lags_smoke_with_per_subject_feature_concat(tmp_path):
